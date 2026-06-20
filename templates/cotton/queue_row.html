@@ -1,0 +1,24 @@
+<tr class="task task-{{ task.status }}" data-index="{{ index }}">
+  <td class="pri">{{ task.priority }}</td>
+  <td class="status">{{ task.status }}</td>
+  <td class="title">
+    <span class="title-text">{{ task.title }}</span>
+    {% if task.description %}
+    <details class="task-desc">
+      <summary class="task-desc-toggle">desc</summary>
+      <div class="task-desc-body">{{ task.description }}</div>
+    </details>
+    {% endif %}
+    {% if task.summary %}
+    <div class="task-output task-output-{{ task.status }}">{{ task.summary }}</div>
+    {% endif %}
+  </td>
+  <td class="actions">
+    <button type="button" data-action="edit" data-task="{{ task.id }}"
+            data-title="{{ task.title }}" data-priority="{{ task.priority }}"
+            title="edit">✎</button>
+    <button type="button" data-action="move" data-task="{{ task.id }}" data-dir="up" title="move up">↑</button>
+    <button type="button" data-action="move" data-task="{{ task.id }}" data-dir="down" title="move down">↓</button>
+    <button type="button" data-action="del" data-task="{{ task.id }}" title="delete">✕</button>
+  </td>
+</tr>

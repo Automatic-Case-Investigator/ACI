@@ -1,0 +1,24 @@
+<c-layout title="ACI Dashboard" subtitle="analyst console">
+  <section class="ask-panel">
+    <h1>Start a session</h1>
+    <c-ask-form />
+  </section>
+  <section class="recent">
+    <h2>Recent sessions</h2>
+    <ul class="runlist">
+      {% for s in sessions %}
+      <li class="session-row">
+        <a href="{% url 'dashboard:session' s.id %}">
+          <span class="q">{{ s.question }}</span>
+          <span class="muted">{{ s.created_at|date:"Y-m-d H:i" }}</span>
+        </a>
+        <form method="post" action="{% url 'dashboard:delete_session' s.id %}" class="delete-form">
+          <button type="submit" class="del-btn" title="Delete session">✕</button>
+        </form>
+      </li>
+      {% empty %}
+      <li class="muted">no sessions yet — ask a question above</li>
+      {% endfor %}
+    </ul>
+  </section>
+</c-layout>

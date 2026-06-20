@@ -1,0 +1,18 @@
+{% load static dashboard_tags %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title|default:"ACI Dashboard" }}</title>
+  <link rel="stylesheet" href="{% static_v 'dashboard/app.css' %}">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="{% url 'dashboard:index' %}">ACI</a>
+    <span class="subtitle">{{ subtitle }}</span>
+  </header>
+  <main class="page">{{ slot }}</main>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="{% static_v 'dashboard/app.js' %}"></script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+# AVFS — shared agent workspace/memory file server.
+#
+# The Django backend and MCP servers run on the host (they spawn stdio
+# subprocesses and talk to your local Wazuh/TheHive). AVFS is the one piece
+# that runs as a long-lived service, so it lives here.
+#
+# Compose auto-loads .env, so the auth-token and agent-id below are pulled
+# from the same values the backend uses — keep them in sync via .env only.
+#
+#   docker compose up -d avfs      # start
+#   docker compose logs -f avfs    # tail
+#   docker compose down            # stop (data persists in the named volume)
+
+services:
+  avfs:
+    image: 1bd08a0df278/avfs:latest
+    container_name: aci-avfs
+    ports:
+      - "8765:8765"
+    volumes:
+      - avfs_data:/data
+    environment:
+      - AVFS_SERVER__TRANSPORT=http
+      - AVFS_SERVER__HOST=0.0.0.0
+      # Maps the bearer token the backend sends to an AVFS agent identity.
+      # Both halves come from .env: ${AVFS_AUTH_TOKEN} and ${AVFS_AGENT_ID}.
+      - "AVFS_AUTH__MODE=static_token"
+      - "AVFS_AUTH__STATIC_TOKENS__${AVFS_AUTH_TOKEN}=${AVFS_AGENT_ID}"
+      - AVFS_RELATIONAL_DB__URI=avfs+sqlite:///data/avfs.db
+    restart: unless-stopped
+
+volumes:
+  avfs_data:

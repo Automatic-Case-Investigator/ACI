@@ -1,0 +1,21 @@
+<div class="queue">
+  <div class="queue-head">
+    investigation queue
+    {% if snap.run_id %}<span class="muted">{{ snap.run_id|slice:":8" }} · {{ snap.inv_status }}</span>{% endif %}
+  </div>
+  {% if snap.tasks %}
+  <table class="queue-table">
+    <thead><tr><th>pri</th><th>status</th><th>title</th><th></th></tr></thead>
+    <tbody>
+      {% for t in snap.tasks %}<c-queue-row :task="t" index="{{ forloop.counter }}" />{% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="muted empty">no tasks yet</div>
+  {% endif %}
+  <form class="queue-add" data-action="add">
+    <input name="title" placeholder="new task title" required>
+    <input name="priority" type="number" value="50" min="0" max="100" class="pri-input" title="priority">
+    <button type="submit">add</button>
+  </form>
+</div>

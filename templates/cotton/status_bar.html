@@ -1,0 +1,5 @@
+<div class="statusbar">
+  <span class="muted">case {{ snap.case_id|default:"—" }}</span>
+  {% if snap.run_id %}<span class="muted">inv {{ snap.run_id|slice:":8" }} · {{ snap.inv_status }}</span>{% endif %}
+  <span class="q">{{ snap.question }}</span>
+</div>

@@ -1,0 +1,41 @@
+{% load dashboard_tags %}
+{% event_role ev as role %}
+{% if role == "user" or role == "assistant" %}
+<div class="bubble bubble-{{ role }}" data-seq="{{ ev.seq }}">
+  {% if ev.detail and role == "assistant" %}
+    <div class="bubble-body">{{ ev.detail|pretty_detail }}</div>
+  {% else %}
+    <div class="bubble-body">{{ ev.summary|bubble_text }}</div>
+  {% endif %}
+</div>
+{% elif ev.kind == "stream" %}
+<div class="stream-fragment" data-seq="{{ ev.seq }}" data-run="{{ ev.run_id }}"
+     data-src="{{ ev.source }}" data-delta="{{ ev.detail|default:ev.summary }}"></div>
+{% elif ev.kind == "intent" %}
+<div class="logline ev-intent" data-seq="{{ ev.seq }}"
+     data-run="{{ ev.run_id }}" data-src="{{ ev.source }}" data-kind="{{ ev.kind }}"
+     data-intent="{{ ev.metadata.intent_sequence|default:'' }}">
+  <span class="seq">#{{ ev.seq }}</span>
+  <span class="time">{{ ev.created_at|date:"H:i:s" }}</span>
+  <span class="src src-{{ ev.source }}">{{ ev.source }}</span>
+  <span class="glyph">{% event_glyph ev %}</span>
+  <div class="line-body intent-body markdown-body">{{ ev.detail|default:ev.summary }}</div>
+</div>
+{% else %}
+<div class="logline {% event_css ev %}" data-seq="{{ ev.seq }}"
+     data-run="{{ ev.run_id }}" data-src="{{ ev.source }}" data-kind="{{ ev.kind }}"
+     data-intent="{{ ev.metadata.intent_sequence|default:'' }}">
+  <span class="seq">#{{ ev.seq }}</span>
+  <span class="time">{{ ev.created_at|date:"H:i:s" }}</span>
+  <span class="src src-{{ ev.source }}">{{ ev.source }}</span>
+  <span class="glyph">{% event_glyph ev %}</span>
+  {% if ev.detail %}
+    <details class="line-body"{% if ev.expand %} open{% endif %}>
+      <summary>{{ ev.summary }}</summary>
+      <pre class="detail">{{ ev.detail|pretty_detail }}</pre>
+    </details>
+  {% else %}
+    <span class="line-body summary-only">{{ ev.summary }}</span>
+  {% endif %}
+</div>
+{% endif %}

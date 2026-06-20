@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aci-taskqueue"
+version = "0.1.0"
+description = "ACI MCP server for per-agent task queues"
+requires-python = ">=3.10"
+dependencies = ["mcp>=1.0"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["aci_taskqueue*"]

@@ -1,0 +1,21 @@
+{% if snap.board_entries %}
+<div class="board">
+  <div class="queue-head">findings board</div>
+  <table class="queue-table board-table">
+    <thead><tr><th>type</th><th>conf</th><th>status</th><th>finding</th></tr></thead>
+    <tbody>
+      {% for e in snap.board_entries %}
+      <tr class="board-entry board-kind-{{ e.kind }} board-status-{{ e.status }}">
+        <td class="board-kind">{{ e.kind }}</td>
+        <td class="board-conf">{{ e.confidence }}</td>
+        <td class="board-status">{{ e.status }}</td>
+        <td class="board-content">
+          {{ e.content }}
+          {% if e.source %}<div class="task-output muted">{{ e.source }}</div>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}

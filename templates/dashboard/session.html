@@ -1,0 +1,64 @@
+<c-layout title="Session · ACI" subtitle="live investigation">
+  <div class="session-shell">
+    <div id="status">{% include "dashboard/_status.html" %}</div>
+    <nav class="mobile-view-switch{% if not snap.show_queue %} no-queue{% endif %}"
+         id="mobile-view-switch" aria-label="Session view">
+      <button type="button" class="view-switch active" data-view="activity"
+              aria-pressed="true">activity</button>
+      <button type="button" class="view-switch" data-view="queue"
+              aria-pressed="false">queue</button>
+    </nav>
+    <div class="cols mobile-show-activity{% if not snap.show_queue %} no-queue{% endif %}" id="cols">
+      <section class="logcol">
+        <div class="logpanel" id="log">
+          {% for ev in events %}<c-log-line :ev="ev" />{% endfor %}
+        </div>
+        <div id="activity" class="activity-line">
+          <span id="spinner-char" class="spin" hidden>|</span>
+          <span id="idle-dot" class="idle-dot">●</span>
+          <span id="activity-text">ready</span>
+        </div>
+      </section>
+      <aside class="queuecol" id="queue">{% include "dashboard/_queue.html" %}</aside>
+    </div>
+    <div class="ask-footer">
+      <form class="ask" id="ask-follow-up">
+        <input name="question" placeholder="Follow-up question…" autocomplete="off" required>
+        <button type="submit" id="ask-btn">ask</button>
+        <svg class="ctx-ring" id="ctx-ring" viewBox="0 0 36 36" width="28" height="28">
+          <circle class="ctx-bg" cx="18" cy="18" r="14" fill="none" stroke-width="4"/>
+          <circle class="ctx-arc" id="ctx-arc" cx="18" cy="18" r="14" fill="none" stroke-width="4"
+            stroke-dasharray="87.96" stroke-dashoffset="87.96"
+            transform="rotate(-90 18 18)"/>
+          <title id="ctx-title">0 tokens used</title>
+        </svg>
+      </form>
+    </div>
+  </div>
+  <dialog id="task-edit-dialog">
+    <form id="task-edit-form" method="dialog">
+      <h3>Edit task</h3>
+      <input type="hidden" id="edit-task-id">
+      <div class="dialog-field">
+        <label for="edit-task-title">Title</label>
+        <input type="text" id="edit-task-title" required>
+      </div>
+      <div class="dialog-field">
+        <label for="edit-task-desc">Description</label>
+        <textarea id="edit-task-desc" rows="5"></textarea>
+      </div>
+      <div class="dialog-field">
+        <label for="edit-task-priority">Priority (0–100)</label>
+        <input type="number" id="edit-task-priority" min="0" max="100">
+      </div>
+      <div class="dialog-actions">
+        <button type="submit">save</button>
+        <button type="button" id="edit-cancel">cancel</button>
+      </div>
+    </form>
+  </dialog>
+  <script>
+    window.ACI_SESSION_ID = "{{ session_id }}";
+    window.ACI_CURSOR = {{ last_event_id|default:0 }};
+  </script>
+</c-layout>
