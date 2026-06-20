@@ -303,3 +303,153 @@ future headless triage and investigation runs will inherit the same pre-tool
 intent ordering. A future workflow implementation must add event correlation,
 deduplication, alert-to-case resolution, and triage-to-investigation policy
 without routing headless events through the interactive orchestrator.
+
+## Configuration Reference
+
+### Core Settings
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LLM_BASE_URL` | Required | OpenAI-compatible LLM API endpoint |
+| `LLM_API_KEY` | Required | API authentication key |
+| `LLM_MODEL_NAME` | Required | Model identifier (e.g., `gpt-4`, `llama2`) |
+| `LLM_TIMEOUT` | 0 (disabled) | Request timeout in seconds |
+| `SECRET_KEY` | Required | Django secret key (auto-generated) |
+
+### SIEM Integration (Wazuh)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WAZUH_URL` | Required | Wazuh API endpoint (https://...:9201) |
+| `WAZUH_USER` | Required | Wazuh admin username |
+| `WAZUH_PASSWORD` | Required | Wazuh admin password |
+| `WAZUH_VERIFY_TLS` | `true` | Verify SSL certificates |
+
+### SOAR Integration (TheHive)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `THEHIVE_HOST` | Required | TheHive API host |
+| `THEHIVE_PORT` | 9000 | TheHive API port |
+| `THEHIVE_API_KEY` | Required | TheHive API key |
+
+### Workspace (AVFS)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AVFS_URL` | `http://127.0.0.1:8765/` | AVFS HTTP endpoint |
+| `AVFS_AUTH_TOKEN` | Required | AVFS authentication token (NOT `change-me-avfs-token`) |
+| `AVFS_AGENT_ID` | `agent_1` | Agent workspace identifier |
+
+### Database
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TASKQUEUE_DB_PATH` | `taskqueue.db` | Task queue SQLite database path |
+| `BOARD_DB_PATH` | `board.db` | Findings board SQLite database path |
+
+## API Reference
+
+### Agent Runs
+
+#### Start a run
+```
+POST /api/agent/runs/
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "agent_name": "investigation",
+  "case_id": "~254202040",
+  "question": "What happened?"
+}
+
+Response: { "run_id": "...", "status": "queued" }
+```
+
+#### Get run status
+```
+GET /api/agent/runs/<run_id>/
+Authorization: Bearer <token>
+
+Response: {
+  "run_id": "...",
+  "status": "completed",
+  "result": "...",
+  "error": null
+}
+```
+
+#### Get run events
+```
+GET /api/agent/runs/<run_id>/events/
+Authorization: Bearer <token>
+
+Response: [
+  { "id": 1, "kind": "note", "source": "orchestrator", "summary": "..." },
+  ...
+]
+```
+
+#### Cancel a run
+```
+POST /api/agent/runs/<run_id>/cancel/
+Authorization: Bearer <token>
+```
+
+#### Resume a run
+```
+POST /api/agent/runs/<run_id>/resume/
+Authorization: Bearer <token>
+```
+
+### Task Queue
+
+```
+GET    /api/agent/cases/<case_id>/queues/<agent_name>/tasks/?run_id=<run_id>
+POST   /api/agent/cases/<case_id>/queues/<agent_name>/tasks/
+PATCH  /api/agent/cases/<case_id>/queues/<agent_name>/tasks/<task_id>/
+DELETE /api/agent/cases/<case_id>/queues/<agent_name>/tasks/<task_id>/
+```
+
+### Workspace & Reports
+
+```
+GET /api/agent/cases/<case_id>/workspace/
+GET /api/agent/cases/<case_id>/reports/latest/
+```
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---------|-----|
+| `ModuleNotFoundError: No module named 'aci_taskqueue'` | `pip install -e aci-mcp-servers/aci-taskqueue` |
+| `RuntimeError: Failed to load MCP instructions for aci-wazuh` | Wazuh is unreachable or `WAZUH_URL`/`WAZUH_PASSWORD` is wrong |
+| `grep_semantic failed: {ok: false, error: ...}` | AVFS container not running or `AVFS_AUTH_TOKEN` is the literal `change-me-avfs-token` |
+| `add_case_comment` 404 from TheHive | Tool was removed; old sessions may have fired this. New runs use `post_case_report` only |
+| `parsing_exception: Unknown key for START_OBJECT in [time_range]` from Wazuh | Model double-wrapped the search request. The client auto-unwraps this |
+| Django migration errors on startup | Run `python manage.py migrate` |
+| Empty investigation report | Local LLM may be too small or out of context; use a 13B+ model |
+
+## Development
+
+### Debug scripts
+
+Debug and diagnostic scripts are in `.claude/debug/`:
+
+```bash
+PYTHONPATH=. python .claude/debug/check_run.py
+```
+
+Common scripts:
+- `check_run.py` — Inspect a specific run's tasks
+- `check_session.py` — Inspect a session's events
+- `check_board.py` — Inspect the findings board
+- `dump_session.py` — Export all events for a session
+
+### Making changes
+
+1. Create a feature branch
+2. Update tests if needed (`.claude/skills/run-aci-backend/tests/`)
+3. Run the test suite to verify no regressions
+4. Commit with a clear message

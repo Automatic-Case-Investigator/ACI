@@ -37,9 +37,9 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
 ]
 
-ROOT_URLCONF = "aci_backend.urls"
-WSGI_APPLICATION = "aci_backend.wsgi.application"
-ASGI_APPLICATION = "aci_backend.asgi.application"
+ROOT_URLCONF = "aci.urls"
+WSGI_APPLICATION = "aci.wsgi.application"
+ASGI_APPLICATION = "aci.asgi.application"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # django-cotton (v2) auto-wraps the loaders + builtins from this TEMPLATES entry.
