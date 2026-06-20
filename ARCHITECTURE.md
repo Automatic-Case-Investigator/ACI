@@ -1,6 +1,6 @@
-# ACI Backend Architecture
+# ACI Architecture
 
-ACI_Backend is a Django service that hosts the v2 agent runtime, REST API, live
+ACI is a Django service that hosts the agent runtime, REST API, live
 dashboard event stream, and MCP integration layer. The runtime is centered on a
 single queue-driven LangGraph graph shared by the `triage` and `investigation`
 agents.

@@ -84,3 +84,5 @@ htmlcov/
 ._*
 .AppleDouble
 
+# Claude Code local tooling
+.claude/
