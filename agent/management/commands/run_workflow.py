@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 
-from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
 
@@ -23,9 +22,12 @@ class Command(BaseCommand):
         parser.add_argument("--payload", default="{}", help="JSON event payload (optional).")
 
     def handle(self, *args, **options):
-        if not getattr(settings, "WORKFLOWS_ENABLED", False):
+        from agent.runtime.config.runtime_config import workflows_enabled
+
+        if not workflows_enabled():
             raise CommandError(
-                "Automatic workflows are disabled. Set WORKFLOWS_ENABLED=true to enable."
+                "Automatic workflows are disabled. Enable them in Settings → Automation "
+                "(or set WORKFLOWS_ENABLED=true)."
             )
 
         from agent.runtime.triggers import Trigger, fire, get_binding

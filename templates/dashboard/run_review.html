@@ -1,0 +1,64 @@
+<c-layout title="Review workflow · ACI" subtitle="triage handoff">
+  <div class="review-shell">
+    <header class="review-head">
+      <div>
+        <a class="settings-jump" href="{% url 'dashboard:runs' %}?seg=workflows">← workflows</a>
+        <h1>Review triage report</h1>
+        <p class="muted">Case <code>{{ run.case_id }}</code> · workflow {{ run.id }}</p>
+      </div>
+      <div class="review-actions">
+        {% if verdict.verdict %}
+        <span class="vchip v-{{ verdict.verdict }}">{{ verdict.verdict|upper }}</span>
+        {% endif %}
+        {% if existing_session %}
+        <a class="btn" href="{% url 'dashboard:session' existing_session.id %}">Open investigation</a>
+        {% elif can_investigate %}
+        <form method="post" action="{% url 'dashboard:run_investigate' run.id %}">
+          <button type="submit">Investigate</button>
+        </form>
+        {% endif %}
+      </div>
+    </header>
+
+    {% if messages %}
+    <ul class="settings-msgs">
+      {% for m in messages %}<li class="settings-msg {% if m.tags %}{{ m.tags }}{% endif %}">{{ m }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+
+    <section class="review-grid">
+      <aside class="review-meta">
+        <div class="settings-card">
+          <h3>Workflow</h3>
+          <div class="settings-kv"><b>Agent</b> {{ run.agent_name }}</div>
+          <div class="settings-kv"><b>Status</b> <span class="badge status-{{ run.status }}">{{ run.status }}</span></div>
+          <div class="settings-kv"><b>Trigger</b> {{ run.trigger }}</div>
+          <div class="settings-kv"><b>Created</b> {{ run.created_at|date:"Y-m-d H:i" }}</div>
+        </div>
+        <div class="settings-card">
+          <h3>Verdict</h3>
+          <div class="settings-kv"><b>Value</b> {{ verdict.verdict|default:"—" }}</div>
+          <div class="settings-kv"><b>Confidence</b> {{ verdict.confidence|default:"—" }}</div>
+          <div class="settings-kv"><b>Action</b> {{ escalation.action|default:"—" }}</div>
+          {% if verdict.recommended_action %}
+          <p class="muted">{{ verdict.recommended_action }}</p>
+          {% endif %}
+        </div>
+      </aside>
+
+      <main class="review-report">
+        <div class="review-report-head">
+          <h2>Triage report</h2>
+          <span class="muted">stored workflow output</span>
+        </div>
+        {% if run.result %}
+        <div class="report-body markdown-body">{{ run.result }}</div>
+        {% elif run.error %}
+        <pre class="report-pre report-error">{{ run.error }}</pre>
+        {% else %}
+        <p class="muted">No report text was stored for this run.</p>
+        {% endif %}
+      </main>
+    </section>
+  </div>
+</c-layout>

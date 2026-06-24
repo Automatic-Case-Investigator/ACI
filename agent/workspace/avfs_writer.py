@@ -4,8 +4,6 @@ import json
 import posixpath
 from typing import Awaitable, Callable
 
-from django.conf import settings
-
 from .indexer import MEMORY_FILE, parent_index_dirs, upsert_memory_content
 
 
@@ -13,7 +11,9 @@ ToolCall = Callable[[str, dict], Awaitable[str]]
 
 
 def avfs_home() -> str:
-    return f"/home/{settings.AVFS_AGENT_ID}"
+    from agent.runtime.providers.avfs import resolved_agent_id
+
+    return f"/home/{resolved_agent_id()}"
 
 
 def index_stop_for(path: str) -> str:

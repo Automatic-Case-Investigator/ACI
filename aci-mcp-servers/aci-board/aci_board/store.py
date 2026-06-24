@@ -10,7 +10,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 _lock = threading.Lock()
-_DB_PATH = os.path.abspath(os.environ.get("BOARD_DB_PATH", "board.db"))
 
 
 def _now() -> str:
@@ -19,7 +18,7 @@ def _now() -> str:
 
 @contextmanager
 def _conn():
-    conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
+    conn = sqlite3.connect(os.path.abspath(os.environ.get("BOARD_DB_PATH", "board.db")), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout = 5000")
     try:

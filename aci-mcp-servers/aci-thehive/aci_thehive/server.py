@@ -5,6 +5,8 @@ Run as stdio: python -m aci_thehive.server
 from __future__ import annotations
 
 import json
+import os
+import traceback
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -17,9 +19,22 @@ _client: TheHiveClient | None = None
 
 
 def _get_client() -> TheHiveClient:
+    """Build the TheHive client from the env vars the parent populated.
+
+    The runtime resolves connection settings (DB-over-defaults) and passes them
+    to this subprocess as THEHIVE_* env vars (see agent/runtime/providers/thehive.py).
+    We must NOT re-query the DB here: call_tool runs on the asyncio event loop, and
+    synchronous Django ORM there raises SynchronousOnlyOperation — which previously
+    fell back silently to empty defaults. Reading os.environ mirrors the Wazuh server.
+    """
     global _client
     if _client is None:
-        _client = TheHiveClient()
+        _client = TheHiveClient(
+            host=os.environ.get("THEHIVE_HOST", ""),
+            port=os.environ.get("THEHIVE_PORT", "9000"),
+            api_key=os.environ.get("THEHIVE_API_KEY", ""),
+            verify_tls=os.environ.get("THEHIVE_VERIFY_TLS", "true"),
+        )
     return _client
 
 
@@ -48,6 +63,13 @@ async def get_prompt(name: str, arguments: dict[str, str] | None) -> GetPromptRe
 
 This server is the source for case records, linked alert summaries, and analyst-facing
 case updates.
+
+## Case IDs
+
+TheHive case IDs always begin with a tilde (`~`), e.g. `~245862456`. **Always
+preserve the `~` prefix** when passing a case ID to any tool. A numeric ID without
+the tilde (e.g. `245862456`) is not a valid case ID and will return 404. If the
+analyst provides a case ID without the tilde, add it before calling any tool.
 
 ## Case workflow
 
@@ -185,6 +207,33 @@ async def list_tools() -> list[Tool]:
                 "required": ["case_id", "summary"],
             },
         ),
+        Tool(
+            name="update_case",
+            description="Update fields on a TheHive case (e.g. status, severity, assignee, tags).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "case_id": {"type": "string", "description": "TheHive case ID."},
+                    "fields": {
+                        "type": "object",
+                        "description": "Fields to update, e.g. {\"status\": \"Resolved\"} or {\"severity\": 3}.",
+                    },
+                },
+                "required": ["case_id", "fields"],
+            },
+        ),
+        Tool(
+            name="post_case_comment",
+            description="Post an ACI workflow note to a TheHive case as a case page.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "case_id": {"type": "string", "description": "TheHive case ID."},
+                    "message": {"type": "string", "description": "Comment text (markdown supported)."},
+                },
+                "required": ["case_id", "message"],
+            },
+        ),
     ]
 
 
@@ -209,10 +258,14 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 arguments["summary"],
                 title=arguments.get("title", "Investigation Report"),
             )
+        elif name == "update_case":
+            result = client.update_case(arguments["case_id"], arguments["fields"])
+        elif name == "post_case_comment":
+            result = client.post_case_comment(arguments["case_id"], arguments["message"])
         else:
             result = {"error": f"Unknown tool: {name}"}
     except Exception as exc:
-        result = {"error": str(exc)}
+        result = {"error": traceback.format_exc()}
 
     return [TextContent(type="text", text=json.dumps(result, default=str))]
 

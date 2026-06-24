@@ -50,9 +50,9 @@ The graph is built in `agent/runtime/graph.py` with these nodes:
 | `seed` | Ensure the agent has initial queue work. Triage creates one triage task. Investigation creates a handoff or fallback task only when its queue has no pending work. |
 | `claim` | Stop if cancellation was requested; otherwise atomically claim the highest-priority pending task from `aci-taskqueue`. |
 | `intent` | Call the model without tools, stream a free-form public reasoning narrative in Markdown, and persist it before any tool-capable model call. |
-| `think` | Build or continue the model conversation for the current task, compact context when the prompt approaches 80% of `LLM_CONTEXT_LENGTH`, and call the model with allowed MCP tools. |
+| `think` | Build or continue the model conversation for the current task, compact context when the prompt approaches 80% of the model provider's configured context length (Settings → Model provider), and call the model with allowed MCP tools. |
 | `use_tools` | Execute model-requested tools, cap oversized tool results before feeding them back to the model, pre-create AVFS parent directories for writes, and update `memory.md` indexes after successful AVFS writes. |
-| `assess` | Complete the claimed task with a summary. Triage has a fallback recovery prompt when the model stops without returning report text. |
+| `assess` | Complete the claimed task with a summary. Triage has a fallback recovery prompt when the model stops without returning report text. Investigation has a **seed guard**: if the "Populate investigation queue" seed task finishes without any `create_task` calls, `assess` re-injects a correction message and routes back to `think` instead of forwarding to `pivot`, giving the model another chance to populate the queue. |
 | `finish` | Write the final investigation report stub through the AVFS workspace writer, compute `completed` vs `incomplete_budget`, or preserve `cancelled`. |
 
 ```mermaid
@@ -89,7 +89,9 @@ flowchart TD
     ToolResult --> Intent
 
     ToolCalls -- no --> Assess["assess task"]
-    Assess --> Budget{"budget exhausted?"}
+    Assess --> SeedGuard{"seed guard\n(inv only): queue\nempty after seed?"}
+    SeedGuard -- yes → re-inject correction --> Think
+    SeedGuard -- no --> Budget{"budget exhausted?"}
     Budget -- no --> Claim
     Budget -- yes --> Finish
 
@@ -135,6 +137,20 @@ supplied. The taskqueue repository rejects direct blank completion summaries.
 Investigation finalization reads these task summaries into the structured run
 result, so the orchestrator can distinguish completed work, incomplete work, and
 tasks that completed without a substantive conclusion.
+
+### Seed Guard
+
+Investigation runs start with a "Populate investigation queue" seed task that instructs
+the model to call `create_task` for every item in the triage plan. If the model completes
+that task without any `create_task` calls (an empty response, an early stop, or a model
+that writes a narrative instead of queuing work), `assess` detects the empty queue,
+withholds task completion, re-injects a correction `HumanMessage`, and returns
+`status="seed_guard"` — which routes the graph back to `think` rather than to `pivot`.
+
+The seed guard fires only for the named seed task and only for the `investigation` agent.
+It respects the step/tool-call budget: if budget is already exhausted when the seed guard
+triggers, the run is routed to `finish` instead of looping back. This prevents an infinite
+correction loop while still allowing the model a second attempt under normal conditions.
 
 ## Live Model Streaming
 
@@ -450,6 +466,9 @@ Common scripts:
 ### Making changes
 
 1. Create a feature branch
-2. Update tests if needed (`.claude/skills/run-aci-backend/tests/`)
-3. Run the test suite to verify no regressions
+2. Update tests if needed (`tests/unit/`, `tests/django/`)
+3. Run the offline test suite to verify no regressions:
+   ```bash
+   PYTHONPATH=. python -m pytest tests/unit tests/django -q
+   ```
 4. Commit with a clear message

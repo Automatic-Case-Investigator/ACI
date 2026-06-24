@@ -7,7 +7,9 @@ The browser only swaps innerHTML — all rendering lives in the cotton component
 """
 from __future__ import annotations
 
+import inspect
 import json
+import re
 
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
@@ -24,6 +26,40 @@ _INTERNAL_TASK_PREFIXES = (
     "Investigate case ",  # fallback seed when no triage handoff is present
 )
 
+# The board content for a TI result is formatted as
+# "TI[provider] kind value: <verdict> (<score>) — <indicators>" (see
+# agent.ti.enricher.write_ti_results), so the verdict is the first known keyword
+# after the colon.
+_TI_VERDICT_RE = re.compile(r":\s*(malicious|suspicious|clean|unknown)\b")
+
+async def _resolve_coroutines(obj):
+    if inspect.iscoroutine(obj):
+        return await obj
+
+    if isinstance(obj, dict):
+        return {
+            k: await _resolve_coroutines(v)
+            for k, v in obj.items()
+        }
+
+    if isinstance(obj, list):
+        return [
+            await _resolve_coroutines(v)
+            for v in obj
+        ]
+
+    return obj
+
+def _ti_display_rows(board_entries: list) -> list[dict]:
+    """Project ti_result board entries into display rows with a parsed verdict."""
+    rows = []
+    for e in board_entries:
+        if e.get("kind") != "ti_result":
+            continue
+        m = _TI_VERDICT_RE.search(e.get("content", "") or "")
+        rows.append({**e, "verdict": m.group(1) if m else "unknown"})
+    return rows
+
 
 # ── sync helpers (DB + task store), called via database_sync_to_async ────────────
 def _resolve_investigation(session_id: str):
@@ -31,13 +67,29 @@ def _resolve_investigation(session_id: str):
 
     qs = AgentRun.objects.filter(agent_name="investigation")
     try:
-        inv = qs.filter(metadata__session_id=session_id).order_by("created_at").first()
+        inv = qs.filter(metadata__session_id=session_id).order_by("-created_at").first()
         if inv:
             return inv
     except Exception:
         pass
-    for run in qs.order_by("created_at"):
+    for run in qs.order_by("-created_at"):
         if (run.metadata or {}).get("session_id") == session_id:
+            return run
+    return None
+
+
+def _resolve_restartable_specialist(session_id: str):
+    from agent.models import AgentRun
+    from agent.dashboard import runner
+
+    try:
+        runs = AgentRun.objects.filter(metadata__session_id=session_id).order_by("-created_at")
+    except Exception:
+        runs = AgentRun.objects.order_by("-created_at")[:200]
+    for run in runs:
+        if (run.metadata or {}).get("session_id") != session_id:
+            continue
+        if runner.can_restart_from_prior_run(run):
             return run
     return None
 
@@ -45,9 +97,11 @@ def _resolve_investigation(session_id: str):
 def _snapshot(session_id: str) -> dict:
     from agent.models import AgentRun
     from agent.dashboard import runner
+    from django.urls import reverse
 
     orch = AgentRun.objects.filter(id=session_id).first()
     inv = _resolve_investigation(session_id)
+    active_specialist = runner.active_specialist_for_session(session_id)
     tasks: list = []
     board_entries: list = []
     case_id = run_id = inv_status = ""
@@ -75,6 +129,25 @@ def _snapshot(session_id: str) -> dict:
             board_entries = []
 
     running = bool(inv and inv_status == "running")
+    processing = runner.is_processing(session_id) or bool(active_specialist)
+    processing_source = ""
+    if active_specialist:
+        processing_source = "inv" if active_specialist.agent_name == "investigation" else "tri"
+    elif runner.is_processing(session_id):
+        processing_source = "orch"
+    restart_source = inv if (inv and runner.can_restart_from_prior_run(inv)) else _resolve_restartable_specialist(session_id)
+    can_restart = bool(restart_source)
+    # Surface the latest structured verdict for the diagnosis card. Prefer the
+    # investigation run; fall back to the most recent run with a verdict for this
+    # session (e.g. a triage-only session).
+    verdict_run = inv if (inv and inv.verdict) else _latest_verdict_run(session_id)
+    analyst_verdict = ""
+    if verdict_run:
+        from agent.models import FeedbackEntry
+        fb = FeedbackEntry.objects.filter(run_id=str(verdict_run.id)).first()
+        if fb and fb.analyst_verdict:
+            av = fb.analyst_verdict
+            analyst_verdict = av.get("verdict", "") if isinstance(av, dict) else str(av)
     return {
         "status": orch.status if orch else "unknown",
         "question": orch.question if orch else "",
@@ -82,14 +155,39 @@ def _snapshot(session_id: str) -> dict:
         "run_id": run_id,
         "inv_status": inv_status,
         "running": running,
-        "processing": runner.is_processing(session_id),
+        "processing": processing,
+        "processing_source": processing_source,
         "ctx": runner.get_ctx(session_id),
         "tasks": tasks,
         "board_entries": board_entries,
+        # Findings (fact/hypothesis/artifact) and advisory TI results render in
+        # separate board sections so reputation hits don't blend into the findings.
+        "finding_entries": [e for e in board_entries if e.get("kind") != "ti_result"],
+        "ti_entries": _ti_display_rows(board_entries),
+        "verdict": verdict_run.verdict if verdict_run else None,
+        "verdict_run_id": str(verdict_run.id) if verdict_run else "",
+        "analyst_verdict": analyst_verdict,
+        "can_restart": can_restart,
+        "restart_agent": restart_source.agent_name if restart_source else "",
+        "restart_run_id": str(restart_source.id) if restart_source else "",
+        "restart_url": reverse("dashboard:run_restart", args=[restart_source.id]) if restart_source else "",
         # B4: the queue/Findings Board column is only meaningful once investigation has work or is
         # active. A fresh/triage-only session shows a full-width chat.
         "show_queue": bool(tasks or board_entries),
     }
+
+
+def _latest_verdict_run(session_id: str):
+    """Most recent run in this session that carries a structured verdict, or None."""
+    from agent.models import AgentRun
+
+    try:
+        runs = AgentRun.objects.filter(
+            metadata__session_id=session_id, verdict__isnull=False
+        ).order_by("-updated_at")
+        return runs.first()
+    except Exception:
+        return None
 
 
 def _apply_queue_action(session_id: str, msg: dict) -> None:
@@ -238,10 +336,16 @@ class RunConsumer(AsyncWebsocketConsumer):
 
     async def _push_queue_and_status(self):
         snap = await database_sync_to_async(_snapshot)(self.session_id)
+        snap = await _resolve_coroutines(snap)
+
         ctx = snap["ctx"]
+        verdict_sig = (snap.get("verdict") or {}).get("verdict") if snap.get("verdict") else None
         status_sig = (
             snap["status"], snap["case_id"], snap["run_id"], snap["inv_status"],
-            snap["processing"], ctx["tokens"], ctx.get("run_id"), ctx.get("source"),
+            snap["processing"], snap.get("processing_source"), ctx["tokens"], ctx.get("run_id"), ctx.get("source"),
+            ctx.get("limit"), ctx.get("ts"), verdict_sig, snap.get("verdict_run_id"),
+            snap.get("can_restart"), snap.get("restart_agent"), snap.get("restart_run_id"),
+            snap.get("analyst_verdict"),
         )
         if status_sig != self._status_sig:
             self._status_sig = status_sig
@@ -250,10 +354,12 @@ class RunConsumer(AsyncWebsocketConsumer):
                 "type": "status",
                 "html": html,
                 "processing": snap["processing"],
+                "processing_source": snap.get("processing_source", ""),
                 "ctx_tokens": ctx["tokens"],
                 "ctx_limit": ctx["limit"],
                 "ctx_run_id": ctx.get("run_id", ""),
                 "ctx_source": ctx.get("source", ""),
+                "ctx_ts": ctx.get("ts"),
             }))
         queue_sig = (snap["show_queue"],) + tuple(
             (t["id"], t["status"], t["priority"], t["title"], t.get("summary"), t.get("updated_at"))

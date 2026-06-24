@@ -1,0 +1,635 @@
+<c-layout title="Settings · ACI" subtitle="Settings">
+  <div class="settings-shell settings-shell-wide">
+    <aside class="settings-rail" aria-label="Settings sections">
+      <a href="#overview">Overview</a>
+      <a href="#model">Model</a>
+      <a href="#integrations">Integrations</a>
+      <a href="#connectors">MCP servers</a>
+      <a href="#agents">Agents</a>
+      <a href="#automation">Automation</a>
+      <a href="#debug">Debug</a>
+      <a href="#baselines">Baselines</a>
+    </aside>
+
+    <div class="settings-main">
+      <header class="settings-head" id="overview">
+        <div>
+          <h1>Settings</h1>
+        </div>
+      </header>
+
+      {% if messages %}
+      <ul class="settings-msgs">
+        {% for m in messages %}<li class="settings-msg {% if m.tags %}{{ m.tags }}{% endif %}">{{ m }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+      
+      <section class="settings-section" id="model">
+        <div class="settings-section-head">
+          <div>
+            <h2>Model provider</h2>
+            <p class="muted">The OpenAI-compatible LLM the agents call. Applies to the next run.</p>
+          </div>
+        </div>
+        <form method="post" action="{% url 'dashboard:settings_model_save' %}" class="settings-form settings-form-grid">
+          <label>Base URL
+            <input type="text" name="base_url" value="{{ model.base_url|default:'' }}" placeholder="http://vllm.example.com/v1">
+          </label>
+          <label>Model name
+            <input type="text" name="model" value="{{ model.model|default:'' }}" placeholder="meta-llama/Llama-3-8b">
+          </label>
+          <label>API key
+            <span class="secret-field">
+              <input type="password" name="api_key" value="{{ model.api_key|default:'' }}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore data-lpignore="true" readonly onfocus="this.removeAttribute('readonly')" placeholder="(none set — blank clears)">
+              <button type="button" class="link-btn secret-toggle">show</button>
+            </span>
+          </label>
+          <label>Tool-calling mode
+            <select name="tool_calling_mode">
+              {% for mode in tool_calling_modes %}
+              <option value="{{ mode }}" {% if model.tool_calling_mode == mode %}selected{% endif %}>{{ mode }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>Temperature
+            <input type="number" name="temperature" min="0" max="2" step="0.1" value="{{ model.sampling_params.temperature|default:'' }}" placeholder="0">
+          </label>
+          <label>Max tokens
+            <input type="number" name="max_tokens" min="1" value="{{ model.sampling_params.max_tokens|default:'' }}" placeholder="4096">
+          </label>
+          <label>Context length (tokens)
+            <input type="number" name="context_length" min="1" value="{{ model.context_length|default:'' }}" placeholder="131072">
+          </label>
+          <label>Request timeout (seconds, blank = none)
+            <input type="number" name="timeout" min="0" value="{{ model.timeout|default:'' }}">
+          </label>
+          <div class="form-actions"><button type="submit">Save model settings</button></div>
+        </form>
+      </section>
+
+      <section class="settings-section" id="integrations">
+        <div class="settings-section-head">
+          <div>
+            <h2>Integrations</h2>
+            <p class="muted">External platform connections. Saved to the database (overriding <code>.env</code>) and applied to the MCP servers on the next run. Secret fields are write-only — leave blank to keep the stored value.</p>
+          </div>
+        </div>
+        {% regroup integrations by category as integration_groups %}
+        {% for group in integration_groups %}
+        <h3 class="settings-subheading">{{ group.grouper }}</h3>
+        <div class="settings-cards">
+          {% for c in group.list %}
+          <form method="post" action="{% url 'dashboard:settings_connection_save' %}" class="settings-card conn-card" data-cat="{{ c.category|lower }}">
+            <input type="hidden" name="provider" value="{{ c.key }}">
+            <div class="conn-head">
+              <h3>{{ c.label }} <span class="conn-kind conn-kind-{{ c.kind|lower }}">{{ c.kind }}</span></h3>
+              {% if c.internal %}
+              <span class="pill pill-on">always on</span>
+              {% else %}
+              <label class="check-inline"><input type="checkbox" name="enabled" value="1" {% if c.enabled %}checked{% endif %}> enabled</label>
+              {% endif %}
+            </div>
+            {% for f in c.fields %}
+            {% if f.type == 'bool' %}
+            <label class="check-inline conn-bool"><input type="checkbox" name="{{ f.name }}" value="true" {% if f.checked %}checked{% endif %}> {{ f.label }}</label>
+            {% else %}
+            <label class="conn-field">{{ f.label }}
+              {% if f.type == 'secret' %}
+              <span class="secret-field">
+                <input type="password" name="{{ f.name }}" value="{{ f.value }}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore data-lpignore="true" readonly onfocus="this.removeAttribute('readonly')" placeholder="(none set — blank clears)">
+                <button type="button" class="link-btn secret-toggle">show</button>
+              </span>
+              {% else %}
+              <input type="text" name="{{ f.name }}" value="{{ f.value }}" placeholder="{{ f.placeholder }}">
+              {% endif %}
+            </label>
+            {% endif %}
+            {% endfor %}
+            <div class="conn-actions">
+              <button type="submit" class="conn-save-btn">Save</button>
+              <button type="submit" class="link-btn" formaction="{% url 'dashboard:settings_connection_test' %}">Test connection</button>
+            </div>
+          </form>
+          {% if c.key == 'aci-ti' %}
+          <div class="settings-card conn-card-cache">
+            <div class="conn-head"><h3>TI Cache</h3></div>
+            <p class="muted" id="ti-cache-stats">Loading cache stats…</p>
+            <form method="post" action="{% url 'dashboard:settings_runtime_save' %}">
+              <input type="hidden" name="section" value="ti_cache">
+              <label class="conn-field">Cache TTL (hours)
+                <input type="number" name="ti_cache_ttl_hours" min="1" value="{{ runtime.ti_cache_ttl_hours }}" placeholder="24">
+              </label>
+              <p class="muted tiny">Shared across all TI providers. Applies to entries written after saving.</p>
+              <div class="conn-actions">
+                <button type="submit" class="conn-save-btn">Save TTL</button>
+              </div>
+            </form>
+            <form method="post" action="{% url 'dashboard:settings_ti_cache_clear' %}" onsubmit="return confirm('Delete all TI cache entries?');">
+              {% csrf_token %}
+              <div class="form-actions">
+                <button type="submit" class="danger-btn">Clear cache</button>
+              </div>
+            </form>
+          </div>
+          <script>
+            fetch("{% url 'dashboard:settings_ti_cache_stats' %}")
+              .then(r => r.json())
+              .then(data => {
+                const el = document.getElementById("ti-cache-stats");
+                if (!el) return;
+                const providers = Object.entries(data.by_provider || {})
+                  .map(([k, v]) => k + ": " + v).join(", ");
+                el.textContent = "Number of cache entries: " + data.total;
+              })
+              .catch(() => {
+                const el = document.getElementById("ti-cache-stats");
+                if (el) el.textContent = "Cache stats unavailable.";
+              });
+          </script>
+          {% endif %}
+          {% endfor %}
+        </div>
+        {% endfor %}
+        <p class="muted tiny" style="margin: 0 16px 14px;">“Test connection” probes the values currently in the form (falling back to saved settings) — you can test before saving.</p>
+      </section>
+
+      <section class="settings-section" id="connectors">
+        <div class="settings-section-head">
+          <div>
+            <h2>MCP servers</h2>
+            <p class="muted">Enable/disable built-in servers, or register your own. Connection credentials live in <a class="link-btn" href="#integrations">Integrations</a>.</p>
+          </div>
+        </div>
+        <div class="settings-table-wrap">
+          <table class="settings-table">
+            <thead><tr><th>Server</th><th>Category</th><th>Kind</th><th>State</th><th></th></tr></thead>
+            <tbody>
+              {% for p in providers %}
+              <tr>
+                <td><code>{{ p.key }}</code></td>
+                <td><span class="cat cat-{{ p.category }}">{{ p.category }}</span></td>
+                <td>{{ p.kind }}</td>
+                <td><span class="pill {% if p.enabled %}pill-on{% else %}pill-off{% endif %}">{% if p.enabled %}enabled{% else %}disabled{% endif %}</span></td>
+                <td>
+                  {% if p.locked %}
+                    <span class="muted">locked</span>
+                  {% else %}
+                    <form method="post" action="{% url 'dashboard:settings_provider_toggle' %}">
+                      <input type="hidden" name="key" value="{{ p.key }}">
+                      <input type="hidden" name="enabled" value="{% if p.enabled %}0{% else %}1{% endif %}">
+                      <button type="submit" class="link-btn">{% if p.enabled %}disable{% else %}enable{% endif %}</button>
+                    </form>
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Custom MCP servers</h3>
+        <div class="settings-table-wrap">
+          <table class="settings-table">
+            <thead><tr><th>ID</th><th>Name</th><th>Transport</th><th>Command / URL</th><th>State</th><th></th></tr></thead>
+            <tbody>
+              {% for s in custom_mcps %}
+              <tr>
+                <td><code>{{ s.id }}</code></td>
+                <td>{{ s.name }}</td>
+                <td>{{ s.transport }}</td>
+                <td class="mono-cell">{{ s.command_or_url }}</td>
+                <td><span class="pill {% if s.enabled %}pill-on{% else %}pill-off{% endif %}">{% if s.enabled %}enabled{% else %}disabled{% endif %}</span></td>
+                <td class="row-actions">
+                  <form method="post" action="{% url 'dashboard:settings_mcp_save' %}">
+                    <input type="hidden" name="id" value="{{ s.id }}">
+                    <input type="hidden" name="name" value="{{ s.name }}">
+                    <input type="hidden" name="transport" value="{{ s.transport }}">
+                    <input type="hidden" name="command_or_url" value="{{ s.command_or_url }}">
+                    <input type="hidden" name="enabled" value="{% if s.enabled %}0{% else %}1{% endif %}">
+                    <button type="submit" class="link-btn">{% if s.enabled %}disable{% else %}enable{% endif %}</button>
+                  </form>
+                  <form method="post" action="{% url 'dashboard:settings_mcp_delete' %}" onsubmit="return confirm('Delete MCP server {{ s.id }}?');">
+                    <input type="hidden" name="id" value="{{ s.id }}">
+                    <button type="submit" class="link-btn link-danger">delete</button>
+                  </form>
+                </td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="6" class="muted">no custom servers — add one below</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <form method="post" action="{% url 'dashboard:settings_mcp_save' %}" class="settings-form settings-form-grid">
+          <div class="form-title">
+            <h3>Add / edit a custom server</h3>
+            <p class="muted">Re-use an existing ID to edit it. Reserved built-in keys are rejected.</p>
+          </div>
+          <label>ID (stable key)<input type="text" name="id" placeholder="my-siem" required></label>
+          <label>Name<input type="text" name="name" placeholder="My SIEM connector" required></label>
+          <label>Transport
+            <select name="transport">{% for t in transports %}<option value="{{ t }}">{{ t }}</option>{% endfor %}</select>
+          </label>
+          <label>Command (stdio) or URL (http)
+            <input type="text" name="command_or_url" placeholder="python -m my_mcp.server  |  https://host/mcp" required>
+          </label>
+          <label>Allowed agents (comma-separated, blank = all)
+            <input type="text" name="allowed_agents" placeholder="triage, investigation">
+          </label>
+          <label class="check-inline form-check"><input type="checkbox" name="enabled" value="1" checked> enabled</label>
+          <div class="form-actions"><button type="submit">Save custom server</button></div>
+        </form>
+      </section>
+
+      <section class="settings-section" id="agents">
+        <div class="settings-section-head">
+          <div>
+            <h2>Agents</h2>
+            <p class="muted">Override budget and tool policy per agent. Takes effect on the next run.</p>
+          </div>
+        </div>
+        <div class="settings-cards">
+          {% for a in agents %}
+          <form method="post" action="{% url 'dashboard:settings_agent_save' %}" class="settings-card">
+            <input type="hidden" name="agent_name" value="{{ a.name }}">
+            <h3>{{ a.name }}</h3>
+            <p class="muted">{{ a.description }}</p>
+            <label class="inl">Max steps
+              <input type="number" name="max_steps" min="1" value="{{ a.max_steps }}">
+            </label>
+            <label class="inl">Max tool calls
+              <input type="number" name="max_tool_calls" min="1" value="{{ a.max_tool_calls }}">
+            </label>
+            <div class="settings-kv"><b>Tool policy</b></div>
+            <div class="check-grid">
+              {% for p in a.available_providers %}
+              <label class="check-inline"><input type="checkbox" name="tool_policy" value="{{ p.key }}" {% if p.on %}checked{% endif %}> {{ p.key }}</label>
+              {% endfor %}
+            </div>
+            <label class="check-inline"><input type="checkbox" name="stream_intent" value="1" {% if a.stream_intent %}checked{% endif %}> stream intent</label>
+            <div class="settings-kv muted">handoff:
+              {% if a.produces_handoff %}produces{% endif %}{% if a.consumes_handoff %}consumes{% endif %}{% if not a.produces_handoff and not a.consumes_handoff %}none{% endif %}</div>
+            <button type="submit">Save {{ a.name }}</button>
+          </form>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="settings-section" id="automation">
+        <div class="settings-section-head">
+          <div>
+            <h2>Automation</h2>
+            <p class="muted">The global kill switch, webhook triggers, workflow bindings, and verdict escalation.</p>
+          </div>
+        </div>
+
+        <form method="post" action="{% url 'dashboard:settings_runtime_save' %}" class="settings-form">
+          <input type="hidden" name="section" value="workflows">
+          <label class="check-inline"><input type="checkbox" name="workflows_enabled" value="1" {% if runtime.workflows_enabled %}checked{% endif %}> Automatic workflows enabled</label>
+          <p class="muted tiny">When off, configured webhooks accept the request but return 503 instead of dispatching a run.</p>
+          <div class="form-actions"><button type="submit">Save</button></div>
+        </form>
+
+        <h3 id="triggers">Workflow triggers</h3>
+        <p class="muted" style="margin: 0 16px 6px;">Each trigger exposes a webhook URL — point your SIEM or SOAR at it so new alerts and cases start a workflow.</p>
+        <div class="settings-table-wrap">
+          <table class="settings-table settings-table-roomy">
+            <thead>
+              <tr><th>Name</th><th>Webhook URL</th><th>Provider</th><th>Event</th><th>Target</th><th>Dedupe</th><th>Secret</th><th>State</th><th></th></tr>
+            </thead>
+            <tbody>
+              {% for t in workflow_triggers %}
+              <tr>
+                <td><div class="strong">{{ t.name }}</div><code>{{ t.id }}</code></td>
+                <td class="webhook-url-cell">
+                  <input type="text" class="webhook-url" value="{{ t.webhook_url }}" readonly onclick="this.select();">
+                  <button type="button" class="link-btn copy-webhook" data-url="{{ t.webhook_url }}">copy</button>
+                </td>
+                <td>{{ t.provider_label }}<div class="muted tiny"><code>{{ t.provider_key }}</code></div></td>
+                <td><code>{{ t.event_type }}</code></td>
+                <td>{{ t.target }}</td>
+                <td>{{ t.dedupe_window }}s</td>
+                <td>{% if t.secret_set %}<span class="pill pill-on">set</span>{% else %}<span class="pill pill-off">optional</span>{% endif %}</td>
+                <td><span class="pill {% if t.enabled %}pill-on{% else %}pill-off{% endif %}">{% if t.enabled %}enabled{% else %}disabled{% endif %}</span></td>
+                <td class="row-actions">
+                  <a class="link-btn" href="?edit_trigger={{ t.id }}#trigger-form">edit</a>
+                  <form method="post" action="{% url 'dashboard:settings_trigger_toggle' %}">
+                    <input type="hidden" name="id" value="{{ t.id }}">
+                    <input type="hidden" name="enabled" value="{% if t.enabled %}0{% else %}1{% endif %}">
+                    <button type="submit" class="link-btn">{% if t.enabled %}disable{% else %}enable{% endif %}</button>
+                  </form>
+                  <form method="post" action="{% url 'dashboard:settings_trigger_delete' %}" onsubmit="return confirm('Delete trigger {{ t.id }}?');">
+                    <input type="hidden" name="id" value="{{ t.id }}">
+                    <button type="submit" class="link-btn link-danger">delete</button>
+                  </form>
+                </td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="9" class="muted">no workflow triggers configured — add a webhook trigger below</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <form method="post" action="{% url 'dashboard:settings_trigger_save' %}" class="settings-form settings-form-grid" id="trigger-form">
+          <input type="hidden" name="existing_id" value="{{ edit_trigger.id|default:'' }}">
+          <div class="form-title">
+            <h3>{% if edit_trigger %}Edit trigger{% else %}Add trigger{% endif %}</h3>
+            <p class="muted">Saving generates a webhook URL at <code>/api/agent/webhooks/&lt;id&gt;/</code>. Secret is optional for local webhooks.</p>
+          </div>
+          <label>Trigger ID
+            <input type="text" name="id" value="{{ edit_trigger.id|default:'' }}" placeholder="thehive-case-webhook" {% if edit_trigger %}readonly{% endif %}>
+          </label>
+          <label>Trigger name
+            <input type="text" name="name" value="{{ edit_trigger.name|default:'' }}" placeholder="TheHive case webhook">
+          </label>
+          <label>Provider
+            <select name="provider_key">
+              {% for p in trigger_provider_options %}
+              <option value="{{ p.key }}" {% if edit_trigger.provider_key == p.key %}selected{% endif %}>{{ p.label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>Workflow event
+            <select name="event_type">
+              {% for e in workflow_event_options %}
+              <option value="{{ e.event_type }}" {% if edit_trigger.event_type == e.event_type %}selected{% endif %}>{{ e.event_type }} → {{ e.agent_name }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>Dedupe seconds
+            <input type="number" name="dedupe_window" min="0" value="{{ edit_trigger.dedupe_window|default:'600' }}">
+          </label>
+          <label>Secret token
+            <input type="password" name="secret" autocomplete="new-password" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore data-lpignore="true" value="{{ edit_trigger.secret|default:'' }}" placeholder="optional">
+          </label>
+          <label class="check-inline form-check"><input type="checkbox" name="enabled" value="1" {% if not edit_trigger or edit_trigger.enabled %}checked{% endif %}> enabled</label>
+          <div class="form-actions">
+            <button type="submit">Save trigger</button>
+            {% if edit_trigger %}<a class="link-btn" href="{% url 'dashboard:settings' %}#trigger-form">cancel edit</a>{% endif %}
+          </div>
+        </form>
+
+        <h3>Workflow bindings</h3>
+        <div class="settings-cards">
+          {% for w in workflows %}
+          <form method="post" action="{% url 'dashboard:settings_workflow_save' %}" class="settings-card">
+            <input type="hidden" name="event_type" value="{{ w.event_type }}">
+            <h3><code>{{ w.event_type }}</code> → {{ w.agent_name }}</h3>
+            <label class="inl">Dedupe window (s)
+              <input type="number" name="dedupe_window" min="0" value="{{ w.dedupe_window }}">
+            </label>
+            <label class="check-inline"><input type="checkbox" name="enabled" value="1" {% if w.enabled %}checked{% endif %}> enabled</label>
+            <button type="submit">Save workflow</button>
+          </form>
+          {% empty %}
+          <p class="muted">no trigger bindings registered</p>
+          {% endfor %}
+        </div>
+
+        <h3>Escalation policy</h3>
+        <p class="muted" style="margin: 0 16px 6px;">What an automatic run does with each verdict.</p>
+        <form method="post" action="{% url 'dashboard:settings_escalation_save' %}" class="settings-form settings-form-grid">
+          {% for e in escalation_rows %}
+          <label><code>{{ e.verdict }}</code>
+            <select name="action_{{ e.verdict }}">
+              {% for act in e.actions %}<option value="{{ act }}" {% if e.action == act %}selected{% endif %}>{{ act }}</option>{% endfor %}
+            </select>
+          </label>
+          {% endfor %}
+          <div class="form-actions"><button type="submit">Save escalation policy</button></div>
+        </form>
+      </section>
+
+      <section class="settings-section" id="debug">
+        <div class="settings-section-head">
+          <div>
+            <h2>Debug</h2>
+            <p class="muted">Surface internal graph tool calls and node-transition events in the session activity log. Applies to the next agent run — does not affect runs already in progress.</p>
+          </div>
+        </div>
+        <form method="post" action="{% url 'dashboard:settings_runtime_save' %}" class="settings-form">
+          <input type="hidden" name="section" value="debug">
+          <label class="check-inline"><input type="checkbox" name="debug_mode" value="1" {% if runtime.debug_mode %}checked{% endif %}> Debug mode enabled</label>
+          <div class="form-actions"><button type="submit">Save</button></div>
+        </form>
+      </section>
+
+      <section class="settings-section" id="baselines">
+        <div class="settings-section-head">
+          <div>
+            <h2>Behavioral baselines</h2>
+            <p class="muted">Pick the users and endpoints to profile. With subjects configured, computation targets exactly these; with none, it auto-discovers from your SIEM.</p>
+          </div>
+          <form method="post" action="{% url 'dashboard:settings_baseline_recompute' %}" class="baseline-recompute">
+            <label class="inl">Lookback window (days)
+              <input type="number" name="window_days" min="1" value="{{ baseline_window_days }}">
+            </label>
+            <button type="submit">Recompute now</button>
+          </form>
+        </div>
+
+        <form method="post" action="{% url 'dashboard:settings_runtime_save' %}" class="settings-form settings-form-grid">
+          <input type="hidden" name="section" value="baseline">
+          <label>SIEM adapter
+            <select name="baseline_siem_adapter">
+              {% for ad in runtime.baseline_adapter_options %}
+              <option value="{{ ad }}" {% if runtime.baseline_adapter == ad %}selected{% endif %}>{{ ad }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>Scheduler interval (hours)
+            <input type="number" name="baseline_interval_hours" min="1" value="{{ runtime.baseline_interval_hours }}">
+          </label>
+          <div class="form-actions"><button type="submit">Save baseline runtime</button></div>
+        </form>
+        <p class="muted tiny" style="margin: 0 16px 14px;">The lookback window is shared by manual recompute and the scheduler. The scheduler interval applies on the next server restart.</p>
+
+        <h3>Configured subjects</h3>
+        <div class="settings-table-wrap">
+          <table class="settings-table">
+            <thead><tr><th>Type</th><th>Subject</th><th>State</th><th></th></tr></thead>
+            <tbody>
+              {% for s in baseline_subjects %}
+              <tr>
+                <td>{{ s.subject_type }}</td>
+                <td><code>{{ s.subject_id }}</code></td>
+                <td><span class="pill {% if s.enabled %}pill-on{% else %}pill-off{% endif %}">{% if s.enabled %}enabled{% else %}disabled{% endif %}</span></td>
+                <td class="row-actions">
+                  <form method="post" action="{% url 'dashboard:settings_baseline_subject_toggle' %}">
+                    <input type="hidden" name="id" value="{{ s.id }}">
+                    <input type="hidden" name="enabled" value="{% if s.enabled %}0{% else %}1{% endif %}">
+                    <button type="submit" class="link-btn">{% if s.enabled %}disable{% else %}enable{% endif %}</button>
+                  </form>
+                  <form method="post" action="{% url 'dashboard:settings_baseline_subject_delete' %}" onsubmit="return confirm('Delete baseline subject {{ s.subject_type }}:{{ s.subject_id }}?');">
+                    <input type="hidden" name="id" value="{{ s.id }}">
+                    <button type="submit" class="link-btn link-danger">delete</button>
+                  </form>
+                </td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="4" class="muted">no subjects configured — computation auto-discovers from your SIEM</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <form method="post" action="{% url 'dashboard:settings_baseline_subject_save' %}" class="settings-form settings-form-grid">
+          <div class="form-title">
+            <h3>Add a subject</h3>
+            <p class="muted">{{ baseline_subject_hint }}</p>
+          </div>
+          <label>Subject type
+            <select name="subject_type">
+              {% for t in baseline_subject_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+            </select>
+          </label>
+          <label>Subject ID
+            <input type="text" name="subject_id" placeholder="alice  |  web-server-01" required>
+          </label>
+          <label class="check-inline form-check"><input type="checkbox" name="enabled" value="1" checked> enabled</label>
+          <div class="form-actions"><button type="submit">Add subject</button></div>
+        </form>
+
+        <h3>Computed baselines</h3>
+        <div class="settings-cards">
+          {% for b in baseline_snapshots %}
+          <details class="settings-card bl-entity">
+            <summary class="bl-entity-summary">
+              <h3>{{ b.subject_type }}: <code>{{ b.subject_id }}</code></h3>
+              <span class="muted tiny bl-entity-meta">{{ b.features|length }} feature{{ b.features|length|pluralize }} · {{ b.computed_at|default:'—' }}</span>
+            </summary>
+            {% for f in b.features %}
+            <div class="settings-kv">
+              <b>{{ f.feature }}</b>
+              <span class="pill pill-{{ f.health }}">{{ f.health }}</span>
+              <span class="muted tiny">{{ f.window_days }}d window</span>
+            </div>
+            {% if f.vis.type == "bar" %}
+            <div class="bl-bars">
+              {% for bar in f.vis.bars %}
+              <div class="bl-bar-row">
+                <span class="bl-bar-label">{{ bar.label }}</span>
+                <div class="bl-bar-track"><div class="bl-bar-fill" style="width:{{ bar.pct }}%"></div></div>
+                <span class="bl-bar-count">{{ bar.count }}</span>
+              </div>
+              {% empty %}<p class="muted tiny">no data</p>{% endfor %}
+            </div>
+            {% elif f.vis.type == "stats" %}
+            <table class="bl-stats">
+              {% for item in f.vis.items %}
+              <tr><td class="bl-stat-label">{{ item.label }}</td><td class="bl-stat-val">{{ item.value }}</td></tr>
+              {% endfor %}
+            </table>
+            {% elif f.vis.type == "rate" %}
+            <div class="bl-rate-head muted tiny">failure rate: <b>{{ f.vis.rate_pct }}</b></div>
+            <div class="bl-bars">
+              {% for bar in f.vis.bars %}
+              <div class="bl-bar-row">
+                <span class="bl-bar-label">{{ bar.label }}</span>
+                <div class="bl-bar-track"><div class="bl-bar-fill bl-bar-{{ bar.label }}" style="width:{{ bar.pct }}%"></div></div>
+                <span class="bl-bar-count">{{ bar.count }}</span>
+              </div>
+              {% endfor %}
+            </div>
+            {% elif f.vis.type == "empty" %}
+            <p class="muted tiny">{{ f.vis.msg }}</p>
+            {% else %}
+            <pre class="mono-cell baseline-value">{{ f.vis.value }}</pre>
+            {% endif %}
+            {% endfor %}
+          </details>
+          {% empty %}
+          <p class="muted">no baselines computed yet — add subjects above and click "Recompute now", or wait for the scheduler</p>
+          {% endfor %}
+        </div>
+      </section>
+    </div>
+  </div>
+  <script>
+    (function () {
+      document.querySelectorAll(".secret-toggle").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const input = btn.parentElement.querySelector("input");
+          if (!input) return;
+          const reveal = input.type === "password";
+          input.type = reveal ? "text" : "password";
+          btn.textContent = reveal ? "hide" : "show";
+        });
+      });
+    })();
+
+    (function () {
+      document.querySelectorAll(".copy-webhook").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const url = btn.getAttribute("data-url") || "";
+          try {
+            await navigator.clipboard.writeText(url);
+          } catch (e) {
+            const input = btn.parentElement.querySelector(".webhook-url");
+            if (input) { input.select(); document.execCommand("copy"); }
+          }
+          const original = btn.textContent;
+          btn.textContent = "copied";
+          setTimeout(() => { btn.textContent = original; }, 1200);
+        });
+      });
+    })();
+
+    (function () {
+      const rail = document.querySelector(".settings-rail");
+      if (!rail || !("IntersectionObserver" in window)) return;
+      const links = Array.from(rail.querySelectorAll("a[href^='#']"));
+      const byId = new Map(links.map((link) => [link.getAttribute("href").slice(1), link]));
+      const targets = Array.from(byId.keys())
+        .map((id) => document.getElementById(id))
+        .filter(Boolean);
+      if (!targets.length) return;
+
+      function setActive(id) {
+        links.forEach((link) => link.classList.toggle("active", link === byId.get(id)));
+      }
+
+      function updateActiveFromScroll() {
+        const marker = Math.max(90, window.innerHeight * 0.22);
+        let current = targets[0].id;
+        let nearest = { id: current, distance: Infinity };
+        targets.forEach((target) => {
+          const top = target.getBoundingClientRect().top;
+          const distance = Math.abs(top - marker);
+          if (top <= marker) current = target.id;
+          if (distance < nearest.distance) nearest = { id: target.id, distance };
+        });
+        setActive(current || nearest.id);
+      }
+
+      let ticking = false;
+      function requestActiveUpdate() {
+        if (ticking) return;
+        ticking = true;
+        requestAnimationFrame(() => {
+          ticking = false;
+          updateActiveFromScroll();
+        });
+      }
+
+      const observer = new IntersectionObserver(() => {
+        requestActiveUpdate();
+      }, { rootMargin: "-20% 0px -65% 0px", threshold: [0, 0.1, 0.25] });
+
+      targets.forEach((target) => observer.observe(target));
+      links.forEach((link) => {
+        link.addEventListener("click", () => {
+          const id = link.getAttribute("href").slice(1);
+          setActive(id);
+          setTimeout(updateActiveFromScroll, 250);
+        });
+      });
+      window.addEventListener("scroll", requestActiveUpdate, { passive: true });
+      window.addEventListener("hashchange", requestActiveUpdate);
+      setActive((location.hash || "#overview").slice(1));
+      requestActiveUpdate();
+    })();
+  </script>
+</c-layout>

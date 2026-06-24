@@ -9,7 +9,6 @@ Endpoint map (tested against v5.1.9):
 """
 from __future__ import annotations
 
-import os
 from datetime import datetime, timezone
 from typing import Any
 
@@ -27,12 +26,17 @@ def _epoch_ms_to_iso(value: Any) -> str | None:
 
 
 class TheHiveClient:
-    def __init__(self) -> None:
-        host = os.environ["THEHIVE_HOST"].rstrip("/")
-        port = os.environ.get("THEHIVE_PORT", "9000")
+    def __init__(self, *, host: str, port: str = "9000", api_key: str, verify_tls: str = "true") -> None:
+        if not host:
+            raise ValueError("TheHive host is not configured — set it in Settings → Integrations")
+        host = host.rstrip("/")
+        if not host.startswith(("http://", "https://")):
+            host = f"http://{host}"
         self._base = f"{host}:{port}"
-        api_key = os.environ["THEHIVE_API_KEY"]
-        verify = os.environ.get("THEHIVE_VERIFY_TLS", "true").lower() == "true"
+        api_key = api_key.strip().replace('\r', '').replace('\n', '')
+        if not api_key:
+            raise ValueError("TheHive API key is not configured — set it in Settings → Integrations")
+        verify = verify_tls.lower() == "true"
         self._client = httpx.Client(
             base_url=self._base,
             headers={
@@ -167,3 +171,17 @@ class TheHiveClient:
             "content": summary,
             "category": "Investigation",
         })
+
+    def post_case_comment(self, case_id: str, message: str) -> dict:
+        """Record an ACI workflow note on the case.
+
+        TheHive deployments used by ACI expose the Pages API consistently, while
+        `/api/v1/case/{id}/timeline` returns 404 on some versions. Use a dated
+        case page for workflow notes so escalation side effects do not fail.
+        """
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        return self.post_report(
+            case_id,
+            f"**{stamp}**\n\n{message}",
+            title=f"ACI workflow note {stamp}",
+        )

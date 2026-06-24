@@ -10,8 +10,12 @@ def fire(trigger: Trigger):
     event source (webhook/poller) will call; it intentionally has no transport
     assumptions of its own.
     """
-    from ..dispatch import dispatch_run_sync
+    from ..engine.dispatch import dispatch_run_sync
+    from ..config.runtime_config import workflows_enabled
     from ...models import AgentRun
+
+    if not workflows_enabled():
+        return None
 
     binding = get_binding(trigger.event_type)
     if binding is None or not binding.enabled:

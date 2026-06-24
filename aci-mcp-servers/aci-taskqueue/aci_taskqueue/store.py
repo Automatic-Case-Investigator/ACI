@@ -14,7 +14,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 _lock = threading.Lock()
-_DB_PATH = os.environ.get("TASKQUEUE_DB_PATH", "taskqueue.db")
 
 
 def _now() -> str:
@@ -25,7 +24,7 @@ from contextlib import contextmanager
 
 @contextmanager
 def _conn():
-    conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
+    conn = sqlite3.connect(os.environ.get("TASKQUEUE_DB_PATH", "taskqueue.db"), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     # The DB is shared between this process and the agent's MCP subprocess; wait
     # rather than fail immediately when the other side holds a write lock.

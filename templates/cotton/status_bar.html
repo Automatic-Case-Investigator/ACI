@@ -1,5 +1,11 @@
 <div class="statusbar">
   <span class="muted">case {{ snap.case_id|default:"—" }}</span>
-  {% if snap.run_id %}<span class="muted">inv {{ snap.run_id|slice:":8" }} · {{ snap.inv_status }}</span>{% endif %}
+  {% if snap.run_id %}<span class="muted">inv {{ snap.run_id|slice:":8" }}</span><span class="badge status-{{ snap.inv_status|default:'unknown' }}">{{ snap.inv_status }}</span>{% endif %}
   <span class="q">{{ snap.question }}</span>
+  {% if snap.can_restart and snap.restart_url %}
+  <form class="status-action" method="post" action="{{ snap.restart_url }}"
+        onsubmit="return confirm('Restart this budget-exhausted run from prior work?');">
+    <button type="submit" class="link-btn">restart {{ snap.restart_agent|default:"run" }}</button>
+  </form>
+  {% endif %}
 </div>

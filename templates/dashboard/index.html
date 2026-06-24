@@ -1,24 +1,147 @@
-<c-layout title="ACI Dashboard" subtitle="analyst console">
-  <section class="ask-panel">
-    <h1>Start a session</h1>
-    <c-ask-form />
-  </section>
-  <section class="recent">
-    <h2>Recent sessions</h2>
-    <ul class="runlist">
-      {% for s in sessions %}
-      <li class="session-row">
-        <a href="{% url 'dashboard:session' s.id %}">
-          <span class="q">{{ s.question }}</span>
-          <span class="muted">{{ s.created_at|date:"Y-m-d H:i" }}</span>
-        </a>
-        <form method="post" action="{% url 'dashboard:delete_session' s.id %}" class="delete-form">
-          <button type="submit" class="del-btn" title="Delete session">✕</button>
-        </form>
-      </li>
-      {% empty %}
-      <li class="muted">no sessions yet — ask a question above</li>
-      {% endfor %}
-    </ul>
-  </section>
+<c-layout title="ACI Dashboard" subtitle="Console">
+  <div class="deck">
+
+    <section class="deck-panel ask-deck" style="--i: 0">
+      <div class="deck-head">
+        <h1 class="deck-title">Start a session</h1>
+      </div>
+      <c-ask-form />
+    </section>
+
+    <section class="deck-panel" style="--i: 1">
+      <div class="deck-head">
+        <h2 class="deck-title">Live sessions</h2>
+        <div class="head-tools">
+          <form method="get" class="searchbar" role="search">
+            {% for k, v in request.GET.items %}{% if k != 'sq' and k != 'sp' %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endif %}{% endfor %}
+            <input type="search" name="sq" value="{{ sessions_q }}" placeholder="Search sessions…" aria-label="Search live sessions">
+          </form>
+          <a class="link-btn" href="{% url 'dashboard:runs' %}?seg=live">all sessions</a>
+        </div>
+      </div>
+      <div class="deck-table-wrap">
+        <table class="deck-table">
+          <thead>
+            <tr><th>ID</th><th>Analyst question</th><th>Started</th><th></th></tr>
+          </thead>
+          <tbody>
+            {% for s in sessions_page %}
+            <tr style="--i: {{ forloop.counter0 }}">
+              <td class="mono">{{ s.id|stringformat:'s'|slice:':8' }}</td>
+              <td class="cell-q"><a href="{% url 'dashboard:session' s.id %}">{{ s.question|truncatechars:90 }}</a></td>
+              <td class="muted mono">{{ s.created_at|date:"Y-m-d H:i" }}</td>
+              <td class="row-actions">
+                <a class="link-btn" href="{% url 'dashboard:session' s.id %}">view</a>
+                <form method="post" action="{% url 'dashboard:delete_session' s.id %}" onsubmit="return confirm('Delete session?');">
+                  <button type="submit" class="link-btn link-danger">delete</button>
+                </form>
+              </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="4" class="muted">{% if sessions_q %}no sessions match “{{ sessions_q }}”{% else %}no sessions yet — ask a question above{% endif %}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <c-pager :page="sessions_page" param="sp" />
+    </section>
+
+    {% if review_runs %}
+    <section class="deck-panel review-strip" style="--i: 2">
+      <div class="deck-head">
+        <h2 class="deck-title">Needs investigation</h2>
+        <a class="link-btn" href="{% url 'dashboard:runs' %}?seg=workflows">all workflows</a>
+      </div>
+      <ul class="review-list">
+        {% for r in review_runs %}
+        <li>
+          <a href="{{ r.review_url }}">
+            <span class="strong">case {{ r.case_id }}</span>
+            <span class="muted tiny">{{ r.agent_name }}{% if r.confidence %} · {{ r.confidence }}{% endif %} · {{ r.age }}</span>
+          </a>
+          <a class="link-btn" href="{{ r.review_url }}">review</a>
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+
+    <section class="stat-cards" aria-label="Diagnosis statistics">
+      <a class="stat-card stat-fp" href="{% url 'dashboard:runs' %}?verdict=fp" style="--i: 0">
+        <div class="stat-ico" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M12 3l8 3v5c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z"/><path d="M9 12l2 2 4-4"/></svg>
+        </div>
+        <div class="stat-body">
+          <div class="stat-num">{{ verdict_totals.fp }}</div>
+          <div class="stat-label">False positives</div>
+        </div>
+      </a>
+      <a class="stat-card stat-tp" href="{% url 'dashboard:runs' %}?verdict=tp" style="--i: 1">
+        <div class="stat-ico" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M12 3l8 3v5c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z"/><path d="M12 8v5M12 16v.5"/></svg>
+        </div>
+        <div class="stat-body">
+          <div class="stat-num">{{ verdict_totals.tp }}</div>
+          <div class="stat-label">True positives</div>
+        </div>
+      </a>
+      <a class="stat-card stat-inc" href="{% url 'dashboard:runs' %}?verdict=inconclusive" style="--i: 2">
+        <div class="stat-ico" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3 2.4V14M12 17v.5"/></svg>
+        </div>
+        <div class="stat-body">
+          <div class="stat-num">{{ verdict_totals.inconclusive }}</div>
+          <div class="stat-label">Inconclusive</div>
+        </div>
+      </a>
+      <a class="stat-card stat-ni" href="{% url 'dashboard:runs' %}?verdict=needs_investigation" style="--i: 3">
+        <div class="stat-ico" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M16 16l5 5"/></svg>
+        </div>
+        <div class="stat-body">
+          <div class="stat-num">{{ verdict_totals.needs_investigation }}</div>
+          <div class="stat-label">Need investigation</div>
+        </div>
+      </a>
+    </section>
+
+    <section class="deck-panel" style="--i: 3">
+      <div class="deck-head">
+        <h2 class="deck-title">Active runs</h2>
+        <div class="head-tools">
+          <form method="get" class="searchbar" role="search">
+            {% for k, v in request.GET.items %}{% if k != 'rq' and k != 'rp' %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endif %}{% endfor %}
+            <input type="search" name="rq" value="{{ active_q }}" placeholder="Search runs…" aria-label="Search active runs">
+          </form>
+          <a class="link-btn" href="{% url 'dashboard:runs' %}?seg=active">all active</a>
+        </div>
+      </div>
+      <div class="deck-table-wrap">
+        <table class="deck-table">
+          <thead>
+            <tr><th>Run</th><th>Agent / question</th><th>Progress</th><th>Age</th></tr>
+          </thead>
+          <tbody id="active-runs" data-page-size="8" data-page-param="rp">
+            {% for r in active_runs %}
+            <tr style="--i: {{ forloop.counter0 }}">
+              <td class="mono">{{ r.short_id }}</td>
+              <td class="cell-q">
+                <span class="strong">{{ r.agent_name }}</span>
+                <span class="muted tiny">{{ r.question|truncatechars:70 }}</span>
+              </td>
+              <td class="cell-prog"><span class="prog" title="awaiting inference"><span class="prog-bar"></span></span></td>
+              <td class="muted mono">{{ r.age }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="4" class="muted">{% if active_q %}no active runs match “{{ active_q }}”{% else %}nothing awaiting inference right now{% endif %}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div id="active-runs-pager">
+        <c-pager :page="active_page" param="rp" />
+      </div>
+    </section>
+
+  </div>
 </c-layout>

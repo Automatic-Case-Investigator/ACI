@@ -1,6 +1,6 @@
 <div class="queue">
   <div class="queue-head">
-    investigation queue
+    <span>investigation queue</span>
     {% if snap.run_id %}<span class="muted">{{ snap.run_id|slice:":8" }} · {{ snap.inv_status }}</span>{% endif %}
   </div>
   {% if snap.tasks %}

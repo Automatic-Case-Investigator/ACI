@@ -18,24 +18,18 @@ Investigation strategies you apply:
 
 ## AVFS workspace scope
 
-Your AVFS workspace is your personal working memory — it contains only files you or
-prior agent runs have written. It does **not** contain target-system files.
+Your AVFS workspace is your personal working memory — it contains only files you or prior agent runs have written. It does **not** contain target-system files.
 
 - **Read** `~/cases/<id>/evidence/` for raw evidence saved by prior runs.
-- **Search** `~/memory/` to look up known patterns or false positives.
+- **Search** `~/memory/` using `grep_semantic` (e.g. `path_prefix=~/memory/`, `query=<keyword>`) to look up known patterns or false positives.
 - **Do not** try to `cat`, `ls`, or read paths that appear in alerts or SIEM events
   (e.g. `/var/spool/cron/crontabs/root`, `/proc/net/tcp`, `/var/log/syslog`).
   Those are paths on the target system, not files in your workspace. They will fail.
 
 ## Triage evidence
 
-When the triage handoff already confirmed a finding (e.g., found the exact crontab
-entry, confirmed a file modification, captured raw syscheck events):
+When the triage handoff already confirmed a finding (e.g., found the exact crontab entry, confirmed a file modification, captured raw FIM events):
 
-- **Cite the triage evidence directly.** Reference the finding, the syscheck path,
-  the timestamp, and any workspace paths already saved.
-- **Do NOT re-query SIEM to re-prove what triage already confirmed.** Use SIEM only
-  to expand scope: pivot on new IPs, users, processes, or time windows the triage
-  did not cover.
-- One task to "confirm reverse shell" when triage already has the crontab content
-  should take ≤5 tool calls: read workspace evidence → cite it → complete task.
+- **Cite the triage evidence directly.** Reference the finding, the file path, the timestamp, and any workspace paths already saved.
+- **Do NOT re-query SIEM to re-prove what triage already confirmed.** Use SIEM only to expand scope: pivot on new IPs, users, processes, or time windows the triage did not cover.
+- One task to "confirm reverse shell" when triage already has the crontab content should take ≤5 tool calls: read workspace evidence → cite it → complete task.

@@ -1,0 +1,136 @@
+{% load dashboard_tags %}
+<c-layout title="Runs · ACI" subtitle="Runs">
+  <div class="settings-shell">
+    <header class="settings-head">
+      <div>
+        <h1>Runs</h1>
+        <p class="muted">Every live session and automatic workflow run. Open a session to jump into its chatbox; stop or delete runs individually or in bulk.</p>
+      </div>
+    </header>
+
+    {% if messages %}
+    <ul class="settings-msgs">
+      {% for m in messages %}<li class="settings-msg {% if m.tags %}{{ m.tags }}{% endif %}">{{ m }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+
+    <section class="settings-section">
+      <div class="runs-toolbar">
+        <nav class="seg-bar" aria-label="Filter runs">
+          {% for s in segments %}
+          <a class="seg-link {% if s == segment %}seg-on{% endif %}"
+             href="?{% query_replace 'seg' s %}" {% if s == segment %}aria-current="page"{% endif %}>{{ s }}</a>
+          {% endfor %}
+        </nav>
+        <form method="get" class="searchbar" role="search">
+          {% for k, v in request.GET.items %}{% if k != 'q' %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endif %}{% endfor %}
+          <input type="search" name="q" value="{{ query }}" placeholder="Search id, case, agent, question…">
+          <button type="submit" class="link-btn">search</button>
+        </form>
+        <div class="bulk-bar">
+          <form method="post" action="{% url 'dashboard:runs_stop_all' %}"
+                onsubmit="return confirm('Stop all active runs in this view?');">
+            <input type="hidden" name="seg" value="{{ segment }}">
+            <input type="hidden" name="verdict" value="{{ verdict }}">
+            <input type="hidden" name="q" value="{{ query }}">
+            <button type="submit" class="link-btn">Stop all</button>
+          </form>
+          <form method="post" action="{% url 'dashboard:runs_delete_all' %}"
+                onsubmit="return confirm('Delete all runs in this view? This cannot be undone.');">
+            <input type="hidden" name="seg" value="{{ segment }}">
+            <input type="hidden" name="verdict" value="{{ verdict }}">
+            <input type="hidden" name="q" value="{{ query }}">
+            <button type="submit" class="link-btn link-danger">Delete all</button>
+          </form>
+        </div>
+      </div>
+
+      {% if verdict or query %}
+      <div class="filter-chips">
+        {% if verdict %}<span class="chip">verdict: <b>{{ verdict|upper }}</b> <a href="?{% query_replace 'verdict' '' %}" aria-label="Clear verdict filter">✕</a></span>{% endif %}
+        {% if query %}<span class="chip">search: <b>{{ query }}</b> <a href="?{% query_replace 'q' '' %}" aria-label="Clear search">✕</a></span>{% endif %}
+      </div>
+      {% endif %}
+
+      <div class="settings-table-wrap">
+        <table class="settings-table settings-table-roomy">
+          <thead>
+            <tr>
+              <th>Type</th>
+              <th>Run</th>
+              <th>Status</th>
+              <th>Verdict &amp; next steps</th>
+              <th>Age</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in rows %}
+            <tr>
+              <td>
+                {% if r.is_live %}
+                <span class="pill pill-on">Live session</span>
+                {% else %}
+                <span class="pill">Workflow</span>
+                {% endif %}
+              </td>
+              <td>
+                <div class="strong">{{ r.agent_name }}</div>
+                <div class="muted tiny">{{ r.question|truncatechars:80 }}</div>
+                {% if r.case_id %}<div class="muted tiny">case <code>{{ r.case_id }}</code></div>{% endif %}
+              </td>
+              <td><span class="badge status-{{ r.status }}">{{ r.status }}</span></td>
+              <td>
+                {% if r.verdict %}
+                <span class="vchip v-{{ r.verdict }}">{{ r.verdict|upper }}</span>
+                {% endif %}
+                {% if r.escalation_label %}<div class="next-step">→ {{ r.escalation_label }}</div>{% endif %}
+                {% if r.recommended_action %}<div class="next-step muted">{{ r.recommended_action|truncatechars:120 }}</div>{% endif %}
+                {% if r.execution_error %}<div class="next-step tiny" style="color: var(--error)">{{ r.execution_error|truncatechars:100 }}</div>{% endif %}
+                {% if not r.verdict and not r.escalation_label and not r.recommended_action %}
+                <span class="muted tiny">{% if r.is_live %}interactive{% else %}—{% endif %}</span>
+                {% endif %}
+              </td>
+              <td class="muted">{{ r.age }}</td>
+              <td class="row-actions">
+                {% if r.is_live %}
+                <a class="link-btn" href="{{ r.open_url }}">open chatbox</a>
+                {% endif %}
+                {% if r.can_review %}
+                <a class="link-btn" href="{{ r.review_url }}">review triage</a>
+                {% endif %}
+                {% if r.can_restart %}
+                <form method="post" action="{{ r.restart_url }}"
+                      onsubmit="return confirm('Restart this budget-exhausted {{ r.agent_name }} run from prior work?');">
+                  <input type="hidden" name="seg" value="{{ segment }}">
+                  <input type="hidden" name="verdict" value="{{ verdict }}">
+                  <input type="hidden" name="q" value="{{ query }}">
+                  <button type="submit" class="link-btn">restart from prior</button>
+                </form>
+                {% endif %}
+                {% if r.is_inferring %}
+                <form method="post" action="{% url 'dashboard:run_stop' r.id %}">
+                  <input type="hidden" name="seg" value="{{ segment }}">
+                  <input type="hidden" name="verdict" value="{{ verdict }}">
+                  <input type="hidden" name="q" value="{{ query }}">
+                  <button type="submit" class="link-btn">stop</button>
+                </form>
+                {% endif %}
+                <form method="post" action="{% url 'dashboard:run_delete' r.id %}"
+                      onsubmit="return confirm('Delete this run?');">
+                  <input type="hidden" name="seg" value="{{ segment }}">
+                  <input type="hidden" name="verdict" value="{{ verdict }}">
+                  <input type="hidden" name="q" value="{{ query }}">
+                  <button type="submit" class="link-btn link-danger">delete</button>
+                </form>
+              </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="6" class="muted">no runs match this view</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</c-layout>

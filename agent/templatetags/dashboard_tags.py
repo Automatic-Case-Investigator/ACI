@@ -5,10 +5,24 @@ import json
 import os
 
 from django import template
+from django.http import QueryDict
 from django.templatetags.static import static
 from django.contrib.staticfiles import finders
 
 register = template.Library()
+
+
+@register.simple_tag(takes_context=True)
+def query_replace(context, key, value):
+    """Current querystring with `key` set to `value`, other params preserved.
+
+    Lets independent pagers (e.g. ?sp= and ?rp=) update one page number without
+    clobbering the other. Usage: href="?{% query_replace 'sp' page.next_page_number %}".
+    """
+    request = context.get("request")
+    params = request.GET.copy() if request is not None else QueryDict(mutable=True)
+    params[key] = value
+    return params.urlencode()
 
 
 @register.simple_tag

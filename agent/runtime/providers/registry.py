@@ -25,3 +25,4 @@ from . import board      # noqa: E402, F401
 from . import thehive    # noqa: E402, F401
 from . import wazuh      # noqa: E402, F401
 from . import taskqueue  # noqa: E402, F401
+from . import memory     # noqa: E402, F401

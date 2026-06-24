@@ -87,41 +87,46 @@ USE_TZ = True
 TIME_ZONE = "UTC"
 
 # ── LLM (OpenAI-compatible) ───────────────────────────────────────────────────
-LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://localhost:11434/v1")
-LLM_API_KEY = os.environ.get("LLM_API_KEY", "ollama")
-LLM_MODEL_NAME = os.environ.get("LLM_MODEL_NAME", "llama3.2")
-LLM_TEMPERATURE = float(os.environ.get("LLM_TEMPERATURE", "0"))
-LLM_MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "4096"))
-LLM_CONTEXT_LENGTH = int(os.environ.get("LLM_CONTEXT_LENGTH", "131072"))
-# Empty/0 means no client-side model request timeout. This is intentional for
-# long-running local vLLM/Ollama tool-calling turns.
-LLM_TIMEOUT = os.environ.get("LLM_TIMEOUT", "")
+# Model provider settings (base URL, API key, model name, sampling params,
+# context length, request timeout) live in the database (`ModelProviderConfig`)
+# and are edited in Settings → Model provider. Built-in defaults and the
+# resolution logic are in agent/runtime/model_client.py.
+# Comma-separated agent names that should spend an extra LLM call before each
+# action to produce dashboard-visible progress narration. Keep investigation off
+# by default because tool-heavy investigations are latency-sensitive.
+PUBLIC_INTENT_AGENTS = {
+    item.strip()
+    for item in os.environ.get("PUBLIC_INTENT_AGENTS", "triage").split(",")
+    if item.strip()
+}
 
 # ── AVFS ──────────────────────────────────────────────────────────────────────
 AVFS_URL = os.environ.get("AVFS_URL", "http://127.0.0.1:8765/")
 AVFS_AUTH_TOKEN = os.environ.get("AVFS_AUTH_TOKEN", "change-me-avfs-token")
 AVFS_AGENT_ID = os.environ.get("AVFS_AGENT_ID", "agent_1")
 
-# ── Wazuh (passed to aci-wazuh subprocess as env) ────────────────────────────
-WAZUH_URL = os.environ.get("WAZUH_URL", "")          # preferred: full URL
-WAZUH_HOST = os.environ.get("WAZUH_HOST", "")         # fallback if WAZUH_URL not set
-WAZUH_PORT = os.environ.get("WAZUH_PORT", "9200")
-WAZUH_USER = os.environ.get("WAZUH_USER", "admin")
-WAZUH_PASSWORD = os.environ.get("WAZUH_PASSWORD", "")
-WAZUH_VERIFY_TLS = os.environ.get("WAZUH_VERIFY_TLS", "false")
-WAZUH_INDEX_PATTERN = os.environ.get("WAZUH_INDEX_PATTERN", "wazuh-alerts-*")
+# ── Baselines ────────────────────────────────────────────────────────────────
+# Which SIEM adapter computes behavioral baselines. Must match a registered
+# adapter name in agent/runtime/baseline_adapters/ (e.g. "wazuh").
+BASELINE_SIEM_ADAPTER = os.environ.get("BASELINE_SIEM_ADAPTER", "wazuh")
+# Lookback window and scheduler cadence for the in-process baseline thread.
+BASELINE_WINDOW_DAYS = int(os.environ.get("BASELINE_WINDOW_DAYS", "30"))
+BASELINE_COMPUTE_INTERVAL_HOURS = int(os.environ.get("BASELINE_COMPUTE_INTERVAL_HOURS", "24"))
 
-# ── TheHive (passed to aci-thehive subprocess as env) ────────────────────────
-THEHIVE_HOST = os.environ.get("THEHIVE_HOST", "")
-THEHIVE_PORT = os.environ.get("THEHIVE_PORT", "9000")
-THEHIVE_API_KEY = os.environ.get("THEHIVE_API_KEY", "")
-THEHIVE_VERIFY_TLS = os.environ.get("THEHIVE_VERIFY_TLS", "true")
 
 # ── Task queue (passed to aci-taskqueue subprocess as env) ───────────────────
 TASKQUEUE_DB_PATH = os.environ.get("TASKQUEUE_DB_PATH", str(BASE_DIR / "taskqueue.db"))
 
 # ── Fact/hypothesis board (passed to aci-board subprocess as env) ─────────────
 BOARD_DB_PATH = os.environ.get("BOARD_DB_PATH", str(BASE_DIR / "board.db"))
+
+# ── Threat Intelligence (TI) enrichment ──────────────────────────────────────
+# Settings UI (ProviderConfig for "aci-ti") overrides these env-backed defaults.
+VT_API_KEY               = os.environ.get("VT_API_KEY", "")
+VT_BASE_URL              = os.environ.get("VT_BASE_URL", "https://www.virustotal.com")
+TI_CACHE_DB_PATH         = os.environ.get("TI_CACHE_DB_PATH", str(BASE_DIR / "ti_cache.db"))
+TI_CACHE_TTL_HOURS       = int(os.environ.get("TI_CACHE_TTL_HOURS", "24"))
+TI_CALLS_PER_MINUTE      = int(os.environ.get("TI_CALLS_PER_MINUTE", "4"))
 
 # ── Automatic workflows (C4 trigger seam) ────────────────────────────────────
 # Off by default: only the manual `run_workflow` management command honours this

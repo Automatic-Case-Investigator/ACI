@@ -1,6 +1,17 @@
-<c-layout title="Session · ACI" subtitle="live investigation">
+<c-layout title="Session · ACI" subtitle="Session">
   <div class="session-shell">
-    <div id="status">{% include "dashboard/_status.html" %}</div>
+    <div class="session-top">
+      <div id="status"><c-status-bar :snap="snap" /></div>
+      <button type="button" class="side-panel-toggle" id="side-panel-toggle"
+              aria-controls="side-panel" aria-expanded="false">
+        Details
+      </button>
+    </div>
+    {% if messages %}
+    <ul class="settings-msgs">
+      {% for m in messages %}<li class="settings-msg {% if m.tags %}{{ m.tags }}{% endif %}">{{ m }}</li>{% endfor %}
+    </ul>
+    {% endif %}
     <nav class="mobile-view-switch{% if not snap.show_queue %} no-queue{% endif %}"
          id="mobile-view-switch" aria-label="Session view">
       <button type="button" class="view-switch active" data-view="activity"
@@ -12,20 +23,54 @@
       <section class="logcol">
         <div class="logpanel" id="log">
           {% for ev in events %}<c-log-line :ev="ev" />{% endfor %}
-        </div>
-        <div id="activity" class="activity-line">
-          <span id="spinner-char" class="spin" hidden>|</span>
-          <span id="idle-dot" class="idle-dot">●</span>
-          <span id="activity-text">ready</span>
+          <div id="activity" class="activity-line">
+            <span id="spinner-char" class="spin" hidden>|</span>
+            <span id="idle-dot" class="idle-dot">●</span>
+            <span id="activity-text">ready</span>
+          </div>
         </div>
       </section>
-      <aside class="queuecol" id="queue">{% include "dashboard/_queue.html" %}</aside>
+      <aside class="side-panel" id="side-panel" aria-label="Investigation details" aria-hidden="true">
+        <div class="side-panel-resize" id="side-panel-resize" role="separator"
+             aria-orientation="vertical" aria-label="Resize investigation details"></div>
+        <div class="side-panel-head">
+          <div>
+            <h2>Investigation</h2>
+            <span class="muted">queue, board, verdict</span>
+          </div>
+          <button type="button" class="side-panel-close" id="side-panel-close" aria-label="Close side panel">×</button>
+        </div>
+        <div class="side-tabs" role="tablist" aria-label="Investigation details tabs">
+          <button type="button" class="side-tab active" data-side-tab="queue" role="tab" aria-selected="true">queue</button>
+          <button type="button" class="side-tab" data-side-tab="board" role="tab" aria-selected="false">board</button>
+          <button type="button" class="side-tab" data-side-tab="verdict" role="tab" aria-selected="false">verdict</button>
+        </div>
+        <section class="side-pane active" data-side-pane="queue" role="tabpanel">
+          <div class="queuecol" id="queue"><c-queue-table :snap="snap" /></div>
+        </section>
+        <section class="side-pane" data-side-pane="board" role="tabpanel">
+          <div id="board-panel">
+            <c-board-table :snap="snap" />
+          </div>
+        </section>
+        <section class="side-pane" data-side-pane="verdict" role="tabpanel">
+          <div id="verdict-panel">
+            {% include "dashboard/_verdict.html" %}
+            {% if not snap.verdict %}<div class="side-empty muted">no verdict yet</div>{% endif %}
+          </div>
+        </section>
+      </aside>
     </div>
     <div class="ask-footer">
       <form class="ask" id="ask-follow-up">
         <input name="question" placeholder="Follow-up question…" autocomplete="off" required>
         <button type="submit" id="ask-btn">ask</button>
-        <svg class="ctx-ring" id="ctx-ring" viewBox="0 0 36 36" width="28" height="28">
+        <svg class="ctx-ring" id="ctx-ring" viewBox="0 0 36 36" width="28" height="28"
+             data-ctx-tokens="{{ snap.ctx.tokens|default:0 }}"
+             data-ctx-limit="{{ snap.ctx.limit|default:0 }}"
+             data-ctx-source="{{ snap.ctx.source|default:'' }}"
+             data-ctx-run-id="{{ snap.ctx.run_id|default:'' }}"
+             data-ctx-ts="{{ snap.ctx.ts|default:'' }}">
           <circle class="ctx-bg" cx="18" cy="18" r="14" fill="none" stroke-width="4"/>
           <circle class="ctx-arc" id="ctx-arc" cx="18" cy="18" r="14" fill="none" stroke-width="4"
             stroke-dasharray="87.96" stroke-dashoffset="87.96"

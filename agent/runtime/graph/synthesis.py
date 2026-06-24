@@ -1,0 +1,387 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import re
+
+from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
+
+from ..infra.logbus import emit, src_label, summarize_result
+
+from .board import _entry_line
+from .parsing import _CONFIRMED_FACTS_RE, _HYPOTHESES_RE, _fact_dedup_key, _is_none_bullet, _is_provenance_only, _looks_like_lead, _normalize_fact_key, _section_body, _strip_markers
+from .sanitize import _normalize, _sanitize_message
+from .state import AgentState
+from .toolio import _MAX_SYNTHESIS_FINDINGS_CHARS, _SEED_TASK_TITLE, _call, _is_error_tool_result
+from .validation import _derive_report_guardrails
+
+
+
+def _execution_record(messages: list) -> str:
+    """Build a factual completion record from tool messages already in history."""
+    entries: list[str] = []
+    for message in messages:
+        if not isinstance(message, ToolMessage):
+            continue
+        name = getattr(message, "name", "") or "tool"
+        content = _normalize(getattr(message, "content", "") or "")
+        entries.append(f"- `{name}`: {summarize_result(name, content)}")
+
+    if entries:
+        return (
+            "The task reached completion without a final narrative from the agent.\n\n"
+            "**Recorded tool activity:**\n" + "\n".join(entries) +
+            "\n\nNo additional conclusion was supplied. Review the recorded tool "
+            "results and linked artifacts before treating the task as a substantive finding."
+        )
+    return (
+        "The task reached completion without a final narrative and without recorded "
+        "tool activity. No findings or conclusion were supplied."
+    )
+
+
+async def _build_investigation_summary(state: AgentState, tmap: dict, model=None) -> str:
+    """Read the task queue and board, then compile the final investigation report.
+
+    Produces a synthesized SOC analyst report (verdict, executive summary, timeline,
+    scope/impact, recommendations, open gaps) via one model call over the COMPLETE
+    board, followed by the deterministic structured findings as an appendix so the
+    full grounded detail is always preserved. Runs at the end of every investigation
+    so the orchestrator and analyst receive a complete, decision-useful picture.
+    """
+    # --- task queue ---
+    list_fn = tmap.get("list_tasks")
+    tasks: list[dict] = []
+    if list_fn:
+        raw = await _call(list_fn, {
+            "case_id": state["case_id"],
+            "run_id": state["run_id"],
+            "agent_name": state["agent_name"],
+        })
+        if not _is_error_tool_result(raw):
+            try:
+                data = json.loads(raw)
+                tasks = data if isinstance(data, list) else data.get("tasks", [])
+            except Exception:
+                pass
+
+    completed = [t for t in tasks if t.get("status") == "completed"
+                 and _SEED_TASK_TITLE not in (t.get("title") or "").lower()]
+    incomplete = [t for t in tasks if t.get("status") not in ("completed", "dismissed")
+                  and _SEED_TASK_TITLE not in (t.get("title") or "").lower()]
+
+    # --- board ---
+    get_board_fn = tmap.get("get_board")
+    artifacts: list[dict] = []
+    facts: list[dict] = []
+    hypotheses: list[dict] = []
+    ti_enrichments: list[dict] = []
+    if get_board_fn:
+        raw = await _call(get_board_fn, {})
+        if not _is_error_tool_result(raw):
+            try:
+                data = json.loads(raw)
+                entries = data.get("entries", []) if isinstance(data, dict) else []
+                artifacts = [e for e in entries if e.get("kind") == "artifact"]
+                facts = [e for e in entries if e.get("kind") == "fact"]
+                hypotheses = [e for e in entries if e.get("kind") == "hypothesis"]
+                ti_enrichments = [e for e in entries if e.get("kind") == "ti_result"]
+            except Exception:
+                pass
+
+    # --- compose deterministic structured findings (the grounded appendix) ---
+    lines: list[str] = [
+        f"# Structured Findings — Case {state['case_id']}",
+        f"**Run:** {state['run_id']}  \n**Question:** {state['question']}",
+        "",
+    ]
+
+    # Lead with the confirmed findings so the most important results (e.g. a
+    # confirmed reverse shell) are at the top, not buried in a per-task appendix.
+    # Built deterministically from the board: all facts + confirmed hypotheses.
+    # Collapse near-duplicate facts: the model restates the same fact across
+    # tasks with only the event-id / timestamp differing, so dedup on a
+    # volatility-stripped key (not exact text) and drop placeholder negatives.
+    key_findings: list[str] = []
+    seen_findings: set[str] = set()
+    for fact in facts:
+        content = (fact.get("content") or "").strip()
+        if not content or _is_none_bullet(content) or _is_provenance_only(content):
+            continue
+        key = _fact_dedup_key(content) or content.lower()
+        if key in seen_findings:
+            continue
+        seen_findings.add(key)
+        src = f" [{fact['source']}]" if fact.get("source") else ""
+        key_findings.append(f"- {content}{src}")
+    for hyp in hypotheses:
+        if hyp.get("status") != "confirmed":
+            continue
+        content = (hyp.get("content") or "").strip()
+        if not content or _is_none_bullet(content) or _looks_like_lead(content):
+            continue
+        key = _normalize_fact_key(content) or content.lower()
+        if key in seen_findings:
+            continue
+        seen_findings.add(key)
+        key_findings.append(f"- {content} (confirmed)")
+    derived_findings, report_guardrails = _derive_report_guardrails(
+        artifacts, facts, hypotheses, completed
+    )
+    for finding in derived_findings:
+        key = finding.lower()
+        if key not in seen_findings:
+            seen_findings.add(key)
+            key_findings.append(finding)
+
+    lines.append("## Key Findings")
+    if key_findings:
+        lines.extend(key_findings)
+    else:
+        lines.append("- No confirmed findings; see Hypotheses and Completed Tasks below.")
+    lines.append("")
+
+    if artifacts:
+        lines.append("## Found Artifacts")
+        for artifact in artifacts:
+            src = f" [{artifact['source']}]" if artifact.get("source") else ""
+            lines.append(f"- {artifact['content']}{src}")
+        lines.append("")
+
+    # Dedup + drop placeholder negatives so the appendix mirrors Key Findings.
+    fact_lines: list[str] = []
+    seen_facts: set[str] = set()
+    for fact in facts:
+        content = (fact.get("content") or "").strip()
+        if not content or _is_none_bullet(content) or _is_provenance_only(content):
+            continue
+        key = _fact_dedup_key(content) or content.lower()
+        if key in seen_facts:
+            continue
+        seen_facts.add(key)
+        src = f" [{fact['source']}]" if fact.get("source") else ""
+        fact_lines.append(f"- {content}{src}")
+    if fact_lines:
+        lines.append("## Confirmed Facts")
+        lines.extend(fact_lines)
+        lines.append("")
+
+    # Collapse duplicate hypotheses onto one entry, preferring a resolved
+    # status (confirmed/refuted) over open so the same claim never appears as
+    # both [open] and [refuted]. Drop placeholder negatives and stray leads.
+    _STATUS_RANK = {"confirmed": 3, "refuted": 2, "open": 1}
+    hyp_by_key: dict[str, dict] = {}
+    for hyp in hypotheses:
+        raw = (hyp.get("content") or "").strip()
+        # The model often embeds the status (and confidence) as a literal prefix
+        # inside the content (`[confirmed/medium] ...`). Peel it for clean display
+        # and trust it over a stale DB status when present.
+        content, embedded_status = _strip_markers(raw)
+        if not content or _is_none_bullet(content) or _looks_like_lead(content):
+            continue
+        status = embedded_status or hyp.get("status", "open")
+        key = _normalize_fact_key(content) or content.lower()
+        prev = hyp_by_key.get(key)
+        if prev is None or _STATUS_RANK.get(status, 0) > _STATUS_RANK.get(prev["status"], 0):
+            hyp_by_key[key] = {
+                "content": content,
+                "status": status,
+                "confidence": hyp.get("confidence", "medium"),
+            }
+    if hyp_by_key:
+        lines.append("## Hypotheses")
+        for h in hyp_by_key.values():
+            lines.append(f"- [{h['status']}/{h['confidence']}] {h['content']}")
+        lines.append("")
+
+    if ti_enrichments:
+        lines.append("## TI Enrichment (advisory)")
+        for e in ti_enrichments:
+            ref = f" [{e['source']}]" if e.get("source") else ""
+            lines.append(f"- {e['content']}{ref}")
+        lines.append("")
+
+    if completed:
+        lines.append("## Completed Tasks")
+        for t in completed:
+            lines.append(f"### {t.get('title', '(untitled)')}")
+            summary = (t.get("summary") or "").strip()
+            if summary:
+                lines.append(summary)
+            lines.append("")
+
+    if incomplete:
+        lines.append("## Incomplete / Pending Tasks")
+        for t in incomplete:
+            status = t.get("status", "unknown")
+            lines.append(f"- [{status}] {t.get('title', '(untitled)')}")
+        lines.append("")
+
+    if not completed and not artifacts and not facts and not hypotheses and not ti_enrichments:
+        lines.append("No tasks completed and no Findings Board entries were recorded.")
+
+    structured = "\n".join(lines)
+
+    # Synthesize a SOC analyst report on top of the grounded data. The model sees
+    # the COMPLETE board + task summaries (never truncated); the structured findings
+    # are kept as an appendix so nothing is lost if the synthesis is terse.
+    narrative = await _synthesize_analyst_report(
+        model, state, key_findings, facts, hypotheses, completed, report_guardrails
+    )
+    if narrative:
+        return f"{narrative}\n\n---\n\n# Appendix — Structured Findings\n\n{structured}"
+    return structured
+
+
+_ANALYST_REPORT_SYSTEM = (
+    "You are a senior SOC analyst writing the final incident report from an "
+    "investigation's confirmed findings. Use ONLY the evidence provided — never "
+    "invent event IDs, IPs, hosts, users, timestamps, or facts. Correlate "
+    "indicators: if a discovered destination/C2 address matches the original "
+    "attacker source, or local privileged activity aligns in time with the alert, "
+    "state the linkage explicitly. Be decisive and calibrated."
+)
+
+
+_FINDINGS_RE = re.compile(
+    r"(?:^|\n)(?:#{2,3}\s*|(?:\*\*))Findings(?:\*\*)?\s*\n",
+    re.IGNORECASE,
+)
+
+
+def _clip_findings_for_synthesis(findings: str) -> str:
+    text = (findings or "").strip()
+    if len(text) <= _MAX_SYNTHESIS_FINDINGS_CHARS:
+        return text
+    clipped = len(text) - _MAX_SYNTHESIS_FINDINGS_CHARS
+    return (
+        text[:_MAX_SYNTHESIS_FINDINGS_CHARS].rstrip()
+        + f"\n\n[clipped {clipped} chars from Findings for synthesis prompt size]"
+    )
+
+
+def _task_summary_for_synthesis(summary: str) -> str:
+    text = (summary or "").strip()
+    cf_match = _CONFIRMED_FACTS_RE.search(text)
+    findings_match = _FINDINGS_RE.search(text)
+    hyp_match = _HYPOTHESES_RE.search(text)
+    if cf_match and findings_match and hyp_match:
+        return (
+            "## Confirmed Facts\n"
+            f"{_section_body(text, cf_match).strip() or '- None confirmed.'}\n\n"
+            "## Findings\n\n"
+            f"{_clip_findings_for_synthesis(_section_body(text, findings_match)) or '(no findings narrative)'}\n\n"
+            "## Hypotheses\n"
+            f"{_section_body(text, hyp_match).strip() or '- No open hypotheses.'}"
+        )
+    if len(text) <= _MAX_SYNTHESIS_FINDINGS_CHARS:
+        return text or "(no summary)"
+    clipped = len(text) - _MAX_SYNTHESIS_FINDINGS_CHARS
+    return (
+        text[:_MAX_SYNTHESIS_FINDINGS_CHARS].rstrip()
+        + f"\n\n[clipped {clipped} chars from unstructured task summary for synthesis prompt size]"
+    )
+
+
+async def _synthesize_analyst_report(
+    model, state: AgentState, key_findings: list[str],
+    facts: list[dict], hypotheses: list[dict], completed: list[dict],
+    report_guardrails: str = "",
+) -> str:
+    """One grounded model call → an analyst-grade narrative. '' on any failure."""
+    if model is None:
+        return ""
+    # Cap lists so the synthesis prompt stays within small-model context limits.
+    facts_txt = "\n".join(_entry_line(f) for f in facts[:60]) or "- (none)"
+    hyps_txt = "\n".join(_entry_line(h) for h in hypotheses[:30]) or "- (none)"
+    tasks_txt = "\n\n".join(
+        f"### {t.get('title', '(untitled)')}\n{_task_summary_for_synthesis(t.get('summary') or '')}"
+        for t in completed
+    ) or "- (none)"
+    findings_txt = "\n".join(key_findings) or "- (none)"
+    guardrails_txt = report_guardrails or "- No deterministic severity/correlation guardrails derived."
+    prompt = (
+        f"Case: {state['case_id']}\nAnalyst question: {state['question']}\n\n"
+        f"## Key findings already derived\n{findings_txt}\n\n"
+        f"## Deterministic analysis guardrails\n{guardrails_txt}\n\n"
+        f"## Confirmed facts (raw-evidence backed)\n{facts_txt}\n\n"
+        f"## Hypotheses (with status)\n{hyps_txt}\n\n"
+        f"## Completed investigation tasks\n{tasks_txt}\n\n"
+        "Write the final report in markdown with EXACTLY these sections:\n\n"
+        "## Verdict — one line: compromise confirmed / suspected / false positive; "
+        "severity (low/medium/high/critical); active or contained.\n\n"
+        "## Executive Summary — 2-4 sentences a manager can act on. "
+        "IMPORTANT: every causal claim here must be consistent with Open Gaps — "
+        "do not assert a confirmed event chain in this section if the same chain is "
+        "listed as unconfirmed or missing in Open Gaps.\n\n"
+        "## Timeline — chronological bullets with timestamps and event IDs. "
+        "If confirmed activity spans two or more clusters separated by more than "
+        "4 hours with no connecting artifact or session, flag that gap explicitly "
+        "with a '⚠ Temporal gap: X hours — causal link unconfirmed' bullet.\n\n"
+        "## Scope & Impact — format as a markdown table:\n"
+        "| Asset | Type | Role | Attacker access / impact |\n"
+        "|---|---|---|---|\n"
+        "| ... | host/user/account | ... | ... |\n"
+        "Also state impact_state (active/contained/unknown) and scope_state "
+        "(isolated/lateral_spread/unknown) with a one-sentence justification.\n\n"
+        "## Initial Access — required for every case. State the confirmed source IP "
+        "of the first suspicious login or session event, whether it matches a later "
+        "C2/callback address, and whether attribution can be established. "
+        "If the source IP was NOT retrieved during investigation, write: "
+        "'⚠ Initial access vector not established — source IP missing from telemetry.' "
+        "and list it under Open Gaps.\n\n"
+        "## Recommended Actions — prioritized, concrete containment/remediation steps "
+        "(numbered list, highest urgency first).\n\n"
+        "## Open Gaps — what could not be confirmed and why. List every piece of "
+        "evidence that is missing, unavailable, or unanswered. "
+        "Ensure this section does not contradict the Executive Summary.\n\n"
+        "Then, as the VERY LAST thing in your message, append a single fenced JSON "
+        "diagnosis verdict block (this exact schema):\n"
+        "```json\n"
+        "{\n"
+        '  "verdict": "tp | fp | inconclusive | needs_investigation",\n'
+        '  "confidence": "low | medium | high",\n'
+        '  "impact_state": "active | contained | unknown",\n'
+        '  "scope_state": "isolated | lateral_spread | unknown",\n'
+        '  "matched_patterns": [],\n'
+        '  "supporting_evidence": ["<event ID / fact backing the verdict>"],\n'
+        '  "contradicting_evidence": [],\n'
+        '  "missing_evidence": ["<every gap named in Open Gaps or Initial Access section>"],\n'
+        '  "recommended_action": ""\n'
+        "}\n"
+        "```\n"
+        "Verdict rules: `tp` = credible malicious evidence exists (confirmed attacker "
+        "action, payload execution, or unauthorized access — cite it); `fp` = evidence "
+        "confirms known-benign activity with no contradicting high-risk evidence (a "
+        "matched curated pattern strengthens confidence but is not required); "
+        "`inconclusive` = neither standard met; `needs_investigation` = more work "
+        "required. Never choose `tp` just because nothing benign was found. A "
+        "`tp`/`fp` verdict with empty supporting_evidence is invalid. "
+        "If Initial Access was not established, list it in missing_evidence.\n"
+        "`impact_state`: active (attacker activity ongoing), contained (stopped or "
+        "asset isolated), unknown. `scope_state`: isolated (single host/account), "
+        "lateral_spread (movement confirmed), unknown. Default both to unknown unless "
+        "evidence is explicit.\n"
+        "Ground every claim in the facts above. Follow the deterministic guardrails "
+        "unless the facts explicitly contradict them. If facts are thin, say so in the verdict."
+    )
+    _SYNTHESIS_TIMEOUT_SECS = 180
+    try:
+        resp = await asyncio.wait_for(
+            model.ainvoke([
+                SystemMessage(content=_ANALYST_REPORT_SYSTEM),
+                HumanMessage(content=prompt),
+            ]),
+            timeout=_SYNTHESIS_TIMEOUT_SECS,
+        )
+        _sanitize_message(resp)
+        return (getattr(resp, "content", "") or "").strip()
+    except asyncio.TimeoutError:
+        emit(src_label(state["agent_name"]), "warning",
+             f"final report synthesis timed out ({_SYNTHESIS_TIMEOUT_SECS}s); using structured findings only")
+        return ""
+    except Exception as exc:
+        emit(src_label(state["agent_name"]), "warning",
+             "final report synthesis failed; using structured findings only",
+             detail=str(exc))
+        return ""

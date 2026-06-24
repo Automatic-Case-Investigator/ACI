@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import sys
 
-from django.conf import settings
-
 from .base import KIND_SOAR, MCPProvider
 from .registry import register
 
@@ -19,10 +17,10 @@ _ENV_MAP = {
 
 def _defaults() -> dict:
     return {
-        "host": settings.THEHIVE_HOST,
-        "port": settings.THEHIVE_PORT,
-        "api_key": settings.THEHIVE_API_KEY,
-        "verify_tls": settings.THEHIVE_VERIFY_TLS,
+        "host": "",
+        "port": "9000",
+        "api_key": "",
+        "verify_tls": "true",
     }
 
 

@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import sys
 
-from django.conf import settings
-
 from .base import KIND_SIEM, MCPProvider
 from .registry import register
 
@@ -22,13 +20,13 @@ _ENV_MAP = {
 
 def _defaults() -> dict:
     return {
-        "url": settings.WAZUH_URL,
-        "host": settings.WAZUH_HOST,
-        "port": settings.WAZUH_PORT,
-        "user": settings.WAZUH_USER,
-        "password": settings.WAZUH_PASSWORD,
-        "verify_tls": settings.WAZUH_VERIFY_TLS,
-        "index_pattern": settings.WAZUH_INDEX_PATTERN,
+        "url": "",
+        "host": "",
+        "port": "9200",
+        "user": "admin",
+        "password": "",
+        "verify_tls": "false",
+        "index_pattern": "wazuh-alerts-*",
     }
 
 

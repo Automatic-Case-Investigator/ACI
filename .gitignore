@@ -65,6 +65,7 @@ Thumbs.db
 *.tmp
 board.db
 taskqueue.db
+ti_cache.db
 *.log
 liverun_*.log
 

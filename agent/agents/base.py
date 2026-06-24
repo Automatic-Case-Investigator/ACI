@@ -77,12 +77,27 @@ class Handoff:
         parts.append("")
         parts.append(
             "Your ONLY goal while executing this seed task is to call `create_task` for "
-            "**every** numbered item in the triage investigation plan below. "
-            "Count the items in the plan — then call `create_task` exactly that many times. "
+            "**every** numbered item in the triage investigation plan below, plus any "
+            "mandatory tasks added by rules 1–3 below. "
             "For each task include: the question to answer, the exact pivots, the absolute "
             "time window, and the expected evidence source. Carry forward the triage priority. "
             "Do NOT run any SIEM queries, read files, or start investigating until all tasks "
-            "are queued and this seed task is marked complete."
+            "are queued and this seed task is marked complete.\n\n"
+            "**Rule 1 — one task per plan item, no early stop.** Count every numbered line "
+            "in the triage investigation plan. Call `create_task` for each one. Do not stop "
+            "early.\n\n"
+            "**Rule 2 — initial access is always mandatory.** If the triage report mentions "
+            "any login event, PAM session, SSH session, or remote-access event AND the plan "
+            "has no task to retrieve the earliest suspicious session's source IP, you MUST "
+            "add one extra task: *'Establish initial access vector — source IP of earliest "
+            "suspicious login.'* Use priority 85.\n\n"
+            "**Rule 3 — call `list_tasks` before each `create_task`.** Skip a task only if "
+            "an identical one already exists in the queue.\n\n"
+            "**When `create_task` fails:** read the error, propose a task that achieves the "
+            "same investigative goal by an allowed method (e.g. search SIEM syscheck events "
+            "instead of reading the file), and immediately continue to the next triage item. "
+            "A failed `create_task` does NOT count as a successfully created task — you must "
+            "still create a task for every triage plan item before you are done."
         )
         if self.artifacts:
             import json

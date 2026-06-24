@@ -1,10 +1,10 @@
-{% if snap.board_entries %}
+{% if snap.finding_entries %}
 <div class="board">
-  <div class="queue-head">findings board</div>
+  <div class="queue-head"><span>findings board</span></div>
   <table class="queue-table board-table">
     <thead><tr><th>type</th><th>conf</th><th>status</th><th>finding</th></tr></thead>
     <tbody>
-      {% for e in snap.board_entries %}
+      {% for e in snap.finding_entries %}
       <tr class="board-entry board-kind-{{ e.kind }} board-status-{{ e.status }}">
         <td class="board-kind">{{ e.kind }}</td>
         <td class="board-conf">{{ e.confidence }}</td>
@@ -12,6 +12,26 @@
         <td class="board-content">
           {{ e.content }}
           {% if e.source %}<div class="task-output muted">{{ e.source }}</div>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% if snap.ti_entries %}
+<div class="board ti-board">
+  <div class="queue-head"><span>threat intelligence</span><span class="ti-advisory">advisory</span></div>
+  <table class="queue-table board-table ti-table">
+    <thead><tr><th>verdict</th><th>conf</th><th>indicator</th></tr></thead>
+    <tbody>
+      {% for e in snap.ti_entries %}
+      <tr class="board-entry ti-verdict-{{ e.verdict }}">
+        <td class="ti-verdict"><span class="ti-badge ti-badge-{{ e.verdict }}">{{ e.verdict }}</span></td>
+        <td class="board-conf">{{ e.confidence }}</td>
+        <td class="board-content">
+          {{ e.content }}
+          {% if e.source %}<div class="task-output muted"><a href="{{ e.source }}" target="_blank" rel="noopener">{{ e.source }}</a></div>{% endif %}
         </td>
       </tr>
       {% endfor %}

@@ -81,12 +81,11 @@ cp sample.env .env
 
 Edit `.env` with your actual endpoints and credentials:
 
-```env
-# LLM Configuration
-LLM_BASE_URL=http://vllm.example.com/v1
-LLM_API_KEY=your-api-key-here
-LLM_MODEL_NAME=meta-llama/Llama-2-13b-hf
+> The LLM/model provider (base URL, API key, model name, sampling, context
+> length, timeout) is configured in the dashboard under **Settings → Model
+> provider** and stored in the database — not in `.env`.
 
+```env
 # SIEM (Wazuh)
 WAZUH_URL=https://wazuh.example.com:9201
 WAZUH_USER=admin
@@ -151,8 +150,15 @@ See [API Reference](ARCHITECTURE.md#api-reference) in `ARCHITECTURE.md`.
 All tests run offline (no LLM, Wazuh, TheHive, or AVFS needed):
 
 ```bash
-PYTHONPATH=. python .claude/skills/run-aci-backend/tests/test_graph_stub.py -v
+# Full offline suite
+PYTHONPATH=. python -m pytest tests/unit tests/django -q
+
+# Individual test files
+PYTHONPATH=. python -m pytest tests/unit/test_graph_stub.py -v
+PYTHONPATH=. python -m pytest tests/unit/test_verdict_parsing.py -v
 ```
+
+Tests live under `tests/unit/` (graph logic, verdict parsing, findings board, alert metadata, feedback loop, TI enrichment) and `tests/django/` (settings). Service-dependent end-to-end tests are in `tests/integration/` and require live Wazuh, TheHive, and LLM services.
 
 ## Project Structure
 

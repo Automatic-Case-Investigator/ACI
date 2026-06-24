@@ -1,30 +1,186 @@
 // Live dashboard client. Opens a WebSocket to the session consumer and swaps
-// server-rendered HTML frames into the log / queue / status regions.
+// server-rendered HTML frames into the log / side-panel / status regions.
 //
 // Rendering tracks (sprint B):
 //   • analyst questions + orchestrator answers render as chat bubbles (B1)
 //   • consecutive sub-agent (triage/investigation) events group into collapsible
 //     agent boxes keyed by run id (B2)
 //   • the footer shows an idle/active activity line (B3)
-//   • the queue column appears only when investigation has work (B4)
+//   • investigation details live in a right-side tab panel (B4)
 (function () {
   "use strict";
+  function renderStaticMarkdown() {
+    if (typeof marked === "undefined") return;
+    document.querySelectorAll(".report-body.markdown-body").forEach((body) => {
+      if (body.dataset.markdownRendered === "1") return;
+      body.innerHTML = marked.parse(body.textContent || "", { breaks: true });
+      body.dataset.markdownRendered = "1";
+    });
+  }
+
+  renderStaticMarkdown();
+
+  function escapeHTML(value) {
+    return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      "\"": "&quot;",
+      "'": "&#39;",
+    })[ch]);
+  }
+
+  function dashboardActivePage(target) {
+    const params = new URLSearchParams(location.search);
+    const pageParam = target.dataset.pageParam || "rp";
+    const page = Number(params.get(pageParam) || 1);
+    return Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
+  }
+
+  function renderDashboardActivePager(pager, total, page, pageSize, pageParam) {
+    if (!pager) return;
+    const pages = Math.ceil(total / pageSize);
+    if (pages <= 1) {
+      pager.innerHTML = "";
+      pager.hidden = true;
+      return;
+    }
+    const current = Math.min(Math.max(page, 1), pages);
+    function href(nextPage) {
+      const params = new URLSearchParams(location.search);
+      params.set(pageParam, String(nextPage));
+      return `${location.pathname}?${params.toString()}`;
+    }
+    const nums = Array.from({ length: pages }, (_, idx) => {
+      const n = idx + 1;
+      return n === current
+        ? `<span class="pager-num pager-cur" aria-current="page">${n}</span>`
+        : `<a class="pager-num" href="${escapeHTML(href(n))}">${n}</a>`;
+    }).join("");
+    pager.hidden = false;
+    pager.innerHTML = `
+      <nav class="pager" aria-label="Pagination">
+        ${current > 1
+          ? `<a class="pager-step" href="${escapeHTML(href(current - 1))}" rel="prev">&lsaquo; Prev</a>`
+          : `<span class="pager-step pager-off">&lsaquo; Prev</span>`}
+        <span class="pager-nums">${nums}</span>
+        ${current < pages
+          ? `<a class="pager-step" href="${escapeHTML(href(current + 1))}" rel="next">Next &rsaquo;</a>`
+          : `<span class="pager-step pager-off">Next &rsaquo;</span>`}
+      </nav>
+    `;
+  }
+
+  function renderDashboardActiveRuns(runs) {
+    const target = document.getElementById("active-runs");
+    if (!target) return;
+    const allRuns = Array.isArray(runs) ? runs : [];
+    const pageSize = Math.max(1, Number(target.dataset.pageSize || 8) || 8);
+    const pageParam = target.dataset.pageParam || "rp";
+    const page = dashboardActivePage(target);
+    const params = new URLSearchParams(location.search);
+    const query = (params.get("rq") || "").trim().toLowerCase();
+    const searchActive = Boolean(query);
+    const filteredRuns = query
+      ? allRuns.filter((run) => [
+        run.run_id,
+        run.short_id,
+        run.agent_name,
+        run.case_id,
+        run.question,
+        run.status,
+      ].some((field) => String(field || "").toLowerCase().includes(query)))
+      : allRuns;
+    const pages = Math.max(1, Math.ceil(filteredRuns.length / pageSize));
+    const current = Math.min(page, pages);
+    const visible = filteredRuns.slice((current - 1) * pageSize, current * pageSize);
+
+    if (!visible.length) {
+      target.innerHTML = `<tr><td colspan="4" class="muted">${
+        searchActive ? "no active runs match this search" : "nothing awaiting inference right now"
+      }</td></tr>`;
+    } else {
+      target.innerHTML = visible.map((run, idx) => {
+        const question = run.question || run.case_id || "";
+        const status = run.status || "running";
+        return `
+          <tr style="--i: ${idx}">
+            <td class="mono">${escapeHTML(run.short_id || String(run.run_id || "").slice(0, 8))}</td>
+            <td class="cell-q">
+              <span class="strong">${escapeHTML(run.agent_name || "agent")}</span>
+              <span class="muted tiny">${escapeHTML(question)}</span>
+            </td>
+            <td class="cell-prog"><span class="prog" title="${escapeHTML(status)}"><span class="prog-bar"></span></span></td>
+            <td class="muted mono">${escapeHTML(run.age || "")}</td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    renderDashboardActivePager(
+      document.getElementById("active-runs-pager"),
+      filteredRuns.length,
+      current,
+      pageSize,
+      pageParam
+    );
+  }
+
+  function bindDashboardIndex() {
+    const target = document.getElementById("active-runs");
+    if (!target) return;
+    let inFlight = false;
+    async function refreshActiveRuns() {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const response = await fetch("/api/agent/runs/active/", {
+          headers: { "Accept": "application/json" },
+          cache: "no-store",
+        });
+        if (!response.ok) return;
+        const payload = await response.json();
+        renderDashboardActiveRuns(payload.runs);
+      } catch (_) {
+        // Keep the server-rendered table if the transient refresh fails.
+      } finally {
+        inFlight = false;
+      }
+    }
+    refreshActiveRuns();
+    setInterval(refreshActiveRuns, 5000);
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) refreshActiveRuns();
+    });
+  }
+
+  bindDashboardIndex();
+
   const sid = window.ACI_SESSION_ID;
   if (!sid) return;
 
   const log = document.getElementById("log");
+  const activityEl = document.getElementById("activity");
   const cols = document.getElementById("cols");
   const statusEl = document.getElementById("status");
   const queueEl = document.getElementById("queue");
+  const boardPanelEl = document.getElementById("board-panel");
+  const verdictPanelEl = document.getElementById("verdict-panel");
+  const sidePanelEl = document.getElementById("side-panel");
+  const sidePanelToggleEl = document.getElementById("side-panel-toggle");
+  const sidePanelCloseEl = document.getElementById("side-panel-close");
+  const sidePanelResizeEl = document.getElementById("side-panel-resize");
   const mobileViewSwitch = document.getElementById("mobile-view-switch");
   const spinnerCharEl = document.getElementById("spinner-char");
   const idleDotEl = document.getElementById("idle-dot");
   const activityTextEl = document.getElementById("activity-text");
   const askBtn = document.getElementById("ask-btn");
   const ctxArc = document.getElementById("ctx-arc");
+  const ctxRing = document.getElementById("ctx-ring");
   const ctxTitle = document.getElementById("ctx-title");
   const CTX_CIRC = 87.96; // 2π × 14
   let ws;
+  const SIDE_PANEL_WIDTH_KEY = `aci:${sid}:side-panel-width`;
 
   const AGENT_NAME = { tri: "triage", inv: "investigation", orch: "orchestrator" };
   const ACTOR_LABEL = {
@@ -34,7 +190,16 @@
   };
 
   // ── context ring ────────────────────────────────────────────────────────────
-  function updateCtx(tokens, limit, source, runId) {
+  function ctxAge(ts) {
+    if (!ts) return "";
+    const secs = Math.max(0, Math.round(Date.now() / 1000 - ts));
+    if (secs < 5) return " · just now";
+    if (secs < 60) return ` · ${secs}s ago`;
+    if (secs < 3600) return ` · ${Math.round(secs / 60)}m ago`;
+    return ` · ${Math.round(secs / 3600)}h ago`;
+  }
+
+  function updateCtx(tokens, limit, source, runId, ts) {
     if (!ctxArc || !limit) return;
     const frac = Math.min(tokens / limit, 1);
     ctxArc.style.strokeDashoffset = (CTX_CIRC * (1 - frac)).toFixed(2);
@@ -42,8 +207,17 @@
     ctxArc.style.stroke = frac < 0.7 ? "var(--result)" : frac < 0.9 ? "var(--call)" : "var(--error)";
     if (ctxTitle) {
       const who = source ? `${source}${runId ? ` ${String(runId).slice(0, 8)}` : ""}: ` : "";
-      ctxTitle.textContent = `${who}${tokens.toLocaleString()} / ${limit.toLocaleString()} tokens (${pct}%)`;
+      ctxTitle.textContent =
+        `${who}${tokens.toLocaleString()} / ${limit.toLocaleString()} tokens (${pct}%)${ctxAge(ts)}`;
     }
+  }
+
+  function initCtx() {
+    if (!ctxRing) return;
+    const tokens = Number(ctxRing.dataset.ctxTokens || 0);
+    const limit = Number(ctxRing.dataset.ctxLimit || 0);
+    const ts = Number(ctxRing.dataset.ctxTs || 0) || null;
+    updateCtx(tokens, limit, ctxRing.dataset.ctxSource || "", ctxRing.dataset.ctxRunId || "", ts);
   }
 
   // ── spinner / idle / stop-button (B3) ───────────────────────────────────────
@@ -93,10 +267,173 @@
   function send(obj) {
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
   }
-  function parseHTML(html) {
+  function parseFragment(html) {
     const t = document.createElement("template");
     t.innerHTML = (html || "").trim();
-    return t.content.firstElementChild;
+    return t.content;
+  }
+  function parseHTML(html) {
+    return parseFragment(html).firstElementChild;
+  }
+  function emptySidePanelText(text) {
+    const div = document.createElement("div");
+    div.className = "side-empty muted";
+    div.textContent = text;
+    return div;
+  }
+  function appendLogChild(node) {
+    if (!log || !node) return;
+    if (activityEl && activityEl.parentElement === log) {
+      log.insertBefore(node, activityEl);
+    } else {
+      log.appendChild(node);
+    }
+  }
+
+  function isMobileLayout() {
+    return window.matchMedia && window.matchMedia("(max-width: 760px)").matches;
+  }
+
+  function clampSidePanelWidth(width) {
+    const min = 300;
+    if (!cols || isMobileLayout()) return width;
+    const available = cols.clientWidth || window.innerWidth || 0;
+    const max = Math.max(min, Math.min(720, available - 360));
+    return Math.min(Math.max(width, min), max);
+  }
+
+  function setSidePanelWidth(width, persist) {
+    if (!sidePanelEl || isMobileLayout()) return;
+    const next = clampSidePanelWidth(width);
+    sidePanelEl.style.setProperty("--side-panel-width", `${Math.round(next)}px`);
+    if (persist) localStorage.setItem(SIDE_PANEL_WIDTH_KEY, String(Math.round(next)));
+  }
+
+  function restoreSidePanelWidth() {
+    const stored = Number(localStorage.getItem(SIDE_PANEL_WIDTH_KEY));
+    if (Number.isFinite(stored) && stored > 0) setSidePanelWidth(stored, false);
+  }
+
+  function setSidePanelOpen(open) {
+    if (!sidePanelEl) return;
+    sidePanelEl.classList.toggle("open", open);
+    sidePanelEl.setAttribute("aria-hidden", open ? "false" : "true");
+    if (cols) cols.classList.toggle("side-panel-open", open);
+    if (sidePanelToggleEl) sidePanelToggleEl.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+
+  function setSideTab(name) {
+    if (!sidePanelEl) return;
+    sidePanelEl.querySelectorAll("[data-side-tab]").forEach((button) => {
+      const active = button.dataset.sideTab === name;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", active ? "true" : "false");
+    });
+    sidePanelEl.querySelectorAll("[data-side-pane]").forEach((pane) => {
+      pane.classList.toggle("active", pane.dataset.sidePane === name);
+    });
+  }
+
+  function bindSidePanel() {
+    if (!sidePanelEl) return;
+    restoreSidePanelWidth();
+    if (sidePanelToggleEl) {
+      sidePanelToggleEl.onclick = () => setSidePanelOpen(!sidePanelEl.classList.contains("open"));
+    }
+    if (sidePanelCloseEl) {
+      sidePanelCloseEl.onclick = () => setSidePanelOpen(false);
+    }
+    sidePanelEl.querySelectorAll("[data-side-tab]").forEach((button) => {
+      button.onclick = () => setSideTab(button.dataset.sideTab);
+    });
+    if (sidePanelResizeEl) {
+      sidePanelResizeEl.addEventListener("pointerdown", (event) => {
+        if (isMobileLayout()) return;
+        event.preventDefault();
+        const startX = event.clientX;
+        const startWidth = sidePanelEl.getBoundingClientRect().width;
+        sidePanelEl.classList.add("resizing");
+        document.body.classList.add("resizing-side-panel");
+        sidePanelResizeEl.setPointerCapture?.(event.pointerId);
+        const onMove = (moveEvent) => {
+          setSidePanelWidth(startWidth + (startX - moveEvent.clientX), true);
+        };
+        const onUp = () => {
+          sidePanelEl.classList.remove("resizing");
+          document.body.classList.remove("resizing-side-panel");
+          window.removeEventListener("pointermove", onMove);
+          window.removeEventListener("pointerup", onUp);
+          window.removeEventListener("pointercancel", onUp);
+        };
+        window.addEventListener("pointermove", onMove);
+        window.addEventListener("pointerup", onUp);
+        window.addEventListener("pointercancel", onUp);
+      });
+    }
+    window.addEventListener("resize", () => {
+      const current = sidePanelEl.getBoundingClientRect().width;
+      if (current > 0) setSidePanelWidth(current, false);
+    });
+  }
+
+  // Apply the "selected" class to the button matching `verdict` (resolving the
+  // confirm button against the agent verdict). The server renders this on every
+  // status frame; this is only needed for the optimistic click-time update.
+  function highlightFeedback(fb, verdict) {
+    if (!fb) return;
+    const card = fb.closest(".verdict-card");
+    const agentVerdict = card ? (card.getAttribute("data-verdict-value") || "") : "";
+    fb.querySelectorAll(".fb-btn").forEach((b) => {
+      const bv = b.getAttribute("data-verdict");
+      // Confirm wins when the analyst verdict equals the agent verdict; a dispute
+      // button highlights only when the analyst chose a value differing from it,
+      // so a confirmed fp/tp never lights up two buttons. Mirrors _verdict.html.
+      const selected = bv === "confirm"
+        ? (!!agentVerdict && agentVerdict === verdict)
+        : (bv === verdict && verdict !== agentVerdict);
+      b.classList.toggle("fb-selected", selected);
+    });
+  }
+
+  function updateStatusPanel(html) {
+    const fragment = parseFragment(html);
+    const statusbar = fragment.querySelector(".statusbar");
+    const verdict = fragment.querySelector(".verdict-card");
+    if (statusEl && statusbar) {
+      statusEl.innerHTML = "";
+      statusEl.appendChild(statusbar);
+    } else if (statusEl) {
+      statusEl.innerHTML = html;
+    }
+    if (verdictPanelEl) {
+      verdictPanelEl.innerHTML = "";
+      if (verdict) {
+        verdictPanelEl.appendChild(verdict);
+      } else {
+        verdictPanelEl.appendChild(emptySidePanelText("no verdict yet"));
+      }
+    }
+  }
+
+  function updateInvestigationPanel(html, showQueue) {
+    const fragment = parseFragment(html);
+    const queue = fragment.querySelector(".queue");
+    // The board panel can contain multiple sections (findings + threat intel).
+    const boards = fragment.querySelectorAll(".board");
+    if (queueEl) {
+      queueEl.innerHTML = "";
+      queueEl.appendChild(queue || emptySidePanelText("no tasks yet"));
+    }
+    if (boardPanelEl) {
+      boardPanelEl.innerHTML = "";
+      if (boards.length) {
+        boards.forEach((b) => boardPanelEl.appendChild(b));
+      } else {
+        boardPanelEl.appendChild(emptySidePanelText("no board entries yet"));
+      }
+    }
+    bindQueue();
+    if (sidePanelEl) sidePanelEl.classList.toggle("has-work", !!showQueue);
   }
 
   // ── log placement: bubbles flat, sub-agent traces grouped into boxes (B1/B2) ──
@@ -116,7 +453,7 @@
     body.className = "agent-box-body";
     box.appendChild(head);
     box.appendChild(body);
-    log.appendChild(box);
+    appendLogChild(box);
     return { run, body };
   }
 
@@ -127,6 +464,7 @@
       : node.querySelector(".markdown-body");
     if (!body || typeof marked === "undefined") return;
     body.innerHTML = marked.parse(body.textContent, { breaks: true });
+    body.dataset.markdownRendered = "1";
   }
 
   function appendStreamChunk(meta, fallbackNode) {
@@ -145,7 +483,7 @@
       const body = document.createElement("div");
       body.className = "bubble-body";
       node.appendChild(body);
-      log.appendChild(node);
+      appendLogChild(node);
       currentBox = null;
       currentStream = { key, node, body, raw: "" };
     }
@@ -213,7 +551,9 @@
       body.className = "line-body summary-only intent-body";
       node.appendChild(glyph);
       node.appendChild(body);
-      traceParent(meta.run_id || "", meta.source || "orch").appendChild(node);
+      const parent = traceParent(meta.run_id || "", meta.source || "orch");
+      if (parent === log) appendLogChild(node);
+      else parent.appendChild(node);
       stream = { node, body, raw: "" };
       intentStreams.set(key, stream);
     }
@@ -264,7 +604,7 @@
       currentBox.body.appendChild(node);
     } else {
       currentBox = null;
-      log.appendChild(node);
+      appendLogChild(node);
     }
     clearStreamIfFinal(node);
     renderMarkdown(node);
@@ -273,8 +613,9 @@
   // Re-group the server-rendered (flat) initial events into boxes/bubbles.
   function regroupInitial() {
     if (!log) return;
-    const nodes = Array.from(log.children);
+    const nodes = Array.from(log.children).filter((node) => node !== activityEl);
     log.innerHTML = "";
+    if (activityEl) log.appendChild(activityEl);
     currentBox = null;
     nodes.forEach(placeLine);
     scrollBottom();
@@ -403,12 +744,11 @@
         }
         if (stick) scrollBottom();
       } else if (m.type === "status" && statusEl) {
-        statusEl.innerHTML = m.html;
-        setProcessing(!!m.processing, m.ctx_source);
-        if (m.ctx_limit) updateCtx(m.ctx_tokens || 0, m.ctx_limit, m.ctx_source, m.ctx_run_id);
+        updateStatusPanel(m.html);
+        setProcessing(!!m.processing, m.processing_source || m.ctx_source);
+        if (m.ctx_limit) updateCtx(m.ctx_tokens || 0, m.ctx_limit, m.ctx_source, m.ctx_run_id, m.ctx_ts);
       } else if (m.type === "queue" && queueEl) {
-        queueEl.innerHTML = m.html;
-        bindQueue();
+        updateInvestigationPanel(m.html, m.show_queue);
         if (cols) cols.classList.toggle("no-queue", !m.show_queue);
         if (mobileViewSwitch) mobileViewSwitch.classList.toggle("no-queue", !m.show_queue);
         if (!m.show_queue) setMobileView("activity");
@@ -417,10 +757,61 @@
     ws.onclose = () => setTimeout(connect, 1000);
   }
 
+  // ── verdict feedback ────────────────────────────────────────────────────────
+  function getCookie(name) {
+    const m = document.cookie.match("(^|;)\\s*" + name + "\\s*=\\s*([^;]+)");
+    return m ? m.pop() : "";
+  }
+
+  function bindFeedback() {
+    const feedbackRoot = sidePanelEl || statusEl;
+    if (!feedbackRoot) return;
+    feedbackRoot.addEventListener("click", (e) => {
+      const btn = e.target.closest(".fb-btn");
+      if (!btn) return;
+      const card = btn.closest(".verdict-card");
+      const fbDiv = btn.closest(".verdict-feedback");
+      const runId = card && card.getAttribute("data-run-id");
+      if (!runId) return;
+      let verdict = btn.getAttribute("data-verdict");
+      if (verdict === "confirm") verdict = card.getAttribute("data-verdict-value") || "";
+      if (!verdict) return;
+      const setVerdict = (v) => {
+        if (!fbDiv) return;
+        highlightFeedback(fbDiv, v);
+        fbDiv.dataset.analystVerdict = v;
+      };
+      const prevVerdict = fbDiv ? (fbDiv.dataset.analystVerdict || "") : "";
+      setVerdict(verdict); // optimistic
+      fetch(`/api/agent/runs/${runId}/feedback/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRFToken": getCookie("csrftoken") },
+        body: JSON.stringify({ analyst_verdict: verdict }),
+      })
+        .then((r) => {
+          const ack = card.querySelector(".fb-ack");
+          if (!r.ok) {
+            setVerdict(prevVerdict);
+            if (ack) { ack.hidden = false; ack.textContent = "failed"; }
+            return;
+          }
+          if (ack) {
+            ack.hidden = false;
+            ack.textContent = "saved ✓";
+            setTimeout(() => { ack.hidden = true; }, 2000);
+          }
+        })
+        .catch(() => setVerdict(prevVerdict));
+    });
+  }
+
   regroupInitial();
+  initCtx();
   bindQueue();
   bindAskForm();
   bindMobileViewSwitch();
+  bindSidePanel();
   bindEditDialog();
+  bindFeedback();
   connect();
 })();

@@ -225,15 +225,20 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="update_task",
-            description="Edit a task's title, description, priority, or status.",
+            description=(
+                "Edit a task's title, description, priority, or lifecycle status. "
+                "`claimed` and `completed` are owned by the platform runtime and cannot "
+                "be set here — raise priority to run a pending task sooner, or use "
+                "dismiss/fail/blocked to take a task out of the queue."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "task_id": {"type": "string"},
                     "title": {"type": "string"},
                     "description": {"type": "string"},
-                    "priority": {"type": "integer"},
-                    "status": {"type": "string", "enum": ["pending", "claimed", "completed", "failed", "dismissed", "blocked"]},
+                    "priority": {"type": "integer", "description": "0–100; higher = claimed earlier."},
+                    "status": {"type": "string", "enum": ["pending", "failed", "dismissed", "blocked"]},
                 },
                 "required": ["task_id"],
             },
@@ -292,7 +297,11 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             result = {"deleted": _store.delete_task(arguments["task_id"])}
         elif name == "update_task":
             kw = {k: v for k, v in arguments.items() if k != "task_id"}
-            result = _store.update_task(arguments["task_id"], **kw)
+            # claimed/completed are graph-managed; never let a caller set them here.
+            if kw.get("status") in {"claimed", "completed"}:
+                result = {"error": "status 'claimed'/'completed' is managed by the platform; not settable via update_task"}
+            else:
+                result = _store.update_task(arguments["task_id"], **kw)
         elif name == "reopen_task":
             result = _store.reopen_task(arguments["task_id"])
         else:

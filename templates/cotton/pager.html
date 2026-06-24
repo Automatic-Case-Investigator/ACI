@@ -1,0 +1,24 @@
+{% load dashboard_tags %}
+{% if page.paginator.num_pages > 1 %}
+<nav class="pager" aria-label="Pagination">
+  {% if page.has_previous %}
+  <a class="pager-step" href="?{% query_replace param page.previous_page_number %}" rel="prev">‹ Prev</a>
+  {% else %}
+  <span class="pager-step pager-off">‹ Prev</span>
+  {% endif %}
+  <span class="pager-nums">
+    {% for n in page.paginator.page_range %}
+      {% if n == page.number %}
+      <span class="pager-num pager-cur" aria-current="page">{{ n }}</span>
+      {% else %}
+      <a class="pager-num" href="?{% query_replace param n %}">{{ n }}</a>
+      {% endif %}
+    {% endfor %}
+  </span>
+  {% if page.has_next %}
+  <a class="pager-step" href="?{% query_replace param page.next_page_number %}" rel="next">Next ›</a>
+  {% else %}
+  <span class="pager-step pager-off">Next ›</span>
+  {% endif %}
+</nav>
+{% endif %}

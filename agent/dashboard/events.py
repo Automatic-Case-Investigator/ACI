@@ -21,7 +21,7 @@ import logging
 import queue
 import threading
 
-from agent.runtime.logbus import LogEvent, next_seq
+from agent.runtime.infra.logbus import LogEvent, next_seq
 
 _queue: "queue.Queue[LogEvent]" = queue.Queue()
 _installed = False

@@ -4,14 +4,105 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ title|default:"ACI Dashboard" }}</title>
+  <link rel="icon" type="image/svg+xml" href="{% static_v 'dashboard/icons/ACI_small.svg' %}">
+  <script>
+    // Apply the saved theme before first paint so there's no light/dark flash.
+    (function () {
+      try {
+        var t = localStorage.getItem("aci-theme");
+        if (t === "dark" || t === "light") document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&display=swap">
   <link rel="stylesheet" href="{% static_v 'dashboard/app.css' %}">
 </head>
 <body>
+  {% with active=request.resolver_match.url_name %}
   <header class="topbar">
-    <a class="brand" href="{% url 'dashboard:index' %}">ACI</a>
+    <button type="button" class="nav-toggle" id="nav-toggle"
+            aria-label="Toggle navigation" aria-controls="nav-drawer" aria-expanded="false">
+      <span class="nav-bars"><i></i><i></i><i></i></span>
+    </button>
+    <a class="brand" href="{% url 'dashboard:index' %}" aria-label="ACI Dashboard">
+      <img src="{% static_v 'dashboard/icons/ACI_small.svg' %}" alt="" width="30" height="30">
+    </a>
     <span class="subtitle">{{ subtitle }}</span>
+    <span class="topbar-spacer"></span>
+    <button type="button" class="theme-toggle" id="theme-toggle"
+            aria-label="Toggle light/dark theme" title="Toggle theme"></button>
   </header>
+
+  <div class="nav-backdrop" id="nav-backdrop" hidden></div>
+  <nav class="nav-drawer" id="nav-drawer" aria-label="Primary">
+    <a class="nav-item {% if active == 'index' %}nav-on{% endif %}" href="{% url 'dashboard:index' %}">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+      <span>Dashboard</span>
+    </a>
+    <a class="nav-item {% if active == 'runs' %}nav-on{% endif %}" href="{% url 'dashboard:runs' %}">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l2-6 4 14 3-8h5"/></svg>
+      <span>Runs</span>
+    </a>
+    <a class="nav-item {% if active == 'settings' %}nav-on{% endif %}" href="{% url 'dashboard:settings' %}">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg>
+      <span>Settings</span>
+    </a>
+  </nav>
+
   <main class="page">{{ slot }}</main>
+  {% endwith %}
+  <script>
+    // Theme toggle — lives here (not app.js) so it runs on every page, including
+    // index/settings where the session client short-circuits.
+    (function () {
+      var btn = document.getElementById("theme-toggle");
+      if (!btn) return;
+      var root = document.documentElement;
+      var mq = window.matchMedia("(prefers-color-scheme: dark)");
+      function current() {
+        return root.getAttribute("data-theme") || (mq.matches ? "dark" : "light");
+      }
+      function render() { btn.textContent = current() === "dark" ? "☀" : "☾"; }
+      render();
+      btn.addEventListener("click", function () {
+        var next = current() === "dark" ? "light" : "dark";
+        root.setAttribute("data-theme", next);
+        try { localStorage.setItem("aci-theme", next); } catch (e) {}
+        render();
+      });
+      // Follow the OS when the user hasn't pinned a choice.
+      mq.addEventListener && mq.addEventListener("change", function () {
+        if (!root.getAttribute("data-theme")) render();
+      });
+    })();
+
+    // Drawer nav — inline (like the theme toggle) so it runs on every page.
+    (function () {
+      var toggle = document.getElementById("nav-toggle");
+      var drawer = document.getElementById("nav-drawer");
+      var backdrop = document.getElementById("nav-backdrop");
+      if (!toggle || !drawer || !backdrop) return;
+      function setOpen(open) {
+        document.body.classList.toggle("nav-open", open);
+        toggle.setAttribute("aria-expanded", open ? "true" : "false");
+        backdrop.hidden = !open;
+        try { localStorage.setItem("aci-nav", open ? "1" : "0"); } catch (e) {}
+      }
+      toggle.addEventListener("click", function () {
+        setOpen(!document.body.classList.contains("nav-open"));
+      });
+      backdrop.addEventListener("click", function () { setOpen(false); });
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape" && document.body.classList.contains("nav-open")) setOpen(false);
+      });
+      // Restore the pinned state on wide screens; stay closed on small ones.
+      try {
+        if (localStorage.getItem("aci-nav") === "1" && window.innerWidth > 720) setOpen(true);
+      } catch (e) {}
+    })();
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="{% static_v 'dashboard/app.js' %}"></script>
 </body>

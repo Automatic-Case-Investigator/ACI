@@ -25,6 +25,7 @@ class WazuhClient:
         self._auth = (user, password)
         self._verify = verify
         self._default_index = os.environ.get("WAZUH_INDEX_PATTERN", "wazuh-alerts-*")
+        self._shared: httpx.Client | None = None
 
     def _client(self) -> httpx.Client:
         return httpx.Client(
@@ -33,6 +34,14 @@ class WazuhClient:
             verify=self._verify,
             timeout=30,
         )
+
+    def _get_client(self) -> httpx.Client:
+        """Return a reusable HTTP client (kept open across searches for connection
+        pooling). Investigations fire many sequential searches; opening a fresh TLS
+        connection per call is the dominant cost against a remote OpenSearch."""
+        if self._shared is None or self._shared.is_closed:
+            self._shared = self._client()
+        return self._shared
 
     def list_indices(self) -> list[str]:
         with self._client() as c:
@@ -104,6 +113,7 @@ class WazuhClient:
     _NON_CLAUSE_KEYS = frozenset({
         "time_range", "max_results", "size", "index_pattern",
         "from", "to", "sort", "aggs", "aggregations", "_source",
+        "source_fields",  # model-friendly alias sometimes nested inside the query dict
     })
     # Subset that is NEVER valid at any nesting level in a DSL object; strip recursively.
     _ALWAYS_INVALID = frozenset({"time_range", "max_results", "index_pattern"})
@@ -173,34 +183,28 @@ class WazuhClient:
         index_pattern: str | None = None,
         time_range: dict | None = None,
         max_results: int = 20,
+        source_fields: list[str] | None = None,
     ) -> dict[str, Any]:
         index = index_pattern or self._default_index
         dsl = self._as_dsl(query)
         dsl, time_range, max_results = self._unwrap_request(dsl, time_range, max_results)
         body: dict = {"query": dsl}
 
-        rng = self._range_filter(time_range)
-        if rng:
-            body["query"] = {"bool": {"must": [dsl, rng]}}
-
-        body["size"] = min(max_results, 100)
-
-        with self._client() as c:
-            resp = c.post(f"/{index}/_search", json=body)
-            if resp.is_error:
-                try:
-                    return {"error": resp.json()}
-                except Exception:
-                    return {"error": resp.text[:1000]}
-            data = resp.json()
+        c = self._get_client()
+        resp = c.post(f"/{index}/_search", json=body)
+        if resp.is_error:
+            try:
+                return {"error": resp.json()}
+            except Exception:
+                return {"error": resp.text[:1000]}
+        data = resp.json()
 
         hits = data.get("hits", {})
+        total = hits.get("total", {})
+        total_value = total.get("value", 0) if isinstance(total, dict) else total
         return {
-            "total": hits.get("total", {}).get("value", 0),
-            "events": [
-                {"_id": h["_id"], "_index": h["_index"], **h.get("_source", {})}
-                for h in hits.get("hits", [])
-            ],
+            "total": total_value,
+            "events": hits.get("hits", []),
         }
 
     def _range_filter(self, time_range: dict | None) -> dict | None:
@@ -305,11 +309,38 @@ class WazuhClient:
         hits = data.get("hits", {})
         return {
             "total": hits.get("total", {}).get("value", 0),
-            "events": [
-                {"_id": h["_id"], "_index": h["_index"], **h.get("_source", {})}
-                for h in hits.get("hits", [])
-            ],
+            "events": hits.get("hits", []),
         }
+
+    def aggregate(
+        self,
+        aggs: dict,
+        query: dict | None = None,
+        time_range: dict | None = None,
+        index_pattern: str | None = None,
+    ) -> dict[str, Any]:
+        """Run an arbitrary OpenSearch aggregation and return the raw `aggregations` dict."""
+        index = index_pattern or self._default_index
+        body: dict = {"size": 0, "aggs": aggs}
+
+        must: list[dict] = []
+        if query:
+            clause, time_range, _ = self._unwrap_request(query, time_range, 0)
+            must.append(clause)
+        rng = self._range_filter(time_range)
+        if rng:
+            must.append(rng)
+        if must:
+            body["query"] = {"bool": {"must": must}}
+
+        with self._client() as c:
+            resp = c.post(f"/{index}/_search", json=body)
+            if resp.is_error:
+                try:
+                    return {"error": resp.json()}
+                except Exception:
+                    return {"error": resp.text[:1000]}
+            return resp.json().get("aggregations", {})
 
     def get_event(self, event_id: str, index_pattern: str | None = None) -> dict[str, Any]:
         # NB: a plain `GET /<index>/_doc/<id>` does NOT work against a wildcard index
