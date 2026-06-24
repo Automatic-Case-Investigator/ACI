@@ -32,7 +32,10 @@
     <span class="subtitle">{{ subtitle }}</span>
     <span class="topbar-spacer"></span>
     <button type="button" class="theme-toggle" id="theme-toggle"
-            aria-label="Toggle light/dark theme" title="Toggle theme"></button>
+            aria-label="Toggle light/dark theme" title="Toggle theme">
+      <c-lucideicon.sun class="theme-icon theme-icon-sun" width="16" height="16" />
+      <c-lucideicon.moon class="theme-icon theme-icon-moon" width="16" height="16" />
+    </button>
   </header>
 
   <div class="nav-backdrop" id="nav-backdrop" hidden></div>
@@ -56,6 +59,7 @@
   <script>
     // Theme toggle — lives here (not app.js) so it runs on every page, including
     // index/settings where the session client short-circuits.
+    // Icon visibility (sun vs moon) is handled by CSS via data-theme on <html>.
     (function () {
       var btn = document.getElementById("theme-toggle");
       if (!btn) return;
@@ -64,17 +68,10 @@
       function current() {
         return root.getAttribute("data-theme") || (mq.matches ? "dark" : "light");
       }
-      function render() { btn.textContent = current() === "dark" ? "☀" : "☾"; }
-      render();
       btn.addEventListener("click", function () {
         var next = current() === "dark" ? "light" : "dark";
         root.setAttribute("data-theme", next);
         try { localStorage.setItem("aci-theme", next); } catch (e) {}
-        render();
-      });
-      // Follow the OS when the user hasn't pinned a choice.
-      mq.addEventListener && mq.addEventListener("change", function () {
-        if (!root.getAttribute("data-theme")) render();
       });
     })();
 

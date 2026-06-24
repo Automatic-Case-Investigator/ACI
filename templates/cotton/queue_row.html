@@ -16,9 +16,9 @@
   <td class="actions">
     <button type="button" data-action="edit" data-task="{{ task.id }}"
             data-title="{{ task.title }}" data-priority="{{ task.priority }}"
-            title="edit">✎</button>
-    <button type="button" data-action="move" data-task="{{ task.id }}" data-dir="up" title="move up">↑</button>
-    <button type="button" data-action="move" data-task="{{ task.id }}" data-dir="down" title="move down">↓</button>
-    <button type="button" data-action="del" data-task="{{ task.id }}" title="delete">✕</button>
+            title="edit"><c-lucideicon.pencil width="12" height="12" /></button>
+    <button type="button" data-action="move" data-task="{{ task.id }}" data-dir="up" title="move up"><c-lucideicon.arrow-up width="12" height="12" /></button>
+    <button type="button" data-action="move" data-task="{{ task.id }}" data-dir="down" title="move down"><c-lucideicon.arrow-down width="12" height="12" /></button>
+    <button type="button" data-action="del" data-task="{{ task.id }}" title="delete"><c-lucideicon.x width="12" height="12" /></button>
   </td>
 </tr>

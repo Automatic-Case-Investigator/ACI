@@ -22,6 +22,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "channels",
     "django_cotton",
+    "cotton_icons",
     "rest_framework",
     "rest_framework_simplejwt",
     "agent",

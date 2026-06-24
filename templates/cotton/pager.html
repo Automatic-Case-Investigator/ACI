@@ -2,9 +2,9 @@
 {% if page.paginator.num_pages > 1 %}
 <nav class="pager" aria-label="Pagination">
   {% if page.has_previous %}
-  <a class="pager-step" href="?{% query_replace param page.previous_page_number %}" rel="prev">‹ Prev</a>
+  <a class="pager-step" href="?{% query_replace param page.previous_page_number %}" rel="prev"><c-lucideicon.chevron-left width="14" height="14" /> Prev</a>
   {% else %}
-  <span class="pager-step pager-off">‹ Prev</span>
+  <span class="pager-step pager-off"><c-lucideicon.chevron-left width="14" height="14" /> Prev</span>
   {% endif %}
   <span class="pager-nums">
     {% for n in page.paginator.page_range %}
@@ -16,9 +16,9 @@
     {% endfor %}
   </span>
   {% if page.has_next %}
-  <a class="pager-step" href="?{% query_replace param page.next_page_number %}" rel="next">Next ›</a>
+  <a class="pager-step" href="?{% query_replace param page.next_page_number %}" rel="next">Next <c-lucideicon.chevron-right width="14" height="14" /></a>
   {% else %}
-  <span class="pager-step pager-off">Next ›</span>
+  <span class="pager-step pager-off">Next <c-lucideicon.chevron-right width="14" height="14" /></span>
   {% endif %}
 </nav>
 {% endif %}

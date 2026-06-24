@@ -18,7 +18,7 @@
   <span class="seq">#{{ ev.seq }}</span>
   <span class="time">{{ ev.created_at|date:"H:i:s" }}</span>
   <span class="src src-{{ ev.source }}">{{ ev.source }}</span>
-  <span class="glyph">{% event_glyph ev %}</span>
+  <span class="glyph"><c-lucideicon.lightbulb width="12" height="12" /></span>
   <div class="line-body intent-body markdown-body">{{ ev.detail|default:ev.summary }}</div>
 </div>
 {% else %}
@@ -28,7 +28,19 @@
   <span class="seq">#{{ ev.seq }}</span>
   <span class="time">{{ ev.created_at|date:"H:i:s" }}</span>
   <span class="src src-{{ ev.source }}">{{ ev.source }}</span>
-  <span class="glyph">{% event_glyph ev %}</span>
+  <span class="glyph">
+    {% if ev.kind == "think" %}<c-lucideicon.ellipsis width="12" height="12" />
+    {% elif ev.kind == "stream" or ev.kind == "intent_delta" %}<c-lucideicon.waves width="12" height="12" />
+    {% elif ev.kind == "call" %}<c-lucideicon.arrow-right width="12" height="12" />
+    {% elif ev.kind == "result" %}{% if ev.summary|slice:":5" == "ERROR" %}<c-lucideicon.circle-alert width="12" height="12" />{% else %}<c-lucideicon.arrow-left width="12" height="12" />{% endif %}
+    {% elif ev.kind == "task" %}<c-lucideicon.hash width="12" height="12" />
+    {% elif ev.kind == "route" %}<c-lucideicon.chevrons-right width="12" height="12" />
+    {% elif ev.kind == "error" %}<c-lucideicon.circle-alert width="12" height="12" />
+    {% elif ev.kind == "answer" %}<c-lucideicon.message-circle width="12" height="12" />
+    {% elif ev.kind == "done" %}<c-lucideicon.check width="12" height="12" />
+    {% elif ev.kind == "finding" %}<c-lucideicon.star width="12" height="12" />
+    {% else %}<c-lucideicon.minus width="12" height="12" />{% endif %}
+  </span>
   {% if ev.detail %}
     <details class="line-body"{% if ev.expand %} open{% endif %}>
       <summary>{{ ev.summary }}</summary>

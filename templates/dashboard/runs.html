@@ -47,8 +47,8 @@
 
       {% if verdict or query %}
       <div class="filter-chips">
-        {% if verdict %}<span class="chip">verdict: <b>{{ verdict|upper }}</b> <a href="?{% query_replace 'verdict' '' %}" aria-label="Clear verdict filter">✕</a></span>{% endif %}
-        {% if query %}<span class="chip">search: <b>{{ query }}</b> <a href="?{% query_replace 'q' '' %}" aria-label="Clear search">✕</a></span>{% endif %}
+        {% if verdict %}<span class="chip">verdict: <b>{{ verdict|upper }}</b> <a href="?{% query_replace 'verdict' '' %}" aria-label="Clear verdict filter"><c-lucideicon.x width="10" height="10" /></a></span>{% endif %}
+        {% if query %}<span class="chip">search: <b>{{ query }}</b> <a href="?{% query_replace 'q' '' %}" aria-label="Clear search"><c-lucideicon.x width="10" height="10" /></a></span>{% endif %}
       </div>
       {% endif %}
 
@@ -84,7 +84,7 @@
                 {% if r.verdict %}
                 <span class="vchip v-{{ r.verdict }}">{{ r.verdict|upper }}</span>
                 {% endif %}
-                {% if r.escalation_label %}<div class="next-step">→ {{ r.escalation_label }}</div>{% endif %}
+                {% if r.escalation_label %}<div class="next-step next-step-action"><c-lucideicon.arrow-right width="12" height="12" /> {{ r.escalation_label }}</div>{% endif %}
                 {% if r.recommended_action %}<div class="next-step muted">{{ r.recommended_action|truncatechars:120 }}</div>{% endif %}
                 {% if r.execution_error %}<div class="next-step tiny" style="color: var(--error)">{{ r.execution_error|truncatechars:100 }}</div>{% endif %}
                 {% if not r.verdict and not r.escalation_label and not r.recommended_action %}

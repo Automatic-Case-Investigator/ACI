@@ -11,3 +11,4 @@ rich>=13.7,<15
 channels>=4
 daphne>=4
 django-cotton>=2.7
+cotton-icons

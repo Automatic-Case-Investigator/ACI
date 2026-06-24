@@ -41,30 +41,6 @@ def static_v(path: str) -> str:
         pass
     return url
 
-# glyph per event kind (a small fixed marker, like the TUI's two-char column)
-_GLYPH = {
-    "think": "··",
-    "stream": "~",
-    "intent_delta": "~",
-    "intent": "»",
-    "call": "→",
-    "result": "←",
-    "task": "#",
-    "route": "⇒",
-    "note": "–",
-    "error": "!!",
-    "answer": "=",
-    "done": "✓",
-    "finding": "★",
-}
-
-
-@register.simple_tag
-def event_glyph(ev) -> str:
-    if ev.kind == "result" and ev.summary.startswith("ERROR"):
-        return _GLYPH["error"]
-    return _GLYPH.get(ev.kind, "–")
-
 
 @register.simple_tag
 def event_css(ev) -> str:
