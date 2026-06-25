@@ -59,6 +59,13 @@ _INV_IMPERATIVE_RE = re.compile(
     r"\binvestigate\b|\binvestigation\b",
     re.IGNORECASE,
 )
+# Short affirmative consent messages the analyst sends after reading the triage report.
+# Only used when a stored triage report exists and no investigation has started yet.
+_INV_CONSENT_RE = re.compile(
+    r"^\s*(?:yes|y|yep|yeah|ok|okay|sure|go|go\s+ahead|proceed|continue|start|"
+    r"do\s+it|run\s+it|let'?s\s+go|sounds\s+good|agreed|affirmative)\s*[!.]?\s*$",
+    re.IGNORECASE,
+)
 
 # Matches triage requests: explicit "triage", case-inquiry phrases, or case IDs
 # paired with incident-analysis verbs.
@@ -124,6 +131,21 @@ async def run_orchestrator(session: OrchestratorSession, question: str, max_roun
         pass  # session.messages is saved inside _run_orchestrator_impl before each return
 
 
+def _format_triage_answer(session: OrchestratorSession) -> str:
+    report = (session.last_triage_report or "").strip()
+    verdict = session.last_triage_verdict if isinstance(session.last_triage_verdict, dict) else None
+    if not verdict:
+        prefix = (
+            "Triage completed, but it did not produce a valid structured verdict. "
+            "Do not treat the prose report as a durable TP/FP diagnosis."
+        )
+        return prefix + (f"\n\n{report}" if report else "")
+    verdict_label = (verdict.get("verdict") or "unknown").upper()
+    confidence = verdict.get("confidence") or "?"
+    prefix = f"Triage complete. Structured verdict: {verdict_label} (confidence: {confidence})."
+    return prefix + (f"\n\n{report}" if report else "")
+
+
 async def _run_orchestrator_impl(session: OrchestratorSession, question: str, max_rounds: int = 12) -> str:
     """Implementation of orchestrator with full state management."""
     # Load MCP tools (TheHive, Wazuh, AVFS) fresh per turn so the
@@ -164,6 +186,35 @@ async def _run_orchestrator_impl(session: OrchestratorSession, question: str, ma
         )
         messages.append(HumanMessage(content=directive))
         emit("orch", "note", f"routing directive: triage({triage_case_id})")
+
+    # Inject a hard routing directive when the analyst confirms investigation after triage.
+    # Fires when: (1) a triage report is stored, (2) no investigation has started,
+    # and (3) the analyst's message is a short affirmative consent or an explicit
+    # investigation request.  Prevents the orchestrator from re-doing the work itself
+    # using raw data-source tools instead of delegating to the investigation sub-agent.
+    is_investigation_consent = (
+        bool(session.last_triage_report)
+        and not session.investigation_run_id
+        and "investigation" in tmap
+        and (
+            _analyst_requested_investigation(question)
+            or bool(_INV_CONSENT_RE.match(question))
+        )
+    )
+    if is_investigation_consent:
+        inv_case_id = session.last_triage_case_id or session.case_id or ""
+        directive = (
+            f"[Routing directive — follow exactly] "
+            f"The analyst has confirmed investigation for case {inv_case_id}. "
+            f"Your FIRST and ONLY correct action is to call the `investigation` tool with "
+            f"case_id='{inv_case_id}', question='Investigate case {inv_case_id}', "
+            f"and the stored triage report as `triage_report`. "
+            f"Do NOT call get_case, list_case_alerts, search, search_keyword, get_alert, "
+            f"get_event, or any other data-source tool directly — those are for the "
+            f"investigation sub-agent to use, not for you."
+        )
+        messages.append(HumanMessage(content=directive))
+        emit("orch", "note", f"routing directive: investigation({inv_case_id})")
 
     for _ in range(max_rounds):
         if _should_compact(session.ctx_tokens):
@@ -331,9 +382,11 @@ async def _run_orchestrator_impl(session: OrchestratorSession, question: str, ma
                          detail=inv_content)
                 except asyncio.CancelledError:
                     raise
-                messages.append(ToolMessage(
-                    content=inv_content, tool_call_id="auto_invest", name="investigation"
-                ))
+                # Do NOT append a ToolMessage — there is no matching tool_call_id in the
+                # preceding AIMessage, so the OpenAI API rejects it on history replay.
+                # The result is captured in session.last_investigation_report by the tool;
+                # add it as a HumanMessage so the text-only fallback can reference it too.
+                messages.append(HumanMessage(content=f"[investigation result]\n{inv_content}"))
                 produces_handoff_ran = False
                 consumes_handoff_ran = True
 
@@ -361,6 +414,15 @@ async def _run_orchestrator_impl(session: OrchestratorSession, question: str, ma
             else:
                 transcript_entry = answer
             _append_visible(session.visible_transcript, "assistant", transcript_entry)
+            return answer
+
+        # Triage: use the persisted structured verdict if one exists; otherwise
+        # explicitly report that the specialist failed to produce a valid contract.
+        if produces_handoff_ran and (session.last_triage_report or "").strip():
+            answer = _format_triage_answer(session)
+            messages.append(AIMessage(content=answer))
+            session.messages = messages
+            _append_visible(session.visible_transcript, "assistant", answer)
             return answer
 
         # Triage (or investigation with an empty report): force one text-only model

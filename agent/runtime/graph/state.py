@@ -13,6 +13,7 @@ class AgentState(TypedDict):
     question: str
     handoff: Optional[dict]
     current_task: Optional[dict]
+    last_completed_task: Optional[dict]
     messages: list
     steps: int
     tool_calls_made: int
@@ -24,3 +25,4 @@ class AgentState(TypedDict):
     verdict: Optional[dict]  # structured diagnosis contract parsed at finish
     pivot_tasks_created: int  # follow-up tasks the pivot node has auto-created (capped)
     escalation_posted: bool  # True once an in-band escalation comment has been posted
+    summary_format_retries: int  # per-task count of report-format correction nudges

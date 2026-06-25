@@ -18,7 +18,7 @@ os.environ.setdefault("SECRET_KEY", "test")
 import django
 django.setup()
 
-from django.test import RequestFactory
+from django.test import RequestFactory, TestCase as DjangoTestCase
 from django.contrib.messages.storage.fallback import FallbackStorage
 from django.contrib.sessions.backends.db import SessionStore
 
@@ -54,8 +54,11 @@ class TestCategorization(unittest.TestCase):
         self.assertFalse(INTERNAL_PROVIDERS & DEFAULT_PROVIDERS)
 
 
-class TestAgentOverride(unittest.TestCase):
-    def tearDown(self):
+class TestAgentOverride(DjangoTestCase):
+    def setUp(self):
+        # Remove any pre-existing override so tests start from baseline state.
+        # Runs inside the per-test savepoint — rolled back automatically after
+        # each test, so real production data is never permanently modified.
         AgentConfig.objects.filter(agent_name="triage").delete()
 
     def test_budget_and_tools_override(self):
@@ -75,8 +78,11 @@ class TestAgentOverride(unittest.TestCase):
         self.assertEqual(a.budget.max_steps, base.budget.max_steps)
 
 
-class TestWorkflowOverride(unittest.TestCase):
-    def tearDown(self):
+class TestWorkflowOverride(DjangoTestCase):
+    def setUp(self):
+        # Clean state: remove any pre-existing rows that would interfere with
+        # the tests below. Runs inside the per-test savepoint — automatically
+        # rolled back so real production rows survive.
         WorkflowConfig.objects.filter(event_type="new_case").delete()
         EscalationRule.objects.all().delete()
 
@@ -102,8 +108,8 @@ class TestWorkflowOverride(unittest.TestCase):
         self.assertEqual(resolve_escalation_map()["tp"], "auto_escalate")
 
 
-class TestMCPProtections(unittest.TestCase):
-    def tearDown(self):
+class TestMCPProtections(DjangoTestCase):
+    def setUp(self):
         MCPServerConfig.objects.filter(id="zztest-siem").delete()
         ProviderConfig.objects.filter(key="aci-memory").delete()
 
@@ -134,13 +140,13 @@ class TestMCPProtections(unittest.TestCase):
         self.assertFalse(MCPServerConfig.objects.filter(id="aci-thehive").exists())
 
 
-class TestTheHiveDBSettings(unittest.TestCase):
+class TestTheHiveDBSettings(DjangoTestCase):
     """resolve_settings must read ProviderConfig.settings for aci-thehive.
 
     TheHive/Wazuh connection settings come from the DB only — no env fallback.
     """
 
-    def tearDown(self):
+    def setUp(self):
         ProviderConfig.objects.filter(key="aci-thehive").delete()
 
     def test_db_row_settings_used(self):

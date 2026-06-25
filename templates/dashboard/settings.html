@@ -1,15 +1,14 @@
 <c-layout title="Settings · ACI" subtitle="Settings">
   <div class="settings-shell settings-shell-wide">
-    <aside class="settings-rail" aria-label="Settings sections">
-      <a href="#overview">Overview</a>
-      <a href="#model">Model</a>
-      <a href="#integrations">Integrations</a>
-      <a href="#connectors">MCP servers</a>
-      <a href="#agents">Agents</a>
-      <a href="#automation">Automation</a>
-      <a href="#debug">Debug</a>
-      <a href="#baselines">Baselines</a>
-    </aside>
+    <nav class="settings-rail" role="tablist" aria-label="Settings sections">
+      <a href="#model" role="tab" data-tab="model">Model</a>
+      <a href="#integrations" role="tab" data-tab="integrations">Integrations</a>
+      <a href="#connectors" role="tab" data-tab="connectors">MCP servers</a>
+      <a href="#agents" role="tab" data-tab="agents">Agents</a>
+      <a href="#automation" role="tab" data-tab="automation">Automation</a>
+      <a href="#debug" role="tab" data-tab="debug">Debug</a>
+      <a href="#baselines" role="tab" data-tab="baselines">Baselines</a>
+    </nav>
 
     <div class="settings-main">
       <header class="settings-head" id="overview">
@@ -28,19 +27,26 @@
         <div class="settings-section-head">
           <div>
             <h2>Model provider</h2>
-            <p class="muted">The OpenAI-compatible LLM the agents call. Applies to the next run.</p>
+            <p class="muted">OpenAI-compatible LLM the agents call. Applies to the next run.</p>
           </div>
         </div>
-        <form method="post" action="{% url 'dashboard:settings_model_save' %}" class="settings-form settings-form-grid">
+        <div class="model-presets">
+          <span class="model-presets-label">Quick select:</span>
+          <button type="button" class="preset-btn" data-preset="openai">OpenAI</button>
+          <button type="button" class="preset-btn" data-preset="ollama">Ollama (local)</button>
+          <button type="button" class="preset-btn" data-preset="custom">Custom</button>
+        </div>
+        <form method="post" action="{% url 'dashboard:settings_model_save' %}" class="settings-form settings-form-grid" id="model-form">
           <label>Base URL
-            <input type="text" name="base_url" value="{{ model.base_url|default:'' }}" placeholder="http://vllm.example.com/v1">
+            <input type="text" name="base_url" id="model-base-url" value="{{ model.base_url|default:'' }}" placeholder="http://vllm.example.com/v1">
           </label>
           <label>Model name
-            <input type="text" name="model" value="{{ model.model|default:'' }}" placeholder="meta-llama/Llama-3-8b">
+            <input type="text" name="model" id="model-name" value="{{ model.model|default:'' }}" placeholder="meta-llama/Llama-3-8b" list="model-suggestions">
+            <datalist id="model-suggestions"></datalist>
           </label>
           <label>API key
             <span class="secret-field">
-              <input type="password" name="api_key" value="{{ model.api_key|default:'' }}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore data-lpignore="true" readonly onfocus="this.removeAttribute('readonly')" placeholder="(none set — blank clears)">
+              <input type="password" name="api_key" id="model-api-key" value="{{ model.api_key|default:'' }}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore data-lpignore="true" readonly onfocus="this.removeAttribute('readonly')" placeholder="(none set — blank clears)">
               <button type="button" class="link-btn secret-toggle">show</button>
             </span>
           </label>
@@ -58,20 +64,103 @@
             <input type="number" name="max_tokens" min="1" value="{{ model.sampling_params.max_tokens|default:'' }}" placeholder="4096">
           </label>
           <label>Context length (tokens)
-            <input type="number" name="context_length" min="1" value="{{ model.context_length|default:'' }}" placeholder="131072">
+            <input type="number" name="context_length" id="model-context-length" min="1" value="{{ model.context_length|default:'' }}" placeholder="131072">
           </label>
           <label>Request timeout (seconds, blank = none)
             <input type="number" name="timeout" min="0" value="{{ model.timeout|default:'' }}">
           </label>
           <div class="form-actions"><button type="submit">Save model settings</button></div>
         </form>
+        <script>
+        (function () {
+          var PRESETS = {
+            openai: {
+              base_url: "https://api.openai.com/v1",
+              models: ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "o3", "o3-mini", "o4-mini"],
+              context_length: "128000",
+              placeholder: "sk-...",
+            },
+            ollama: {
+              base_url: "http://localhost:11434/v1",
+              models: ["llama3.2", "llama3.1", "mistral", "qwen2.5", "deepseek-r1"],
+              context_length: "131072",
+              placeholder: "ollama",
+            },
+            custom: {
+              base_url: "",
+              models: [],
+              context_length: "",
+              placeholder: "",
+            },
+          };
+
+          function setDatalist(models) {
+            var dl = document.getElementById("model-suggestions");
+            dl.innerHTML = "";
+            models.forEach(function (m) {
+              var opt = document.createElement("option");
+              opt.value = m;
+              dl.appendChild(opt);
+            });
+          }
+
+          document.querySelectorAll(".preset-btn").forEach(function (btn) {
+            btn.addEventListener("click", function () {
+              var key = btn.dataset.preset;
+              var p = PRESETS[key];
+              if (!p) return;
+
+              var baseUrlInput = document.getElementById("model-base-url");
+              var modelInput = document.getElementById("model-name");
+              var ctxInput = document.getElementById("model-context-length");
+
+              baseUrlInput.value = p.base_url;
+              setDatalist(p.models);
+
+              if (p.models.length > 0 && !modelInput.value) {
+                modelInput.value = p.models[0];
+              }
+              if (p.context_length && !ctxInput.value) {
+                ctxInput.value = p.context_length;
+              }
+
+              if (key === "openai") {
+                var apiKeyInput = document.getElementById("model-api-key");
+                apiKeyInput.removeAttribute("readonly");
+                apiKeyInput.focus();
+              }
+
+              document.querySelectorAll(".preset-btn").forEach(function (b) {
+                b.classList.remove("preset-btn-active");
+              });
+              btn.classList.add("preset-btn-active");
+            });
+          });
+
+          // Highlight the active preset on page load based on current base URL.
+          var currentUrl = document.getElementById("model-base-url").value;
+          if (currentUrl === "https://api.openai.com/v1") {
+            var openaiBtn = document.querySelector('[data-preset="openai"]');
+            if (openaiBtn) {
+              openaiBtn.classList.add("preset-btn-active");
+              setDatalist(PRESETS.openai.models);
+            }
+          } else if (currentUrl.indexOf("localhost:11434") !== -1) {
+            var ollamaBtn = document.querySelector('[data-preset="ollama"]');
+            if (ollamaBtn) {
+              ollamaBtn.classList.add("preset-btn-active");
+              setDatalist(PRESETS.ollama.models);
+            }
+          }
+        })();
+        </script>
       </section>
 
       <section class="settings-section" id="integrations">
         <div class="settings-section-head">
           <div>
             <h2>Integrations</h2>
-            <p class="muted">External platform connections. Saved to the database (overriding <code>.env</code>) and applied to the MCP servers on the next run. Secret fields are write-only — leave blank to keep the stored value.</p>
+            <p class="muted">External platform connections, applied on the next run. Secret fields are write-only — leave blank to keep the stored value.</p>
           </div>
         </div>
         {% regroup integrations by category as integration_groups %}
@@ -406,7 +495,7 @@
         <div class="settings-section-head">
           <div>
             <h2>Debug</h2>
-            <p class="muted">Surface internal graph tool calls and node-transition events in the session activity log. Applies to the next agent run — does not affect runs already in progress.</p>
+            <p class="muted">Surface internal graph tool calls and node transitions in the session log. Applies to the next run.</p>
           </div>
         </div>
         <form method="post" action="{% url 'dashboard:settings_runtime_save' %}" class="settings-form">
@@ -420,7 +509,6 @@
         <div class="settings-section-head">
           <div>
             <h2>Behavioral baselines</h2>
-            <p class="muted">Pick the users and endpoints to profile. With subjects configured, computation targets exactly these; with none, it auto-discovers from your SIEM.</p>
           </div>
           <form method="post" action="{% url 'dashboard:settings_baseline_recompute' %}" class="baseline-recompute">
             <label class="inl">Lookback window (days)
@@ -577,59 +665,55 @@
       });
     })();
 
+    // Tabbed sections — one section visible at a time (progressive disclosure).
+    // The active tab is remembered in localStorage so it survives a save reload,
+    // and deep links (#agents) still select the right tab.
     (function () {
       const rail = document.querySelector(".settings-rail");
-      if (!rail || !("IntersectionObserver" in window)) return;
-      const links = Array.from(rail.querySelectorAll("a[href^='#']"));
-      const byId = new Map(links.map((link) => [link.getAttribute("href").slice(1), link]));
-      const targets = Array.from(byId.keys())
-        .map((id) => document.getElementById(id))
-        .filter(Boolean);
-      if (!targets.length) return;
+      if (!rail) return;
+      const links = Array.from(rail.querySelectorAll("a[data-tab]"));
+      const sections = Array.from(document.querySelectorAll(".settings-section[id]"));
+      if (!links.length || !sections.length) return;
+      const STORE_KEY = "aci-settings-tab";
+      const ids = links.map((l) => l.dataset.tab);
 
-      function setActive(id) {
-        links.forEach((link) => link.classList.toggle("active", link === byId.get(id)));
-      }
-
-      function updateActiveFromScroll() {
-        const marker = Math.max(90, window.innerHeight * 0.22);
-        let current = targets[0].id;
-        let nearest = { id: current, distance: Infinity };
-        targets.forEach((target) => {
-          const top = target.getBoundingClientRect().top;
-          const distance = Math.abs(top - marker);
-          if (top <= marker) current = target.id;
-          if (distance < nearest.distance) nearest = { id: target.id, distance };
+      function activate(id, persist) {
+        if (!ids.includes(id)) id = ids[0];
+        links.forEach((l) => {
+          const on = l.dataset.tab === id;
+          l.classList.toggle("active", on);
+          l.setAttribute("aria-selected", on ? "true" : "false");
         });
-        setActive(current || nearest.id);
+        sections.forEach((s) => { s.hidden = s.id !== id; });
+        if (persist) { try { localStorage.setItem(STORE_KEY, id); } catch (e) {} }
       }
 
-      let ticking = false;
-      function requestActiveUpdate() {
-        if (ticking) return;
-        ticking = true;
-        requestAnimationFrame(() => {
-          ticking = false;
-          updateActiveFromScroll();
-        });
-      }
-
-      const observer = new IntersectionObserver(() => {
-        requestActiveUpdate();
-      }, { rootMargin: "-20% 0px -65% 0px", threshold: [0, 0.1, 0.25] });
-
-      targets.forEach((target) => observer.observe(target));
-      links.forEach((link) => {
-        link.addEventListener("click", () => {
-          const id = link.getAttribute("href").slice(1);
-          setActive(id);
-          setTimeout(updateActiveFromScroll, 250);
+      links.forEach((l) => {
+        l.addEventListener("click", (e) => {
+          e.preventDefault();
+          activate(l.dataset.tab, true);
         });
       });
-      window.addEventListener("scroll", requestActiveUpdate, { passive: true });
-      window.addEventListener("hashchange", requestActiveUpdate);
-      setActive((location.hash || "#overview").slice(1));
-      requestActiveUpdate();
+
+      // Tear down any handler from a previous visit (boosted re-entry) so we
+      // never stack duplicate window listeners.
+      if (window.__aciSettingsCleanup) window.__aciSettingsCleanup();
+      function onHashChange() {
+        if (!document.querySelector(".settings-rail")) return; // left the page
+        const id = (location.hash || "").slice(1);
+        if (id) activate(id, true);
+      }
+      window.addEventListener("hashchange", onHashChange);
+      window.__aciSettingsCleanup = function () {
+        window.removeEventListener("hashchange", onHashChange);
+        window.__aciSettingsCleanup = null;
+      };
+
+      let initial = (location.hash || "").slice(1);
+      if (!ids.includes(initial)) {
+        try { initial = localStorage.getItem(STORE_KEY) || ids[0]; } catch (e) { initial = ids[0]; }
+      }
+      activate(initial, false);
     })();
   </script>
 </c-layout>

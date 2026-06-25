@@ -12,8 +12,45 @@ from ..infra.logbus import emit, src_label, summarize_args, summarize_result, su
 from .board import _format_board_context
 from .sanitize import _HARMONY_TOKEN_RE, _sanitize_history, _sanitize_message
 from .state import AgentState
-from .toolio import _call, _cancel_requested, _cap_tool_result, _compact_history, _emit_node_entry, _ensure_parent_dir, _expand_tilde_args, _extract_input_tokens, _has_pending_tasks, _invoke_bound_model, _is_error_tool_result, _model_tools_for_agent, _parse_claimed_task, _reclaim_stale_tasks, _should_compact, _tmap
+from .toolio import _call, _cancel_requested, _cap_tool_result, _compact_history, _emit_node_entry, _ensure_parent_dir, _expand_tilde_args, _extract_input_tokens, _has_pending_tasks, _invoke_bound_model, _is_error_tool_result, _list_tasks, _model_tools_for_agent, _parse_claimed_task, _reclaim_stale_tasks, _should_compact, _tmap
 
+
+
+_QUEUE_CONTEXT_MAX_TASKS = 12
+_QUEUE_CONTEXT_SNIPPET_CHARS = 120
+
+
+def _format_queue_context(tasks: list[dict]) -> str:
+    if not tasks:
+        return "\n\n---\n**Current Task Queue:**\n- No queued tasks found.\n---"
+    lines = ["\n\n---", "**Current Task Queue (check before proposing New Leads):**"]
+    for task in tasks[:_QUEUE_CONTEXT_MAX_TASKS]:
+        status = task.get("status") or "unknown"
+        priority = task.get("priority", "?")
+        title = (task.get("title") or "(untitled)").strip()
+        desc = " ".join((task.get("description") or "").split())
+        if len(desc) > _QUEUE_CONTEXT_SNIPPET_CHARS:
+            desc = desc[:_QUEUE_CONTEXT_SNIPPET_CHARS].rstrip() + "..."
+        suffix = f" — {desc}" if desc else ""
+        lines.append(f"- [{status} P{priority}] {title}{suffix}")
+    if len(tasks) > _QUEUE_CONTEXT_MAX_TASKS:
+        lines.append(f"- ... {len(tasks) - _QUEUE_CONTEXT_MAX_TASKS} more task(s) omitted")
+    lines.append(
+        "Only propose New Leads that are evidence-backed, not already covered above, "
+        "and include title, pivots, evidence, and priority."
+    )
+    lines.append("---")
+    return "\n".join(lines)
+
+
+async def _queue_context_for_state(state: AgentState, tools: list) -> str:
+    if state["agent_name"] != "investigation":
+        return ""
+    task = state.get("current_task") or {}
+    if "populate investigation queue" in (task.get("title") or "").lower():
+        return ""
+    tasks = await _list_tasks(tools, state["case_id"], state["run_id"], state["agent_name"])
+    return _format_queue_context(tasks)
 
 
 
@@ -30,17 +67,22 @@ async def seed(state: AgentState, config) -> dict:
         if create:
             description = (
                 f"Analyst question: {state['question']}\n\n"
-                "Complete ALL six steps below before writing the report:\n"
-                "1. get_case — load the case record.\n"
-                "2. list_case_alerts — survey alert groups.\n"
-                "3. get_alert — retrieve at least one raw alert body (highest-risk group).\n"
-                "4. search_patterns(rule_ids=[...]) — check known FP/TP patterns.\n"
-                "5. search_feedback(rule_ids=[...]) — check prior analyst corrections.\n"
-                "6. get_baselines — check normal behavior for affected hosts/users.\n\n"
-                "Steps 4–6 are REQUIRED even if they return empty results. Do not write "
-                "the report before completing all six steps.\n\n"
-                "After completing all six steps, write the full triage report as the "
-                "TEXT of your final message, ending with the diagnosis verdict JSON block. "
+                "Complete the following triage steps and write a report. "
+                "Use the tool names provided by the SOAR, SIEM, and memory MCP server guidance.\n"
+                "1. Load the case record.\n"
+                "2. Load the linked alert summary.\n"
+                "3. Check known FP/TP patterns for this case's detection rule IDs.\n"
+                "4. Check baselines for common behaviors.\n"
+                "5. Check analyst corrections for these rule IDs.\n"
+                "6. Load other alerts / events close to the current case / alert timestamp. "
+                "After reading the case and linked alert summary, derive an absolute time "
+                "window around the alert timestamp and query the SIEM with `search_keyword`, "
+                "`search`, or `profile_field` for nearby events on the same host, user, "
+                "source IP, and rule family. Summarize both matching events and zero-result "
+                "queries in the report.\n\n"
+                "After all steps, write the full triage report as the TEXT of your final "
+                "message. The platform will generate the structured diagnosis verdict "
+                "JSON block after your report. "
                 "The platform records your text output — do not end with tool calls only."
             )
             result = await _call(create, {
@@ -140,8 +182,9 @@ async def think(state: AgentState, config) -> dict:
         task = state["current_task"]
         task_text = f"**Task:** {task['title']}\n\n{task.get('description') or ''}".strip()
 
-        # Inject cross-task board context for investigation tasks (not seed task)
+        # Inject cross-task board and queue context for investigation tasks (not seed task)
         board_context = ""
+        queue_context = await _queue_context_for_state(state, tools)
         if (state["agent_name"] == "investigation"
                 and "populate investigation queue" not in (task.get("title") or "").lower()):
             get_board_fn = _tmap(tools).get("get_board")
@@ -151,7 +194,7 @@ async def think(state: AgentState, config) -> dict:
 
         messages = [
             SystemMessage(content=system_prompt),
-            HumanMessage(content=task_text + board_context),
+            HumanMessage(content=task_text + board_context + queue_context),
         ]
 
     model_tools = _model_tools_for_agent(state["agent_name"], tools, state.get("current_task"))
@@ -168,9 +211,20 @@ async def think(state: AgentState, config) -> dict:
     # nudge is not saved to state so it does not accumulate in history.
     call_messages = messages
     if call_messages and isinstance(call_messages[-1], ToolMessage):
+        queue_context = await _queue_context_for_state(state, tools)
         call_messages = call_messages + [HumanMessage(content=(
-            "Tool calls complete. Please now write your analysis and findings "
-            "as text. Your text response is the task result."
+            "Tool calls complete. Write your response now using the mandatory "
+            "structured format:\n\n"
+            "## Confirmed Facts\n"
+            "## Findings\n"
+            "## Hypotheses\n"
+            "## New Leads\n\n"
+            "All four sections are required (use '- None.' if a section is empty). "
+            "For each proposed lead use this exact structure: title, pivots, evidence, "
+            "priority. The platform validates and queues approved leads; do not call "
+            "`create_task` for follow-up work. Only propose leads that are evidence-backed "
+            "and not already covered in the current queue."
+            f"{queue_context}"
         ))]
 
     response = await _invoke_bound_model(bound, call_messages, state["agent_name"])
@@ -189,7 +243,7 @@ async def think(state: AgentState, config) -> dict:
         emit(src, "note", "silent response on task start — retrying with tool-use nudge")
         nudge_msgs = messages + [HumanMessage(content=(
             "Please make at least one tool call to begin this task. "
-            "Use search or search_keyword with the pivot fields listed above."
+            "Use one of the available tools listed in your system prompt."
         ))]
         retry_resp = await _invoke_bound_model(bound, nudge_msgs, state["agent_name"])
         _sanitize_message(retry_resp)
@@ -209,7 +263,7 @@ async def think(state: AgentState, config) -> dict:
 
 async def use_tools(state: AgentState, config) -> dict:
     tools = config["configurable"]["tools"]
-    tmap = _tmap(_model_tools_for_agent(state["agent_name"], tools))
+    tmap = _tmap(_model_tools_for_agent(state["agent_name"], tools, state.get("current_task")))
     messages = list(state["messages"])
     last = messages[-1]
     new_calls = 0

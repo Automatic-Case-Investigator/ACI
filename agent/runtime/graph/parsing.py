@@ -32,17 +32,10 @@ _NEW_LEADS_HEADER_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Match individual lead entries. Allow optional blank lines between fields and
-# tolerate indentation variance. `pivots:` is optional so a title-only lead still
-# registers (priority defaults to 50 when absent).
-_NEW_LEADS_RE = re.compile(
-    r"-\s+title:\s*[\"']?(.+?)[\"']?\s*\n"
-    r"(?:[ \t]*\n)*"                         # optional blank lines
-    r"\s+pivots:\s*(.+?)\s*\n"
-    r"(?:[ \t]*\n)*"
-    r"\s+priority:\s*(\d+)",
-    re.MULTILINE,
-)
+# Lead entries are no longer parsed by regex: extraction + validation is done by
+# a model (see graph/lead_model.py) because the analyst's formatting is too
+# inconsistent for a reliable grammar. Only the section header above is matched
+# deterministically so the pivot node knows a New Leads section exists.
 
 # Accept h2, h3, or bold variants — small models sometimes use ### or **...**
 _CONFIRMED_FACTS_RE = re.compile(
@@ -51,6 +44,10 @@ _CONFIRMED_FACTS_RE = re.compile(
 )
 _HYPOTHESES_RE = re.compile(
     r"(?:^|\n)(?:#{2,3}\s*|(?:\*\*))Hypotheses(?:\*\*)?\s*\n",
+    re.IGNORECASE,
+)
+_FINDINGS_RE = re.compile(
+    r"(?:^|\n)(?:#{2,3}\s*|(?:\*\*))Findings(?:\*\*)?\s*\n",
     re.IGNORECASE,
 )
 # Triage-specific required section patterns.
@@ -73,6 +70,44 @@ def _section_body(text: str, match: re.Match) -> str:
     rest = (text or "")[match.end():]
     next_header = _SECTION_HEADER_RE.search(rest)
     return rest[:next_header.start()] if next_header else rest
+
+
+# The four sections every investigation per-task report must contain. The report
+# is the only place grounded findings (e.g. a reverse shell seen in a tool
+# result) are recorded, so a malformed report silently loses evidence. We
+# validate the shape syntactically and nudge the model to re-emit on failure.
+_REQUIRED_SUMMARY_SECTIONS: tuple[tuple[str, re.Pattern], ...] = (
+    ("Confirmed Facts", _CONFIRMED_FACTS_RE),
+    ("Findings", _FINDINGS_RE),
+    ("Hypotheses", _HYPOTHESES_RE),
+    ("New Leads", _NEW_LEADS_HEADER_RE),
+)
+
+
+# A markdown header at the very start of a string (the section-header regexes
+# above consume the trailing blank line, so the next header can sit flush at
+# position 0 with no leading newline for _SECTION_HEADER_RE to anchor on).
+_NEXT_HEADER_RE = re.compile(r"(?:^|\n)\s*(?:#{2,6}\s+\S|\*\*\S)")
+
+
+def _missing_summary_sections(report: str) -> list[str]:
+    """Return the names of required sections absent or empty in an investigation
+    report. A section counts as present only if its header exists and its body
+    carries at least one bullet (a literal '- None.' satisfies this — the model
+    is told to use it for genuinely empty sections)."""
+    text = report or ""
+    missing: list[str] = []
+    for name, pattern in _REQUIRED_SUMMARY_SECTIONS:
+        match = pattern.search(text)
+        if not match:
+            missing.append(name)
+            continue
+        rest = text[match.end():]
+        next_header = _NEXT_HEADER_RE.search(rest)
+        body = rest[:next_header.start()] if next_header else rest
+        if not _FACT_BULLET_RE.search(body):
+            missing.append(name)
+    return missing
 
 # Regex to parse a bullet like "- Crontab modified at ... (event ...)."
 # Grabs everything after the leading "- ".

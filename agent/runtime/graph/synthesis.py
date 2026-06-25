@@ -9,7 +9,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from ..infra.logbus import emit, src_label, summarize_result
 
 from .board import _entry_line
-from .parsing import _CONFIRMED_FACTS_RE, _HYPOTHESES_RE, _fact_dedup_key, _is_none_bullet, _is_provenance_only, _looks_like_lead, _normalize_fact_key, _section_body, _strip_markers
+from .parsing import _CONFIRMED_FACTS_RE, _FINDINGS_RE, _HYPOTHESES_RE, _fact_dedup_key, _is_none_bullet, _is_provenance_only, _looks_like_lead, _normalize_fact_key, _section_body, _strip_markers
 from .sanitize import _normalize, _sanitize_message
 from .state import AgentState
 from .toolio import _MAX_SYNTHESIS_FINDINGS_CHARS, _SEED_TASK_TITLE, _call, _is_error_tool_result
@@ -243,12 +243,6 @@ _ANALYST_REPORT_SYSTEM = (
 )
 
 
-_FINDINGS_RE = re.compile(
-    r"(?:^|\n)(?:#{2,3}\s*|(?:\*\*))Findings(?:\*\*)?\s*\n",
-    re.IGNORECASE,
-)
-
-
 def _clip_findings_for_synthesis(findings: str) -> str:
     text = (findings or "").strip()
     if len(text) <= _MAX_SYNTHESIS_FINDINGS_CHARS:
@@ -335,35 +329,10 @@ async def _synthesize_analyst_report(
         "## Open Gaps — what could not be confirmed and why. List every piece of "
         "evidence that is missing, unavailable, or unanswered. "
         "Ensure this section does not contradict the Executive Summary.\n\n"
-        "Then, as the VERY LAST thing in your message, append a single fenced JSON "
-        "diagnosis verdict block (this exact schema):\n"
-        "```json\n"
-        "{\n"
-        '  "verdict": "tp | fp | inconclusive | needs_investigation",\n'
-        '  "confidence": "low | medium | high",\n'
-        '  "impact_state": "active | contained | unknown",\n'
-        '  "scope_state": "isolated | lateral_spread | unknown",\n'
-        '  "matched_patterns": [],\n'
-        '  "supporting_evidence": ["<event ID / fact backing the verdict>"],\n'
-        '  "contradicting_evidence": [],\n'
-        '  "missing_evidence": ["<every gap named in Open Gaps or Initial Access section>"],\n'
-        '  "recommended_action": ""\n'
-        "}\n"
-        "```\n"
-        "Verdict rules: `tp` = credible malicious evidence exists (confirmed attacker "
-        "action, payload execution, or unauthorized access — cite it); `fp` = evidence "
-        "confirms known-benign activity with no contradicting high-risk evidence (a "
-        "matched curated pattern strengthens confidence but is not required); "
-        "`inconclusive` = neither standard met; `needs_investigation` = more work "
-        "required. Never choose `tp` just because nothing benign was found. A "
-        "`tp`/`fp` verdict with empty supporting_evidence is invalid. "
-        "If Initial Access was not established, list it in missing_evidence.\n"
-        "`impact_state`: active (attacker activity ongoing), contained (stopped or "
-        "asset isolated), unknown. `scope_state`: isolated (single host/account), "
-        "lateral_spread (movement confirmed), unknown. Default both to unknown unless "
-        "evidence is explicit.\n"
-        "Ground every claim in the facts above. Follow the deterministic guardrails "
-        "unless the facts explicitly contradict them. If facts are thin, say so in the verdict."
+        "Do not append the structured JSON diagnosis verdict block; a separate "
+        "verdict-contract step will generate the machine-readable verdict. Ground "
+        "every narrative claim in the facts above. Follow the deterministic "
+        "guardrails unless the facts explicitly contradict them."
     )
     _SYNTHESIS_TIMEOUT_SECS = 180
     try:

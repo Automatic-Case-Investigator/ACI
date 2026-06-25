@@ -6,13 +6,13 @@ so the historical ``from agent.runtime.graph import X`` / ``graph._helper`` acce
 pattern (used across the runtime and the test suite) keeps working unchanged.
 """
 from . import (
-    state, sanitize, parsing, toolio, board, validation, synthesis,
-    nodes_loop, nodes_flow, builder,
+    state, sanitize, parsing, toolio, board, validation, synthesis, leads,
+    lead_model, nodes_loop, nodes_flow, builder,
 )
 
 _submodules = [
-    state, sanitize, parsing, toolio, board, validation, synthesis,
-    nodes_loop, nodes_flow, builder,
+    state, sanitize, parsing, toolio, board, validation, synthesis, leads,
+    lead_model, nodes_loop, nodes_flow, builder,
 ]
 for _m in _submodules:
     for _n in dir(_m):

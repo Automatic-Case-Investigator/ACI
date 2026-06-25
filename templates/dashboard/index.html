@@ -19,26 +19,36 @@
           <a class="link-btn" href="{% url 'dashboard:runs' %}?seg=live">all sessions</a>
         </div>
       </div>
+      <form id="sessions-bulk" method="post" action="{% url 'dashboard:delete_sessions_selected' %}" data-bulk>
+        <div class="bulk-sel-bar" data-bulk-bar data-bulk-for="sessions-bulk" hidden>
+          <span class="bulk-count"><b data-bulk-count>0</b> selected</span>
+          <span class="bulk-spacer"></span>
+          <button type="submit" class="icon-btn icon-danger" data-tip="Delete selected" aria-label="Delete selected sessions">
+            <c-lucideicon.trash-2 width="16" height="16" />
+          </button>
+        </div>
+      </form>
       <div class="deck-table-wrap">
         <table class="deck-table">
           <thead>
-            <tr><th>ID</th><th>Analyst question</th><th>Started</th><th></th></tr>
+            <tr><th class="sel-col"><input type="checkbox" data-bulk-all data-bulk-for="sessions-bulk" aria-label="Select all sessions on this page"></th><th>ID</th><th>Analyst question</th><th>Started</th><th></th></tr>
           </thead>
           <tbody>
             {% for s in sessions_page %}
             <tr style="--i: {{ forloop.counter0 }}">
+              <td class="sel-col"><input type="checkbox" name="ids" value="{{ s.id }}" form="sessions-bulk" data-bulk-item aria-label="Select session"></td>
               <td class="mono">{{ s.id|stringformat:'s'|slice:':8' }}</td>
-              <td class="cell-q"><a href="{% url 'dashboard:session' s.id %}">{{ s.question|truncatechars:90 }}</a></td>
+              <td class="cell-q"><a href="{% url 'dashboard:session' s.id %}" data-no-boost>{{ s.question|truncatechars:90 }}</a></td>
               <td class="muted mono">{{ s.created_at|date:"Y-m-d H:i" }}</td>
               <td class="row-actions">
-                <a class="link-btn" href="{% url 'dashboard:session' s.id %}">view</a>
+                <a class="icon-btn" href="{% url 'dashboard:session' s.id %}" data-no-boost data-tip="Open session" aria-label="Open session"><c-lucideicon.eye width="16" height="16" /></a>
                 <form method="post" action="{% url 'dashboard:delete_session' s.id %}" onsubmit="return confirm('Delete session?');">
-                  <button type="submit" class="link-btn link-danger">delete</button>
+                  <button type="submit" class="icon-btn icon-danger" data-tip="Delete session" aria-label="Delete session"><c-lucideicon.trash-2 width="16" height="16" /></button>
                 </form>
               </td>
             </tr>
             {% empty %}
-            <tr><td colspan="4" class="muted">{% if sessions_q %}no sessions match “{{ sessions_q }}”{% else %}no sessions yet — ask a question above{% endif %}</td></tr>
+            <tr><td colspan="5" class="muted">{% if sessions_q %}no sessions match “{{ sessions_q }}”{% else %}no sessions yet — ask a question above{% endif %}</td></tr>
             {% endfor %}
           </tbody>
         </table>

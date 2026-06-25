@@ -9,6 +9,36 @@ import httpx
 
 
 class WazuhClient:
+    _SEARCH_KEYWORD_FIELDS = [
+        "full_log",
+        "rule.description",
+        "rule.groups",
+        "rule.id",
+        "agent.name",
+        "agent.ip",
+        "data.srcip",
+        "data.dstip",
+        "data.srcuser",
+        "data.dstuser",
+        "data.user",
+        "data.command",
+        "data.audit.command",
+        "data.audit.exe",
+        "data.audit.execve.a0",
+        "data.audit.execve.a1",
+        "data.audit.execve.a2",
+        "data.audit.execve.a3",
+        "data.audit.execve.a4",
+        "data.audit.cwd",
+        "data.audit.file.name",
+        "data.win.eventdata.image",
+        "data.win.eventdata.commandLine",
+        "data.win.eventdata.parentImage",
+        "syscheck.path",
+        "syscheck.diff",
+        "location",
+    ]
+
     def __init__(self) -> None:
         # Accept either a full URL (WAZUH_URL) or host+port components.
         url = os.environ.get("WAZUH_URL") or ""
@@ -188,7 +218,14 @@ class WazuhClient:
         index = index_pattern or self._default_index
         dsl = self._as_dsl(query)
         dsl, time_range, max_results = self._unwrap_request(dsl, time_range, max_results)
-        body: dict = {"query": dsl}
+
+        # Wrap the caller's DSL in a bool+filter so the time range is always
+        # enforced, even when the model embeds it only as the time_range param
+        # rather than inside the DSL itself.
+        rng = self._range_filter(time_range)
+        if rng:
+            dsl = {"bool": {"must": dsl, "filter": [rng]}}
+        body: dict = {"query": dsl, "size": min(max_results, 100)}
 
         c = self._get_client()
         resp = c.post(f"/{index}/_search", json=body)
@@ -282,21 +319,50 @@ class WazuhClient:
 
     def search_keyword(
         self,
-        keyword: str,
+        query: str,
         index_pattern: str | None = None,
         time_range: dict | None = None,
         max_results: int = 20,
     ) -> dict[str, Any]:
-        """Find events containing a keyword in ANY field (full-text across all fields)."""
+        """Find events matching any space-separated keyword in any field."""
+
         index = index_pattern or self._default_index
-        must: list[dict] = [
-            {"multi_match": {"query": keyword, "fields": ["*"], "lenient": True}}
-        ]
+
+        query = " ".join(t for t in query.split() if t)
+        if not query:
+            return {"total": 0, "events": []}
+
+        query_body: dict[str, Any] = {
+            "bool": {
+                "should": [
+                    {
+                        "simple_query_string": {
+                            "query": query,
+                            "fields": self._SEARCH_KEYWORD_FIELDS,
+                            "default_operator": "or",
+                            "lenient": True,
+                        }
+                    }
+                ],
+                "minimum_should_match": 1,
+            }
+        }
+
         rng = self._range_filter(time_range)
         if rng:
-            must.append(rng)
+            query_body = {
+                "bool": {
+                    "must": [query_body],
+                    "filter": [rng],
+                }
+            }
 
-        body = {"query": {"bool": {"must": must}}, "size": min(max_results, 100)}
+        body = {
+            "query": query_body,
+            "size": min(max_results, 100),
+            "track_total_hits": True,
+        }
+
         with self._client() as c:
             resp = c.post(f"/{index}/_search", json=body)
             if resp.is_error:
@@ -304,6 +370,7 @@ class WazuhClient:
                     return {"error": resp.json()}
                 except Exception:
                     return {"error": resp.text[:1000]}
+
             data = resp.json()
 
         hits = data.get("hits", {})

@@ -84,6 +84,37 @@ class TheHiveClient:
     def update_case(self, case_id: str, fields: dict) -> dict:
         return self._patch(f"/api/case/{case_id}", fields)
 
+    def get_similar_cases(self, case_id: str, max_items: int = 20) -> dict:
+        """Return cases linked to this case by artifacts.
+
+        Prefer the newer `similarCases` query step and fall back to the deprecated
+        `linkedCases` step for older TheHive deployments.
+        """
+        page_to = max(1, int(max_items or 20))
+        base = [{"_name": "getCase", "idOrName": case_id}]
+        attempts = (
+            ("similarCases", [*base, {"_name": "similarCases"}, {"_name": "page", "from": 0, "to": page_to}]),
+            ("linkedCases", [*base, {"_name": "linkedCases"}, {"_name": "page", "from": 0, "to": page_to}]),
+        )
+        last_exc: Exception | None = None
+        for operator, query in attempts:
+            try:
+                items = self._query(query)
+                if not isinstance(items, list):
+                    items = []
+                return {
+                    "case_id": case_id,
+                    "query_operator": operator,
+                    "total": len(items),
+                    "cases": items,
+                }
+            except httpx.HTTPStatusError as exc:
+                last_exc = exc
+                if operator != "similarCases":
+                    raise
+        assert last_exc is not None
+        raise last_exc
+
     # ── Alerts ─────────────────────────────────────────────────────────────────
 
     def get_alert(self, alert_id: str) -> dict:
@@ -114,7 +145,8 @@ class TheHiveClient:
         """
         sample_cap = max(1, min(int(max_results or self._ALERT_SAMPLE_CAP), self._ALERT_SAMPLE_CAP))
         alerts = self._query([
-            {"_name": "listAlert", "_and": [{"_field": "caseId", "_value": case_id}]},
+            {"_name": "listAlert"},
+            {"_name": "filter", "_field": "case", "_value": case_id},
             {"_name": "page", "from": 0, "to": self._ALERT_SCAN_CAP},
         ])
         if not isinstance(alerts, list):

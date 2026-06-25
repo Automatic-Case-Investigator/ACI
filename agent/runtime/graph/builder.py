@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from langgraph.graph import END, StateGraph
 
-from .nodes_flow import assess, finish, pivot
+from .nodes_flow import assess, finish, pivot, publish_finish, reassess_verdict, verdict_contract
 from .nodes_loop import claim, seed, think, use_tools
 from .state import AgentState
 
@@ -30,7 +30,7 @@ def _route_assess(state: AgentState) -> str:
         state["steps"] >= state["max_steps"]
         or state["tool_calls_made"] >= state["max_tool_calls"]
     )
-    if state.get("status") == "seed_guard":
+    if state.get("status") in {"seed_guard", "triage_siem_guard", "investigation_siem_guard", "summary_format_guard"}:
         return "finish" if over_budget else "think"
     if over_budget:
         return "finish"
@@ -46,6 +46,9 @@ def build_graph():
     g.add_node("assess", assess)
     g.add_node("pivot", pivot)
     g.add_node("finish", finish)
+    g.add_node("verdict_contract", verdict_contract)
+    g.add_node("reassess_verdict", reassess_verdict)
+    g.add_node("publish_finish", publish_finish)
 
     g.set_entry_point("seed")
     g.add_edge("seed", "claim")
@@ -61,7 +64,10 @@ def build_graph():
         {"think": "think", "pivot": "pivot", "finish": "finish"},
     )
     g.add_edge("pivot", "claim")
-    g.add_edge("finish", END)
+    g.add_edge("finish", "verdict_contract")
+    g.add_edge("verdict_contract", "reassess_verdict")
+    g.add_edge("reassess_verdict", "publish_finish")
+    g.add_edge("publish_finish", END)
     return g.compile()
 
 

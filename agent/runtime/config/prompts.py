@@ -124,11 +124,12 @@ def _format_run_context(ctx: dict) -> str:
     mcp_guidance = (ctx.get("mcp_prompt_guidance") or "").strip()
     if mcp_guidance:
         lines.append("")
-        lines.append("## MCP Server Guidance")
+        lines.append("## Tool Usage Instructions (from MCP Servers)")
         lines.append(
-            "Tool-specific instructions below were retrieved from the MCP servers "
-            "that provide the tools for this run. Follow this guidance when using "
-            "those servers."
+            "The following instructions were provided by the MCP servers connected "
+            "to this run. They define exact tool names, field names, query syntax, "
+            "and usage rules for the platforms available. Apply this guidance "
+            "precisely when using any SIEM, SOAR, or workspace tool."
         )
         lines.append(mcp_guidance)
     convo = (ctx.get("orchestrator_conversation") or "").strip()

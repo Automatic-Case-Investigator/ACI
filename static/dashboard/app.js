@@ -18,8 +18,6 @@
     });
   }
 
-  renderStaticMarkdown();
-
   function escapeHTML(value) {
     return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
       "&": "&amp;",
@@ -128,7 +126,7 @@
 
   function bindDashboardIndex() {
     const target = document.getElementById("active-runs");
-    if (!target) return;
+    if (!target) return null;
     let inFlight = false;
     async function refreshActiveRuns() {
       if (inFlight) return;
@@ -147,17 +145,133 @@
         inFlight = false;
       }
     }
-    refreshActiveRuns();
-    setInterval(refreshActiveRuns, 5000);
-    document.addEventListener("visibilitychange", () => {
+    function onVisibility() {
       if (!document.hidden) refreshActiveRuns();
-    });
+    }
+    refreshActiveRuns();
+    const timer = setInterval(refreshActiveRuns, 5000);
+    document.addEventListener("visibilitychange", onVisibility);
+    return function teardownDashboardIndex() {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }
 
-  bindDashboardIndex();
+  // ── Runs page: partial table auto-refresh ───────────────────────────────────
+  // Mirrors bindDashboardIndex but reuses the router's full-page parse: fetch the
+  // current URL, lift out the runs <tbody>, and swap only that — preserving the
+  // seg-bar, search box, and filter chips. No new server endpoint required.
+  function bindRunsRefresh() {
+    if (!document.querySelector(".runs-toolbar")) return null;
+    const tbody = document.getElementById("runs-tbody");
+    if (!tbody) return null;
+    let inFlight = false;
+    async function refreshRuns() {
+      if (inFlight || document.hidden) return;
+      // Don't clobber a mid-typed search or an in-progress row selection.
+      const active = document.activeElement;
+      if (active && active.closest && active.closest(".settings-section")) return;
+      if (document.querySelector("[data-bulk-item]:checked")) return;
+      inFlight = true;
+      try {
+        const response = await fetch(location.href, {
+          headers: { "X-Requested-With": "fetch" },
+          cache: "no-store",
+        });
+        if (!response.ok) return;
+        const doc = new DOMParser().parseFromString(await response.text(), "text/html");
+        const next = doc.getElementById("runs-tbody");
+        const current = document.getElementById("runs-tbody");
+        if (next && current) current.innerHTML = next.innerHTML;
+      } catch (_) {
+        // Keep the existing rows if the transient refresh fails.
+      } finally {
+        inFlight = false;
+      }
+    }
+    const timer = setInterval(refreshRuns, 5000);
+    function onVisibility() {
+      if (!document.hidden) refreshRuns();
+    }
+    document.addEventListener("visibilitychange", onVisibility);
+    return function teardownRunsRefresh() {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }
 
+  // ── toasts: auto-dismiss server-rendered messages ──────────────────────────
+  function bindToasts() {
+    const list = document.querySelector(".settings-msgs");
+    if (!list) return null;
+    const timers = [];
+    list.querySelectorAll(".settings-msg").forEach((msg, idx) => {
+      // Errors linger longer so they're not missed.
+      const ttl = msg.classList.contains("error") ? 8000 : 4000;
+      timers.push(setTimeout(() => {
+        msg.classList.add("toast-out");
+        timers.push(setTimeout(() => msg.remove(), 320));
+      }, ttl + idx * 150));
+    });
+    return function teardownToasts() {
+      timers.forEach(clearTimeout);
+    };
+  }
+
+  // ── bulk selection (checkbox lists: runs, live sessions) ────────────────────
+  // Row checkboxes associate with their form via the HTML `form="..."` attribute,
+  // so they live in a swappable <tbody> while the submit lives in a toolbar form.
+  // Change events are delegated on document so rows swapped in by the runs
+  // auto-refresh stay wired without re-binding.
+  function bindBulkSelect() {
+    const forms = Array.from(document.querySelectorAll("form[data-bulk]"));
+    if (!forms.length) return null;
+    const cleanups = [];
+    forms.forEach((form) => {
+      const id = form.id;
+      const items = () => Array.from(document.querySelectorAll('[data-bulk-item][form="' + id + '"]'));
+      const all = document.querySelector('[data-bulk-all][data-bulk-for="' + id + '"]');
+      const bar = document.querySelector('[data-bulk-bar][data-bulk-for="' + id + '"]');
+      const count = bar ? bar.querySelector("[data-bulk-count]") : null;
+
+      function refresh() {
+        const list = items();
+        const checked = list.filter((c) => c.checked);
+        if (count) count.textContent = String(checked.length);
+        if (bar) bar.hidden = checked.length === 0;
+        if (all) {
+          all.checked = list.length > 0 && checked.length === list.length;
+          all.indeterminate = checked.length > 0 && checked.length < list.length;
+        }
+      }
+      function onAll() { items().forEach((c) => { c.checked = all.checked; }); refresh(); }
+      function onChange(e) {
+        if (e.target && e.target.matches && e.target.matches('[data-bulk-item][form="' + id + '"]')) refresh();
+      }
+      function onSubmit(e) {
+        const n = items().filter((c) => c.checked).length;
+        if (n === 0) { e.preventDefault(); return; }
+        if (!window.confirm("Delete " + n + " selected item(s)? This cannot be undone.")) e.preventDefault();
+      }
+      if (all) all.addEventListener("change", onAll);
+      document.addEventListener("change", onChange);
+      form.addEventListener("submit", onSubmit);
+      cleanups.push(() => {
+        if (all) all.removeEventListener("change", onAll);
+        document.removeEventListener("change", onChange);
+        form.removeEventListener("submit", onSubmit);
+      });
+      refresh();
+    });
+    return function teardownBulkSelect() { cleanups.forEach((fn) => fn()); };
+  }
+
+  // ── session client (full page load only — excluded from boosted nav) ─────────
+  // Returns a teardown closure (or null on non-session pages) so the router can
+  // close the WebSocket and clear timers when the analyst navigates away.
+  function initSession() {
   const sid = window.ACI_SESSION_ID;
-  if (!sid) return;
+  if (!sid || !document.getElementById("log")) return null;
 
   const log = document.getElementById("log");
   const activityEl = document.getElementById("activity");
@@ -334,6 +448,14 @@
     });
   }
 
+  // Named so the session teardown can remove it (anonymous window listeners leak
+  // across a boosted navigation away from the session page).
+  function onSidePanelWindowResize() {
+    if (!sidePanelEl) return;
+    const current = sidePanelEl.getBoundingClientRect().width;
+    if (current > 0) setSidePanelWidth(current, false);
+  }
+
   function bindSidePanel() {
     if (!sidePanelEl) return;
     restoreSidePanelWidth();
@@ -370,10 +492,7 @@
         window.addEventListener("pointercancel", onUp);
       });
     }
-    window.addEventListener("resize", () => {
-      const current = sidePanelEl.getBoundingClientRect().width;
-      if (current > 0) setSidePanelWidth(current, false);
-    });
+    window.addEventListener("resize", onSidePanelWindowResize);
   }
 
   // Apply the "selected" class to the button matching `verdict` (resolving the
@@ -814,4 +933,36 @@
   bindEditDialog();
   bindFeedback();
   connect();
+
+  return function teardownSession() {
+    if (ws) {
+      ws.onclose = null; // stop the auto-reconnect
+      try { ws.close(); } catch (_) {}
+    }
+    clearInterval(spinTimer);
+    spinTimer = null;
+    window.removeEventListener("resize", onSidePanelWindowResize);
+  };
+  }
+
+  // ── lifecycle registry ───────────────────────────────────────────────────────
+  // The boosted-nav router (nav.js) calls ACIApp.teardown() before swapping page
+  // content and ACIApp.init() after, so per-page bindings re-attach cleanly and
+  // timers/sockets from the previous page are released.
+  let _teardowns = [];
+
+  function initApp() {
+    renderStaticMarkdown();
+    [bindDashboardIndex(), bindRunsRefresh(), bindToasts(), bindBulkSelect(), initSession()].forEach((fn) => {
+      if (typeof fn === "function") _teardowns.push(fn);
+    });
+  }
+
+  function teardownApp() {
+    _teardowns.forEach((fn) => { try { fn(); } catch (_) {} });
+    _teardowns = [];
+  }
+
+  window.ACIApp = { init: initApp, teardown: teardownApp };
+  initApp();
 })();

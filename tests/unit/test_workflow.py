@@ -89,6 +89,26 @@ class TestEscalation(unittest.TestCase):
         self.assertEqual(escalation_action({"verdict": "needs_investigation"}), ACTION_HOLD)
         self.assertEqual(escalation_action(None), ACTION_NONE)
 
+    def test_tp_with_nonblocking_gaps_still_escalates(self):
+        verdict = {
+            "verdict": "tp",
+            "confidence": "high",
+            "classification_basis": "malicious_evidence",
+            "supporting_evidence": ["reverse shell in crontab"],
+            "nonblocking_gaps": ["collect EDR process tree"],
+        }
+        self.assertEqual(escalation_action(verdict), ACTION_AUTO_ESCALATE)
+
+    def test_fp_with_nonblocking_gaps_still_closes(self):
+        verdict = {
+            "verdict": "fp",
+            "confidence": "high",
+            "classification_basis": "benign_evidence",
+            "supporting_evidence": ["approved change ticket"],
+            "nonblocking_gaps": ["no packet capture available"],
+        }
+        self.assertEqual(escalation_action(verdict), ACTION_AUTO_CLOSE)
+
     def test_apply_records_decision_on_run(self):
         run = AgentRun.objects.create(
             case_id=MARK + "esc", agent_name="triage", question="q",

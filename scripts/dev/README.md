@@ -2,7 +2,8 @@
 
 Parametrized replacements for the old one-off `check_*.py` / `poll_*.py` /
 `submit_*.py` / `get_event.py` scripts that used to clutter the project root.
-Run them from the **project root** so Django resolves `aci.settings`:
+Run them from the **project root** with the same virtualenv used by the Django
+app so editable MCP packages and `aci.settings` resolve correctly:
 
 ```bash
 python scripts/dev/inspect_events.py --session <id> --latest 30
@@ -17,6 +18,18 @@ python scripts/dev/poll.py --session <session_id>
 python scripts/dev/submit.py --question "Triage case ~247152824"
 python scripts/dev/submit.py --session <id> --question "investigate this case" --poll
 ```
+
+Common environment/setup:
+
+```bash
+source venv/bin/activate
+export PYTHONPATH=.
+python manage.py migrate
+```
+
+The scripts inspect the local Django/SQLite state only. Live agent execution
+still depends on the configured model provider and enabled connectors from
+Dashboard -> Settings.
 
 | Tool | Replaces | Purpose |
 |---|---|---|

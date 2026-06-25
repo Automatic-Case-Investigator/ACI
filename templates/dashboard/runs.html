@@ -4,7 +4,6 @@
     <header class="settings-head">
       <div>
         <h1>Runs</h1>
-        <p class="muted">Every live session and automatic workflow run. Open a session to jump into its chatbox; stop or delete runs individually or in bulk.</p>
       </div>
     </header>
 
@@ -52,10 +51,24 @@
       </div>
       {% endif %}
 
+      <form id="runs-bulk" method="post" action="{% url 'dashboard:runs_delete_selected' %}" data-bulk>
+        <input type="hidden" name="seg" value="{{ segment }}">
+        <input type="hidden" name="verdict" value="{{ verdict }}">
+        <input type="hidden" name="q" value="{{ query }}">
+        <div class="bulk-sel-bar" data-bulk-bar data-bulk-for="runs-bulk" hidden>
+          <span class="bulk-count"><b data-bulk-count>0</b> selected</span>
+          <span class="bulk-spacer"></span>
+          <button type="submit" class="icon-btn icon-danger" data-tip="Delete selected" aria-label="Delete selected runs">
+            <c-lucideicon.trash-2 width="16" height="16" />
+          </button>
+        </div>
+      </form>
+
       <div class="settings-table-wrap">
         <table class="settings-table settings-table-roomy">
           <thead>
             <tr>
+              <th class="sel-col"><input type="checkbox" data-bulk-all data-bulk-for="runs-bulk" aria-label="Select all runs on this page"></th>
               <th>Type</th>
               <th>Run</th>
               <th>Status</th>
@@ -64,12 +77,15 @@
               <th></th>
             </tr>
           </thead>
-          <tbody>
-            {% for r in rows %}
+          <tbody id="runs-tbody">
+            {% for r in rows_page %}
             <tr>
+              <td class="sel-col">
+                <input type="checkbox" name="ids" value="{{ r.id }}" form="runs-bulk" data-bulk-item aria-label="Select run {{ r.agent_name }}">
+              </td>
               <td>
                 {% if r.is_live %}
-                <span class="pill pill-on">Live session</span>
+                <span class="pill pill-on">Live</span>
                 {% else %}
                 <span class="pill">Workflow</span>
                 {% endif %}
@@ -94,10 +110,10 @@
               <td class="muted">{{ r.age }}</td>
               <td class="row-actions">
                 {% if r.is_live %}
-                <a class="link-btn" href="{{ r.open_url }}">open chatbox</a>
+                <a class="icon-btn" href="{{ r.open_url }}" data-no-boost data-tip="Open chatbox" aria-label="Open chatbox"><c-lucideicon.eye width="16" height="16" /></a>
                 {% endif %}
                 {% if r.can_review %}
-                <a class="link-btn" href="{{ r.review_url }}">review triage</a>
+                <a class="icon-btn" href="{{ r.review_url }}" data-tip="Review triage" aria-label="Review triage"><c-lucideicon.clipboard-check width="16" height="16" /></a>
                 {% endif %}
                 {% if r.can_restart %}
                 <form method="post" action="{{ r.restart_url }}"
@@ -105,7 +121,7 @@
                   <input type="hidden" name="seg" value="{{ segment }}">
                   <input type="hidden" name="verdict" value="{{ verdict }}">
                   <input type="hidden" name="q" value="{{ query }}">
-                  <button type="submit" class="link-btn">restart from prior</button>
+                  <button type="submit" class="icon-btn" data-tip="Restart from prior" aria-label="Restart from prior"><c-lucideicon.rotate-cw width="16" height="16" /></button>
                 </form>
                 {% endif %}
                 {% if r.is_inferring %}
@@ -113,7 +129,7 @@
                   <input type="hidden" name="seg" value="{{ segment }}">
                   <input type="hidden" name="verdict" value="{{ verdict }}">
                   <input type="hidden" name="q" value="{{ query }}">
-                  <button type="submit" class="link-btn">stop</button>
+                  <button type="submit" class="icon-btn" data-tip="Stop run" aria-label="Stop run"><c-lucideicon.circle-stop width="16" height="16" /></button>
                 </form>
                 {% endif %}
                 <form method="post" action="{% url 'dashboard:run_delete' r.id %}"
@@ -121,16 +137,17 @@
                   <input type="hidden" name="seg" value="{{ segment }}">
                   <input type="hidden" name="verdict" value="{{ verdict }}">
                   <input type="hidden" name="q" value="{{ query }}">
-                  <button type="submit" class="link-btn link-danger">delete</button>
+                  <button type="submit" class="icon-btn icon-danger" data-tip="Delete run" aria-label="Delete run"><c-lucideicon.trash-2 width="16" height="16" /></button>
                 </form>
               </td>
             </tr>
             {% empty %}
-            <tr><td colspan="6" class="muted">no runs match this view</td></tr>
+            <tr><td colspan="7" class="muted">no runs match this view</td></tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
+      <c-pager :page="rows_page" param="p" />
     </section>
   </div>
 </c-layout>

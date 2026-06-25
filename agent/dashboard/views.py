@@ -130,6 +130,25 @@ def delete_session(request, session_id):
     return redirect("dashboard:index")
 
 
+@csrf_exempt
+@require_POST
+def delete_sessions_selected(request):
+    """Delete just the sessions whose ids were checked in the live-sessions list."""
+    from django.contrib import messages
+
+    count = 0
+    for sid in request.POST.getlist("ids"):
+        sid = str(sid)
+        run = AgentRun.objects.filter(id=sid).first()
+        if run is not None:
+            delete_run(run)
+        else:  # row already gone — still purge any stray events
+            AgentEvent.objects.filter(session_id=sid).delete()
+        count += 1
+    messages.success(request, f"Deleted {count} selected session(s).")
+    return redirect("dashboard:index")
+
+
 def session_view(request, session_id):
     session_id = str(session_id)
     orch = AgentRun.objects.filter(id=session_id).first()

@@ -76,7 +76,7 @@ class GroundedOutputGuardTests(unittest.TestCase):
 
         state = _state(final_answer=(
             "## Confirmed Facts\n"
-            "- None confirmed.\n\n"
+            "- Event evt-scan observed agent_ip=10.0.2.15 during the scan window.\n\n"
             "## Findings\n\n"
             "A follow-up lead was found.\n\n"
             "## Hypotheses\n"
@@ -84,6 +84,7 @@ class GroundedOutputGuardTests(unittest.TestCase):
             "## New Leads\n"
             "- title: Investigate if any subsequent 401/403 or 500 errors were generated during the same scan window\n"
             "  pivots: agent_ip=10.0.2.15\n"
+            "  evidence: event=evt-scan agent_ip=10.0.2.15 appeared in this task\n"
             "  priority: 70\n"
         ))
         config = {

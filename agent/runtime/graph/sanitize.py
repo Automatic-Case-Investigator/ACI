@@ -51,7 +51,19 @@ def _sanitize_history(messages: list, *, aggressive: bool = False) -> list:
             if "to=functions." in content or "<|start|>" in content or "<|end|>" in content:
                 continue
         sanitized.append(msg)
-    return sanitized
+
+    # Drop orphaned ToolMessages — messages whose tool_call_id has no matching entry
+    # in any AIMessage's tool_calls.  These cause a 400 from the OpenAI API on replay.
+    known_ids: set[str] = set()
+    for msg in sanitized:
+        for tc in getattr(msg, "tool_calls", None) or []:
+            if isinstance(tc, dict) and tc.get("id"):
+                known_ids.add(tc["id"])
+    return [
+        msg for msg in sanitized
+        if not (getattr(msg, "tool_call_id", None) is not None
+                and getattr(msg, "tool_call_id") not in known_ids)
+    ]
 
 
 def _normalize(result) -> str:

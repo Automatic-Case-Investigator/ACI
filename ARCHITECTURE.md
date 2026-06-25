@@ -54,6 +54,7 @@ The graph is built in `agent/runtime/graph.py` with these nodes:
 | `use_tools` | Execute model-requested tools, cap oversized tool results before feeding them back to the model, pre-create AVFS parent directories for writes, and update `memory.md` indexes after successful AVFS writes. |
 | `assess` | Complete the claimed task with a summary. Triage has a fallback recovery prompt when the model stops without returning report text. Investigation has a **seed guard**: if the "Populate investigation queue" seed task finishes without any `create_task` calls, `assess` re-injects a correction message and routes back to `think` instead of forwarding to `pivot`, giving the model another chance to populate the queue. |
 | `finish` | Write the final investigation report stub through the AVFS workspace writer, compute `completed` vs `incomplete_budget`, or preserve `cancelled`. |
+| `reassess_verdict` | **Investigation only.** Runs after `finish`. Extracts the triage verdict from the handoff and compares it against the investigation synthesis verdict. If they agree, tags `state["verdict"]` with `triage_verdict` at zero cost. If they conflict, fires one focused model call — given the full investigation narrative plus both verdicts — to resolve which is correct, then overwrites `state["verdict"]` with the resolved result. The resolved verdict carries `triage_verdict` (the original triage call) and `reassessment_reason` (one-sentence explanation). If no model is available or the call fails, synthesis verdict is preserved and tagged. |
 
 ```mermaid
 flowchart TD
@@ -95,7 +96,8 @@ flowchart TD
     Budget -- no --> Claim
     Budget -- yes --> Finish
 
-    Finish --> Status{"final status"}
+    Finish --> Reassess["reassess_verdict\n(investigation only)"]
+    Reassess --> Status{"final status"}
     Status --> Completed["completed"]
     Status --> Incomplete["incomplete_budget"]
     Status --> Stopped["cancelled"]

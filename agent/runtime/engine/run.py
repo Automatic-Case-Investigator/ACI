@@ -117,6 +117,7 @@ async def _run_agent_bound(
             ctx_tokens=0,
             verdict=None,
             pivot_tasks_created=0,
+            summary_format_retries=0,
         )
 
         config = {

@@ -9,7 +9,7 @@ TheHive alerts as summaries; use Wazuh events for proof.
 
 **Always start with a broad search. Never open a new investigation thread with a rule.id filter.**
 
-- **Step 1 — keyword sweep first**: Use `search_keyword` with the most distinctive terms from the alert or task (hostname, command name, path fragment, IP address, file name). `search_keyword` needs no DSL, never produces parsing errors, and casts the widest net. This is always the first call.
+- **Step 1 — keyword sweep first**: Use `search_keyword` with the most distinctive terms from the alert or task (hostname, command name, path fragment, IP address, file name). `search_keyword` uses Discover-style free-text matching across common Wazuh alert fields, needs no DSL, never produces parsing errors, and casts a wide net. This is always the first call.
 - **Step 2 — sweep `full_log`/`rule.description`/`rule.groups`**: After `search_keyword`, run a `search()` sweep across these text fields with 3-5 relevant wildcard/match clauses under `should` and `minimum_should_match: 1`. This surfaces event families.
 - **Step 3 — profile rule.id**: Only after the broad sweep confirms which events exist, profile `rule.id` (or `rule.groups`) to understand which rule families fired. Never start here.
 - **Step 4 — narrow DSL queries**: Now use structured DSL with field filters (rule.id, agent.name, specific field values) to retrieve precise event sets.
@@ -64,7 +64,12 @@ TheHive alerts as summaries; use Wazuh events for proof.
 
 ## Event identity
 
-- A real Wazuh/OpenSearch document id is the _id returned by a search result.
+- A real Wazuh/OpenSearch document id is the `_id` returned by a search result.
+  It is an alphanumeric string, e.g. `B_ZVUZYBcMy642XYj-SP` — never a numeric ID.
+- **TheHive alert IDs (numeric with `~` prefix, e.g. `~5083200`) are NOT Wazuh
+  document IDs.** Passing them to `get_event` will always return "No event found".
+  If you have a TheHive alert ID, use the SOAR tool (`get_alert`) to retrieve it —
+  do not pass it to any Wazuh tool.
 - Do not guess, shorten, or fabricate event ids.
 - Do not assume a SOAR alert source reference is a Wazuh document id unless raw data
   confirms it.
@@ -268,7 +273,7 @@ from the case. Run independent pivots separately and store results before citing
 ### Step 0 — broad sweep first (ALWAYS run this before any playbook DSL)
 
 1. **Keyword sweep** — use `search_keyword` with the most distinctive terms from the alert/task:
-   `search_keyword(keyword="{hostname} {command_or_path}", time_range={...})`
+   `search_keyword(query="{hostname} {command_or_path}", time_range={...})`
    This casts the widest net and never produces parsing errors.
 
 2. **Full-text sweep** across `full_log`, `rule.description`, and `rule.groups`:

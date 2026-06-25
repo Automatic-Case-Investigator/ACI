@@ -5,22 +5,45 @@
   <div class="verdict-head">
     <span class="verdict-badge">{{ v.verdict|upper|default:"—" }}</span>
     <span class="verdict-conf">confidence: {{ v.confidence|default:"?" }}</span>
-    {% if v.impact_state and v.impact_state != "unknown" %}<span class="verdict-conf">impact: {{ v.impact_state }}</span>{% endif %}
-    {% if v.scope_state and v.scope_state != "unknown" %}<span class="verdict-conf">scope: {{ v.scope_state }}</span>{% endif %}
-    {% if v.demoted_from %}<span class="verdict-demoted">demoted from {{ v.demoted_from|upper }}</span>{% endif %}
+    {% if v.demoted_from %}<span class="verdict-demoted">override: {{ v.demoted_from|upper }} → {{ v.verdict|upper }}</span>{% endif %}
+    {% if v.triage_verdict and v.triage_verdict != v.verdict %}
+      <span class="verdict-revised" {% if v.reassessment_reason %}title="{{ v.reassessment_reason }}"{% endif %}>revised: {{ v.triage_verdict|upper }} → {{ v.verdict|upper }}</span>
+    {% endif %}
   </div>
-  {% if v.supporting_evidence %}
-  <div class="verdict-row"><b>Evidence</b>
-    <ul>{% for e in v.supporting_evidence %}<li>{{ e }}</li>{% endfor %}</ul>
-  </div>
-  {% endif %}
-  {% if v.matched_patterns %}
-  <div class="verdict-row"><b>Patterns</b>
-    <ul>{% for p in v.matched_patterns %}<li>{{ p }}</li>{% endfor %}</ul>
-  </div>
-  {% endif %}
   {% if v.recommended_action %}
-  <div class="verdict-row"><b>Action</b> {{ v.recommended_action }}</div>
+  <div class="verdict-action"><b>Next step</b> {{ v.recommended_action }}</div>
+  {% endif %}
+
+  {% if v.classification_basis or v.impact_state or v.scope_state or v.supporting_evidence or v.matched_patterns or v.blocking_gaps or v.nonblocking_gaps %}
+  <details class="verdict-more">
+    <summary>Details &amp; evidence</summary>
+    <div class="verdict-chips">
+      {% if v.classification_basis %}<span class="verdict-conf">basis: {{ v.classification_basis }}</span>{% endif %}
+      {% if v.impact_state and v.impact_state != "unknown" %}<span class="verdict-conf">impact: {{ v.impact_state }}</span>{% endif %}
+      {% if v.scope_state and v.scope_state != "unknown" %}<span class="verdict-conf">scope: {{ v.scope_state }}</span>{% endif %}
+      {% if v.triage_verdict and v.triage_verdict == v.verdict %}<span class="verdict-triage-confirmed">confirmed from triage</span>{% endif %}
+    </div>
+    {% if v.supporting_evidence %}
+    <div class="verdict-row"><b>Evidence</b>
+      <ul>{% for e in v.supporting_evidence %}<li>{{ e }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+    {% if v.matched_patterns %}
+    <div class="verdict-row"><b>Patterns</b>
+      <ul>{% for p in v.matched_patterns %}<li>{{ p }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+    {% if v.blocking_gaps %}
+    <div class="verdict-row"><b>Blocking gaps</b>
+      <ul>{% for g in v.blocking_gaps %}<li>{{ g }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+    {% if v.nonblocking_gaps %}
+    <div class="verdict-row"><b>Follow-up gaps</b>
+      <ul>{% for g in v.nonblocking_gaps %}<li>{{ g }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+  </details>
   {% endif %}
   <div class="verdict-feedback" data-run-id="{{ snap.verdict_run_id }}" data-analyst-verdict="{{ snap.analyst_verdict|default:'' }}">
     <span class="muted">analyst:</span>

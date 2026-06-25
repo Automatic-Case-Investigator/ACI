@@ -19,7 +19,7 @@ os.environ.setdefault("SECRET_KEY", "test")
 import django
 django.setup()
 
-from agent.runtime.graph import _model_tools_for_agent
+from agent.runtime.graph import _format_queue_context, _model_tools_for_agent
 
 
 class _Tool:
@@ -45,6 +45,7 @@ class TestToolVisibility(unittest.TestCase):
         current = {"title": "Investigate SSH brute-force"}
         names = _names(_model_tools_for_agent("investigation", ALL_TOOLS, current))
         self.assertFalse(names & HIDDEN, f"leaked: {names & HIDDEN}")
+        self.assertNotIn("create_task", names)
         self.assertIn("search", names)  # real work tools still present
 
     def test_investigation_seed_task_has_full_tools(self):
@@ -63,6 +64,20 @@ class TestToolVisibility(unittest.TestCase):
     def test_no_current_task_still_hides_graph_tools(self):
         names = _names(_model_tools_for_agent("investigation", ALL_TOOLS, None))
         self.assertFalse(names & HIDDEN)
+        self.assertNotIn("create_task", names)
+
+    def test_queue_context_formats_current_tasks(self):
+        context = _format_queue_context([
+            {
+                "status": "pending",
+                "priority": 85,
+                "title": "Review cron FIM diff",
+                "description": "Pivots: path=/var/spool/cron/crontabs/user",
+            }
+        ])
+        self.assertIn("Current Task Queue", context)
+        self.assertIn("[pending P85] Review cron FIM diff", context)
+        self.assertIn("Only propose New Leads", context)
 
 
 if __name__ == "__main__":

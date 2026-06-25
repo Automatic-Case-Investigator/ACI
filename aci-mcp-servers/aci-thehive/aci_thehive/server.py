@@ -71,23 +71,29 @@ preserve the `~` prefix** when passing a case ID to any tool. A numeric ID witho
 the tilde (e.g. `245862456`) is not a valid case ID and will return 404. If the
 analyst provides a case ID without the tilde, add it before calling any tool.
 
-## Case workflow
+## Mandatory startup sequence (triage and investigation)
 
-- For case-specific work, start by reading the case record. Capture title,
-  description, severity, status, tags, created/updated timestamps, and any analyst
-  context already present.
-- Read linked alerts before deciding what happened. The case record alone is usually
-  insufficient for triage.
-- For broad triage, summarize the case and alerts into distinct threads before
-  creating deeper investigation work.
-- For narrow follow-up questions, reuse known case context when available, then read
-  only the additional case/alert detail needed to answer the question.
+Run these three steps before any analysis. Do not skip or reorder them.
+
+1. **`get_case`** — Load the full case record. Capture title, description, severity,
+   status, tags, created/updated timestamps, and any analyst context already present.
+2. **`list_case_alerts`** — Load the grouped alert summary for the case. Reason from
+   `groups` and `time_range` to understand alert volume and distinct event families.
+   The case record alone is insufficient for triage — always read the alerts.
+3. **`get_alert`** — For each alert group that appears significant, fetch the full
+   alert detail to retrieve raw fields, source IPs, usernames, hosts, hashes, and
+   SIEM event references needed for pivoting.
+
+For narrow follow-up questions, reuse known case context when available, then read
+only the additional case/alert detail needed to answer the question.
 
 ## Alert handling
 
 - Linked alerts are summarized to avoid context overload. Use pagination/limits
   deliberately, and fetch full alert details only for alerts that matter to the
   current task.
+- Use `get_similar_cases` when you need other cases connected by shared artifacts.
+  The server handles TheHive-version differences for you.
 - Treat alert fields as pivots, not final proof. Important pivots commonly include
   source, sourceRef, title, type, severity, tags, affected assets, users, IPs, and
   timestamps.
@@ -173,6 +179,26 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="get_similar_cases",
+            description=(
+                "Return other TheHive cases linked to the provided case by shared artifacts. "
+                "Uses the preferred similar-cases query when available and falls back to the "
+                "older linked-cases query on older TheHive versions."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "case_id": {"type": "string", "description": "TheHive case ID."},
+                    "max_items": {
+                        "type": "integer",
+                        "description": "Maximum related cases to return (default 20).",
+                        "default": 20,
+                    },
+                },
+                "required": ["case_id"],
+            },
+        ),
+        Tool(
             name="get_alert",
             description="Retrieve a specific TheHive alert by ID.",
             inputSchema={
@@ -249,6 +275,11 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             result = client.list_case_alerts(
                 arguments["case_id"],
                 max_results=int(arguments.get("max_results", 20)),
+            )
+        elif name == "get_similar_cases":
+            result = client.get_similar_cases(
+                arguments["case_id"],
+                max_items=int(arguments.get("max_items", 20)),
             )
         elif name == "get_alert":
             result = client.get_alert(arguments["alert_id"])

@@ -55,9 +55,9 @@ Always list the specific searches performed when reporting a negative result.
 - If a task becomes irrelevant, dismiss it with a reason rather than completing it with empty output.
 - Mark a task blocked (update status to "blocked") if you cannot proceed without external input. Explain what you need.
 
-## Long-term memory (AVFS)
+## Long-term memory
 
-You have persistent memory in AVFS that survives across runs. **Nothing is loaded
+You have persistent memory in your workspace that survives across runs. **Nothing is loaded
 for you automatically — you must search it yourself before drawing conclusions.**
 Use the available workspace search and read capabilities to retrieve it.
 

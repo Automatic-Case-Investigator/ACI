@@ -21,19 +21,22 @@ DEFAULTS = {
 }
 
 
+def _is_reasoning_model(model_name: str) -> bool:
+    """OpenAI o-series reasoning models don't accept temperature != 1."""
+    name = (model_name or "").lower()
+    return name.startswith(("o1", "o3", "o4"))
+
+
 async def build_model() -> ChatOpenAI:
     cfg = await _model_config()
 
     sampling = cfg.get("sampling_params") or {}
+    model_name = cfg["model"]
 
     kwargs = {
         "base_url": cfg["base_url"],
         "api_key": cfg["api_key"],
-        "model": cfg["model"],
-        "temperature": sampling.get(
-            "temperature",
-            DEFAULTS["sampling_params"]["temperature"],
-        ),
+        "model": model_name,
         "max_tokens": sampling.get(
             "max_tokens",
             DEFAULTS["sampling_params"]["max_tokens"],
@@ -43,6 +46,14 @@ async def build_model() -> ChatOpenAI:
         # the active agent's real prompt-token count instead of staying empty.
         "stream_usage": True,
     }
+
+    # Reasoning models (o1/o3/o4 family) reject temperature != 1; omit it so
+    # the provider uses its default. Non-reasoning models default to 0.
+    if not _is_reasoning_model(model_name):
+        kwargs["temperature"] = sampling.get(
+            "temperature",
+            DEFAULTS["sampling_params"]["temperature"],
+        )
 
     timeout = _normalize_timeout(cfg.get("timeout"))
     if timeout is not None:

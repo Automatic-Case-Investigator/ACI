@@ -34,7 +34,8 @@ import django
 django.setup()
 
 from aci_taskqueue.store import init_db, list_tasks as sq_list, create_task, list_tasks
-from agent.runtime.graph import pivot, _MAX_PIVOT_TASKS
+from agent.runtime.graph import pivot, _MAX_APPROVED_LEADS_PER_TASK, _MAX_PIVOT_TASKS
+from langchain_core.messages import AIMessage
 
 
 class TQTool:
@@ -47,14 +48,53 @@ class TQTool:
         return json.dumps(result, default=str) if result is not None else "null"
 
 
-def _tools():
-    return [TQTool("create_task", create_task), TQTool("list_tasks", list_tasks)]
+def _lead_dicts(priorities):
+    """The validated-lead JSON the (stubbed) lead model returns for these leads."""
+    out = []
+    for i, p in enumerate(priorities):
+        ip = f"10.0.0.{i + 1}"
+        out.append({
+            "title": f"Investigate C2 callback activity for {ip}",
+            "pivots": f"ip={ip}, time=2025-04-20T03:{i:02d}:00Z",
+            "evidence": f"event=evt-{i}, {ip} appeared in the current task output",
+            "priority": p,
+            "approved": True,
+            "category": "approved",
+            "reason": "evidence-backed callback",
+        })
+    return out
+
+
+class StubLeadModel:
+    """Returns a fixed validated-lead JSON array regardless of prompt — the lead
+    model is now responsible for extraction+validation, so the budget cap is what
+    this test exercises."""
+    def __init__(self, leads):
+        self._payload = json.dumps(leads)
+
+    def bind_tools(self, tools):
+        return self
+
+    async def ainvoke(self, messages, **kwargs):
+        return AIMessage(content=self._payload)
+
+
+def _config(priorities):
+    return {"configurable": {
+        "tools": [TQTool("create_task", create_task), TQTool("list_tasks", list_tasks)],
+        "model": StubLeadModel(_lead_dicts(priorities)),
+    }}
 
 
 def _leads_block(priorities):
-    lines = ["## New Leads"]
+    # final_answer only needs a non-empty New Leads section so pivot proceeds; the
+    # stub model produces the actual structured leads.
+    lines = ["## Confirmed Facts"]
+    for i, _ in enumerate(priorities):
+        lines.append(f"- Event evt-{i} observed callback artifact 10.0.0.{i + 1}.")
+    lines += ["", "## New Leads"]
     for i, p in enumerate(priorities):
-        lines += [f"- title: Lead P{p} #{i}", f"  pivots: pivot for {p}", f"  priority: {p}"]
+        lines.append(f"- Investigate C2 callback activity for 10.0.0.{i + 1} (priority {p})")
     return "\n".join(lines) + "\n"
 
 
@@ -83,25 +123,25 @@ class PivotCapTest(unittest.IsolatedAsyncioTestCase):
         # More leads than the cap, with descending priorities.
         priorities = list(range(95, 95 - 13 * 5, -5))  # 13 leads: 95,90,...,35
         self.assertGreater(len(priorities), _MAX_PIVOT_TASKS)
-        config = {"configurable": {"tools": _tools()}}
+        config = _config(priorities)
 
         out = await pivot(_state(run_id, _leads_block(priorities)), config)
 
         tasks = sq_list("~cap", run_id, "investigation")
-        self.assertEqual(len(tasks), _MAX_PIVOT_TASKS,
-                         "pivot must not create more than the cap")
-        self.assertEqual(out.get("pivot_tasks_created"), _MAX_PIVOT_TASKS)
+        self.assertEqual(len(tasks), _MAX_APPROVED_LEADS_PER_TASK,
+                         "pivot must not create more than the per-task cap")
+        self.assertEqual(out.get("pivot_tasks_created"), _MAX_APPROVED_LEADS_PER_TASK)
 
-        # The kept tasks are the highest-priority leads; the lowest are deferred.
+        # The kept tasks are the highest-priority leads; the rest are rejected/deferred.
         kept = {t["priority"] for t in tasks}
-        top = sorted(priorities, reverse=True)[:_MAX_PIVOT_TASKS]
+        top = sorted(priorities, reverse=True)[:_MAX_APPROVED_LEADS_PER_TASK]
         self.assertEqual(kept, set(top))
-        for low in sorted(priorities)[: len(priorities) - _MAX_PIVOT_TASKS]:
+        for low in sorted(priorities)[: len(priorities) - _MAX_APPROVED_LEADS_PER_TASK]:
             self.assertNotIn(low, kept, f"low-priority lead P{low} should be deferred")
 
     async def test_no_new_tasks_once_budget_already_spent(self):
         run_id = "cap-run-2"
-        config = {"configurable": {"tools": _tools()}}
+        config = _config([90, 80, 70])
         # Already at the cap from earlier pivots.
         out = await pivot(
             _state(run_id, _leads_block([90, 80, 70]), already=_MAX_PIVOT_TASKS),
@@ -112,7 +152,7 @@ class PivotCapTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_under_cap_creates_all(self):
         run_id = "cap-run-3"
-        config = {"configurable": {"tools": _tools()}}
+        config = _config([90, 80, 70])
         out = await pivot(_state(run_id, _leads_block([90, 80, 70])), config)
         self.assertEqual(len(sq_list("~cap", run_id, "investigation")), 3)
         self.assertEqual(out.get("pivot_tasks_created"), 3)

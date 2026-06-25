@@ -20,6 +20,7 @@ from agent.runtime.analysis.verdict import (
     citation_check,
     apply_citation_policy,
     apply_open_gaps_policy,
+    normalize_followup_gaps,
 )
 
 
@@ -31,9 +32,12 @@ Compromise confirmed; high severity; contained.
 {
   "verdict": "tp",
   "confidence": "high",
+  "classification_basis": "malicious_evidence",
   "matched_patterns": [],
   "supporting_evidence": ["event 1712 — reverse shell in crontab"],
   "contradicting_evidence": [],
+  "blocking_gaps": [],
+  "nonblocking_gaps": [],
   "missing_evidence": [],
   "recommended_action": "escalate"
 }
@@ -74,6 +78,17 @@ class TestParseVerdict(unittest.TestCase):
         text = '```json\n{"foo": "bar"}\n```'
         self.assertIsNone(parse_verdict(text))
 
+    def test_parses_trailing_bare_json_object(self):
+        text = (
+            "## Findings\nRoutine command audit event.\n\n"
+            '{"verdict":"benign","confidence":"medium","supporting_evidence":["alert:~1"],'
+            '"matched_patterns":[],"new_leads":[]}'
+        )
+        v = parse_verdict(text)
+        self.assertIsNotNone(v)
+        self.assertEqual(v["verdict"], "fp")
+        self.assertEqual(v["confidence"], "medium")
+
     def test_normalizes_case_and_string_lists(self):
         text = '```json\n{"verdict": "TP", "confidence": "High", "supporting_evidence": "single string"}\n```'
         v = parse_verdict(text)
@@ -86,6 +101,27 @@ class TestParseVerdict(unittest.TestCase):
         v = parse_verdict(text)
         self.assertEqual(v["matched_patterns"], [])
         self.assertEqual(v["contradicting_evidence"], [])
+        self.assertEqual(v["blocking_gaps"], [])
+        self.assertEqual(v["nonblocking_gaps"], [])
+
+    def test_legacy_missing_evidence_copied_to_nonblocking_gaps(self):
+        text = (
+            '```json\n{"verdict": "needs_investigation", "confidence": "low", '
+            '"missing_evidence": ["collect EDR process tree"]}\n```'
+        )
+        v = parse_verdict(text)
+        self.assertEqual(v["missing_evidence"], ["collect EDR process tree"])
+        self.assertEqual(v["blocking_gaps"], [])
+        self.assertEqual(v["nonblocking_gaps"], ["collect EDR process tree"])
+
+    def test_legacy_blocking_missing_evidence_copied_to_blocking_gaps(self):
+        text = (
+            '```json\n{"verdict": "needs_investigation", "confidence": "low", '
+            '"missing_evidence": ["no telemetry available for C2 traffic"]}\n```'
+        )
+        v = parse_verdict(text)
+        self.assertEqual(v["blocking_gaps"], ["no telemetry available for C2 traffic"])
+        self.assertEqual(v["nonblocking_gaps"], [])
 
 
 class TestValidateVerdict(unittest.TestCase):
@@ -105,9 +141,22 @@ class TestValidateVerdict(unittest.TestCase):
         self.assertTrue(any("confidence must be one of" in p for p in problems))
 
     def test_tp_without_evidence_flagged(self):
-        v = {"verdict": "tp", "confidence": "high", "supporting_evidence": []}
+        v = {"verdict": "tp", "confidence": "high",
+             "classification_basis": "malicious_evidence", "supporting_evidence": []}
         problems = validate_verdict(v)
         self.assertTrue(any("supporting_evidence" in p for p in problems))
+
+    def test_tp_without_malicious_basis_flagged(self):
+        v = {"verdict": "tp", "confidence": "high",
+             "classification_basis": "insufficient_evidence", "supporting_evidence": ["e1"]}
+        problems = validate_verdict(v)
+        self.assertTrue(any("malicious_evidence" in p for p in problems))
+
+    def test_fp_without_benign_basis_flagged(self):
+        v = {"verdict": "fp", "confidence": "high",
+             "classification_basis": "insufficient_evidence", "supporting_evidence": ["e1"]}
+        problems = validate_verdict(v)
+        self.assertTrue(any("benign_evidence" in p for p in problems))
 
 
 class TestCitationPolicy(unittest.TestCase):
@@ -151,6 +200,7 @@ class TestImpactScopeFields(unittest.TestCase):
     def test_impact_scope_round_trip(self):
         text = (
             '```json\n{"verdict": "tp", "confidence": "high", '
+            '"classification_basis": "malicious_evidence", '
             '"impact_state": "active", "scope_state": "lateral_spread", '
             '"supporting_evidence": ["e1"]}\n```'
         )
@@ -182,6 +232,7 @@ class TestImpactScopeFields(unittest.TestCase):
 
     def test_validate_passes_valid_enum_values(self):
         v = {"verdict": "tp", "confidence": "high",
+             "classification_basis": "malicious_evidence",
              "supporting_evidence": ["e1"], "impact_state": "contained", "scope_state": "isolated"}
         self.assertEqual(validate_verdict(v), [])
 
@@ -190,39 +241,90 @@ class TestOpenGapsPolicy(unittest.TestCase):
 
     def _tp_with_gaps(self, gaps):
         return {"verdict": "tp", "confidence": "high",
+                "classification_basis": "malicious_evidence",
                 "supporting_evidence": ["e1"], "missing_evidence": gaps}
 
-    def test_strict_demotes_on_any_gap(self):
+    def test_nonblocking_gaps_do_not_demote(self):
+        v = {"verdict": "tp", "confidence": "high",
+             "classification_basis": "malicious_evidence",
+             "supporting_evidence": ["event 1712"],
+             "nonblocking_gaps": ["additional log source would help"]}
+        out, demoted = apply_open_gaps_policy(v, strict=True)
+        self.assertFalse(demoted)
+        self.assertEqual(out["verdict"], "tp")
+
+    def test_blocking_gaps_demote(self):
+        v = {"verdict": "tp", "confidence": "high",
+             "classification_basis": "malicious_evidence",
+             "supporting_evidence": ["event 1712"],
+             "blocking_gaps": ["cannot distinguish admin from attacker"]}
+        out, demoted = apply_open_gaps_policy(v, strict=False)
+        self.assertTrue(demoted)
+        self.assertEqual(out["verdict"], "needs_investigation")
+
+    def test_tp_with_missing_basis_demotes(self):
         v = self._tp_with_gaps(["one minor gap"])
+        v.pop("classification_basis")
         out, demoted = apply_open_gaps_policy(v, strict=True)
         self.assertTrue(demoted)
         self.assertEqual(out["verdict"], "needs_investigation")
 
-    def test_non_strict_no_demotion_for_small_non_blocking_gaps(self):
-        v = self._tp_with_gaps(["additional log source would help", "confirm persistence mechanism"])
+    def test_legacy_generic_missing_evidence_does_not_demote_by_count(self):
+        v = self._tp_with_gaps(["gap a", "gap b", "gap c"])
         out, demoted = apply_open_gaps_policy(v, strict=False)
         self.assertFalse(demoted)
         self.assertEqual(out["verdict"], "tp")
 
-    def test_non_strict_demotes_on_three_or_more_gaps(self):
-        v = self._tp_with_gaps(["gap a", "gap b", "gap c"])
-        out, demoted = apply_open_gaps_policy(v, strict=False)
-        self.assertTrue(demoted)
-        self.assertEqual(out["verdict"], "needs_investigation")
-
-    def test_non_strict_demotes_on_blocking_keyword(self):
+    def test_legacy_missing_evidence_with_blocking_phrase_demotes(self):
         v = self._tp_with_gaps(["cannot rule out lateral movement"])
         out, demoted = apply_open_gaps_policy(v, strict=False)
         self.assertTrue(demoted)
         self.assertEqual(out["verdict"], "needs_investigation")
 
-    def test_non_strict_demotes_no_telemetry_keyword(self):
-        v = self._tp_with_gaps(["no telemetry available for C2 traffic"])
+    def test_fp_without_benign_basis_demotes(self):
+        v = {"verdict": "fp", "confidence": "high",
+             "supporting_evidence": ["no malicious evidence found"],
+             "nonblocking_gaps": ["collect EDR process tree"]}
         out, demoted = apply_open_gaps_policy(v, strict=False)
         self.assertTrue(demoted)
+        self.assertEqual(out["verdict"], "needs_investigation")
+
+    def test_fp_with_benign_basis_and_nonblocking_gaps_remains_fp(self):
+        v = {"verdict": "fp", "confidence": "high",
+             "classification_basis": "benign_evidence",
+             "supporting_evidence": ["change ticket approved crontab edit"],
+             "nonblocking_gaps": ["no EDR process tree available"]}
+        out, demoted = apply_open_gaps_policy(v, strict=False)
+        self.assertFalse(demoted)
+        self.assertEqual(out["verdict"], "fp")
+
+    def test_session_regression_tp_with_followup_gaps_remains_tp(self):
+        v = self._tp_with_gaps(["additional log source would help", "confirm persistence mechanism"])
+        out, demoted = apply_open_gaps_policy(v, strict=False)
+        self.assertFalse(demoted)
+        self.assertEqual(out["verdict"], "tp")
+
+    def test_session_regression_initial_access_gap_is_nonblocking_for_proven_tp(self):
+        v = {
+            "verdict": "tp",
+            "confidence": "high",
+            "classification_basis": "malicious_evidence",
+            "supporting_evidence": [
+                "Syscheck modified /var/spool/cron/crontabs/user with reverse-shell cron entry"
+            ],
+            "blocking_gaps": ["Initial access source IP not retrieved from telemetry"],
+            "nonblocking_gaps": ["No direct network telemetry confirming callback"],
+        }
+        normalized = normalize_followup_gaps(v)
+        out, demoted = apply_open_gaps_policy(normalized, strict=False)
+        self.assertFalse(demoted)
+        self.assertEqual(out["verdict"], "tp")
+        self.assertEqual(out["blocking_gaps"], [])
+        self.assertIn("Initial access source IP not retrieved from telemetry", out["nonblocking_gaps"])
 
     def test_no_missing_evidence_never_demotes(self):
         v = {"verdict": "tp", "confidence": "high",
+             "classification_basis": "malicious_evidence",
              "supporting_evidence": ["e1"], "missing_evidence": []}
         out, demoted = apply_open_gaps_policy(v, strict=True)
         self.assertFalse(demoted)

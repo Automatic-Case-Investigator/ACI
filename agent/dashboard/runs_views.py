@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlencode
 
 from django.contrib import messages
+from django.core.paginator import Paginator
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.csrf import csrf_exempt
@@ -43,6 +44,7 @@ _WORKFLOW_TRIGGERS = (AgentRun.TRIGGER_AUTO, AgentRun.TRIGGER_SCHEDULED)
 # Most recent runs scanned before the child-run filter + display cap are applied.
 _SCAN_LIMIT = 500
 _DISPLAY_LIMIT = 200
+_RUNS_PER_PAGE = 25
 
 _ESCALATION_LABEL = {
     "auto_close": "Auto-close",
@@ -199,8 +201,10 @@ def _redirect_back(request):
 
 def runs_view(request):
     f = _filters_from(request.GET)
+    rows = _run_rows(f["seg"], f["query"], f["verdict"])
+    rows_page = Paginator(rows, _RUNS_PER_PAGE).get_page(request.GET.get("p"))
     return render(request, "dashboard/runs.html", {
-        "rows": _run_rows(f["seg"], f["query"], f["verdict"]),
+        "rows_page": rows_page,
         "segment": f["seg"],
         "segments": SEGMENTS,
         "query": f["query"],
@@ -331,4 +335,18 @@ def runs_delete_all(request):
         delete_run(run)
         count += 1
     messages.success(request, f"Deleted {count} run(s).")
+    return _redirect_back(request)
+
+
+@csrf_exempt
+@require_POST
+def runs_delete_selected(request):
+    """Delete just the runs whose ids were checked in the table."""
+    count = 0
+    for rid in request.POST.getlist("ids"):
+        run = AgentRun.objects.filter(id=rid).first()
+        if run is not None:
+            delete_run(run)
+            count += 1
+    messages.success(request, f"Deleted {count} selected run(s).")
     return _redirect_back(request)

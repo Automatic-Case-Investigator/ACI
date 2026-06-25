@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 
 from ..engine.streaming import invoke_streaming
 from ..infra.avfs import home_dir
@@ -38,6 +38,10 @@ def _model_tools_for_agent(
     excluded = set(_GRAPH_MANAGED_TOOLS)
     if agent_name == "triage":
         excluded.add("create_task")
+    if agent_name == "investigation":
+        title = ((current_task or {}).get("title") or "").lower()
+        if _SEED_TASK_TITLE not in title:
+            excluded.add("create_task")
     return [t for t in tools if getattr(t, "name", "") not in excluded]
 
 
@@ -107,10 +111,20 @@ def _should_compact(ctx_tokens: int) -> bool:
     return ctx_tokens >= int(limit * 0.8)
 
 
+def _is_tool_related(msg) -> bool:
+    """True for raw tool evidence: a ToolMessage or the assistant turn that
+    called the tool. These must never be summarised away — they carry the
+    grounded findings (e.g. a reverse shell in a SIEM result) the final report
+    is built from."""
+    return isinstance(msg, ToolMessage) or bool(getattr(msg, "tool_calls", None))
+
+
 async def _compact_history(messages: list, bound, agent_name: str) -> list:
     """Summarise old conversation turns to reduce context size.
 
-    Keeps the last 4 conversation messages verbatim; everything before that is
+    Never compacts the current task's tool results: every ToolMessage and the
+    assistant message that issued the call are kept verbatim. Only standalone
+    text (the task brief, model narration) from before the recent window is
     replaced by a single summary HumanMessage. Returns the original list on any
     failure so the caller can continue normally.
     """
@@ -120,13 +134,21 @@ async def _compact_history(messages: list, bound, agent_name: str) -> list:
         return messages
 
     keep = 4
-    to_summarize = conv_msgs[:-keep]
+    head = conv_msgs[:-keep]
     recent = conv_msgs[-keep:]
+
+    # Split the head into tool evidence (preserved in place) and free text
+    # (summarisable). Keeping the assistant tool-call turns alongside their
+    # ToolMessages also preserves tool_call_id pairing for API replay.
+    preserved_head = [m for m in head if _is_tool_related(m)]
+    summarizable = [m for m in head if not _is_tool_related(m)]
+    if not summarizable:
+        return messages  # nothing safe to compact without dropping evidence
 
     try:
         resp = await bound.ainvoke([
             *sys_msgs,
-            *to_summarize,
+            *summarizable,
             HumanMessage(content=(
                 "Concisely summarise the above conversation. Preserve: case IDs, "
                 "host names, IPs, key findings, tool results still relevant, and "
@@ -141,7 +163,12 @@ async def _compact_history(messages: list, bound, agent_name: str) -> list:
     if not summary:
         return messages
 
-    return [*sys_msgs, HumanMessage(content=f"[Prior context summary]\n\n{summary}"), *recent]
+    return [
+        *sys_msgs,
+        HumanMessage(content=f"[Prior context summary]\n\n{summary}"),
+        *preserved_head,
+        *recent,
+    ]
 
 
 async def _call(tool, args: dict, *, _dbg: str | None = None) -> str:

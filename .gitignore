@@ -87,3 +87,5 @@ htmlcov/
 
 # Claude Code local tooling
 .claude/
+
+.agents/

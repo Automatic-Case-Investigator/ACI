@@ -50,6 +50,21 @@ def _format_subagent_issues(run_id: str) -> str:
     return "\n".join(lines)
 
 
+async def _propagate_verdict_to_session(verdict: dict | None) -> None:
+    """Copy a durable specialist verdict onto the session row counted by dashboard stats."""
+    if not isinstance(verdict, dict):
+        return
+    session_run_id = current_session()
+    if not session_run_id:
+        return
+    try:
+        session_run = await AgentRun.objects.aget(id=session_run_id)
+        session_run.verdict = verdict
+        await session_run.asave(update_fields=["verdict", "updated_at"])
+    except Exception as exc:
+        log.warning("Could not propagate verdict to session %s: %s", session_run_id, exc)
+
+
 def _make_tools(session: OrchestratorSession) -> list[StructuredTool]:
     """Generate one orchestrator tool per routable agent in the registry (A2).
 
@@ -121,24 +136,16 @@ def _make_agent_tool(session: OrchestratorSession, agent_def: AgentDefinition) -
             session.last_triage_case_id = case_id
             session.last_triage_report = run.result or ""
             session.last_triage_run_id = str(run.id)
+            session.last_triage_verdict = run.verdict if isinstance(run.verdict, dict) else None
             session.investigation_run_id = None
+            await _propagate_verdict_to_session(run.verdict)
         if agent_def.consumes_handoff:
             session.investigation_run_id = str(run.id)
             # Keep the FULL investigation report so the orchestrator can deliver it
             # verbatim to the analyst (the in-context tool summary below is truncated).
             session.last_investigation_report = run.result or ""
-            # Propagate the investigation verdict to the orchestrator session so the
-            # session row (which is what the list view shows) carries the verdict and
-            # the dashboard verdict filter works correctly.
-            if isinstance(run.verdict, dict):
-                session_run_id = current_session()
-                if session_run_id:
-                    try:
-                        session_run = await AgentRun.objects.aget(id=session_run_id)
-                        session_run.verdict = run.verdict
-                        await session_run.asave(update_fields=["verdict", "updated_at"])
-                    except Exception as _exc:
-                        log.warning("Could not propagate verdict to session %s: %s", session_run_id, _exc)
+            # Dashboard verdict totals count session rows, not interactive child runs.
+            await _propagate_verdict_to_session(run.verdict)
 
         return _agent_run_summary(agent_def, run)
 
@@ -162,6 +169,7 @@ def _agent_run_summary(agent_def: AgentDefinition, run: AgentRun) -> str:
     if agent_def.produces_handoff:
         return (
             f"{agent_def.name} status={run.status}; error={run.error or 'none'}; "
+            f"verdict={((run.verdict or {}).get('verdict') if isinstance(run.verdict, dict) else 'missing')}; "
             f"triage_report={(run.result or '')[:6000]}\n\n"
             f"subagent_warnings_errors:\n{issues}"
         )

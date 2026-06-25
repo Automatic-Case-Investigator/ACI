@@ -93,11 +93,21 @@ class Handoff:
             "suspicious login.'* Use priority 85.\n\n"
             "**Rule 3 — call `list_tasks` before each `create_task`.** Skip a task only if "
             "an identical one already exists in the queue.\n\n"
+            "**Rule 4 — C2/callback destinations are mandatory pivot targets.** If the "
+            "triage report mentions a reverse-shell callback address, C2 destination, or "
+            "attacker-controlled IP/domain (e.g. `sh -i >& /dev/tcp/<ip>/<port>`, "
+            "`nc`, `curl` to an external IP), add a task: "
+            "*'Investigate attacker-controlled destination <ip> — pivot to all SIEM events "
+            "from/to that IP for SSH, HTTP, and connection evidence within the 48-hour "
+            "window surrounding the alert.'* Use priority 90.\n\n"
             "**When `create_task` fails:** read the error, propose a task that achieves the "
             "same investigative goal by an allowed method (e.g. search SIEM syscheck events "
             "instead of reading the file), and immediately continue to the next triage item. "
             "A failed `create_task` does NOT count as a successfully created task — you must "
-            "still create a task for every triage plan item before you are done."
+            "still create a task for every triage plan item before you are done.\n\n"
+            "**The triage investigation plan is the numbered or bulleted list under "
+            "`## Investigation Plan` OR `## New Leads` in the triage report below.** "
+            "Count every item in that list (numbered or bulleted) and create one task per item."
         )
         if self.artifacts:
             import json

@@ -83,7 +83,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             )
         elif name == "search_keyword":
             result = client.search_keyword(
-                keyword=arguments["keyword"],
+                query=arguments["query"],
                 index_pattern=arguments.get("index_pattern"),
                 time_range=arguments.get("time_range"),
                 max_results=int(arguments.get("max_results", 20)),

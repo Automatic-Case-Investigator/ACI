@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import shlex
 
+import httpx
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from mcp import types
 import traceback
@@ -30,7 +31,9 @@ def _server_configs(tool_policy: list[str], run_ctx: dict | None = None) -> dict
                 log.info("provider %s is disabled; skipping", key)
                 continue
             resolved = cfg.resolve_settings(key, provider.setting_defaults())
-            configs[provider.key] = provider.build_config(resolved, run_ctx)
+            config = provider.build_config(resolved, run_ctx)
+            if config:
+                configs[provider.key] = config
             continue
 
         configured = _configured_mcp_server(key, run_ctx)
@@ -105,7 +108,46 @@ async def build_mcp_client(
     # Calling it directly from async code triggers SynchronousOnlyOperation.
     # sync_to_async runs it in the main Django sync thread where ORM is allowed.
     configs = await sync_to_async(_server_configs, thread_sensitive=True)(tool_policy, run_ctx)
+    configs = await _prune_unreachable_optional_servers(configs)
     return MultiServerMCPClient(configs)
+
+
+_OPTIONAL_HTTP_SERVERS = frozenset({"avfs"})
+
+
+async def _prune_unreachable_optional_servers(configs: dict) -> dict:
+    """Drop optional HTTP MCP servers that are not reachable right now.
+
+    The workspace filesystem (AVFS) is useful but not required for orchestration to
+    function. If its local HTTP endpoint is down, skip it before MCP sessions are
+    opened so the whole run can proceed with reduced capabilities.
+    """
+    pruned = dict(configs)
+    for server_name, config in list(pruned.items()):
+        if server_name not in _OPTIONAL_HTTP_SERVERS:
+            continue
+        if config.get("transport") != "streamable_http":
+            continue
+        if not await _streamable_http_reachable(config):
+            pruned.pop(server_name, None)
+            log.warning("optional MCP server %s is unreachable; skipping it for this run", server_name)
+    return pruned
+
+
+async def _streamable_http_reachable(config: dict) -> bool:
+    url = str(config.get("url") or "").strip()
+    if not url:
+        return False
+    headers = config.get("headers") if isinstance(config.get("headers"), dict) else {}
+    timeout = httpx.Timeout(2.0, connect=2.0)
+    try:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+            response = await client.get(url, headers=headers)
+        # Any HTTP response proves the server is reachable; auth or method issues are
+        # handled later by the MCP layer and are not transport failures.
+        return response.status_code > 0
+    except (httpx.ConnectError, httpx.TimeoutException):
+        return False
 
 
 async def load_mcp_prompt_guidance(

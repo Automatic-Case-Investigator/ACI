@@ -101,17 +101,17 @@ def wazuh_tools() -> list[Tool]:
             Tool(
                 name="search_keyword",
                 description=(
-                    "Search for events containing a keyword in ANY field (full-text across all "
-                    "fields), regardless of which field holds it. Use when you don't know the exact "
-                    "field — e.g. an IP, username, filename, hash, or command. For field-specific "
-                    "queries use `search` instead."
+                    "Search for events using Discover-style free text across common Wazuh alert "
+                    "fields, including full_log, rule, agent, user/IP, command, path, and file "
+                    "fields. Use when you don't know the exact field — e.g. an IP, username, "
+                    "filename, hash, or command. For field-specific queries use `search` instead."
                 ),
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "keyword": {
+                        "query": {
                             "type": "string",
-                            "description": "The keyword/term to look for across all fields.",
+                            "description": "Find events matching any space-separated query term across common Wazuh alert fields. Terms use Discover-style OR semantics.",
                         },
                         "time_range": {
                             "type": "object",
@@ -125,7 +125,7 @@ def wazuh_tools() -> list[Tool]:
                         },
                         "index_pattern": {"type": "string", "description": "Index pattern (optional)."},
                     },
-                    "required": ["keyword"],
+                    "required": ["query"],
                 },
             ),
             Tool(

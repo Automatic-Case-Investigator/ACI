@@ -39,6 +39,7 @@ class OrchestratorSession:
     last_triage_case_id: Optional[str] = None
     last_triage_report: Optional[str] = None
     last_triage_run_id: Optional[str] = None
+    last_triage_verdict: Optional[dict] = None
     last_investigation_report: Optional[str] = None
     thinking: bool = False
     log_buffer: deque = field(default_factory=deque)
@@ -55,6 +56,7 @@ class OrchestratorSession:
             "last_triage_case_id": self.last_triage_case_id,
             "last_triage_report": self.last_triage_report,
             "last_triage_run_id": self.last_triage_run_id,
+            "last_triage_verdict": self.last_triage_verdict,
             "last_investigation_report": self.last_investigation_report,
             "ctx_tokens": self.ctx_tokens,
             "messages": _serialize_messages(self.messages),
@@ -71,6 +73,7 @@ class OrchestratorSession:
         self.last_triage_case_id = data.get("last_triage_case_id", self.last_triage_case_id)
         self.last_triage_report = data.get("last_triage_report", self.last_triage_report)
         self.last_triage_run_id = data.get("last_triage_run_id", self.last_triage_run_id)
+        self.last_triage_verdict = data.get("last_triage_verdict", self.last_triage_verdict)
         self.last_investigation_report = data.get("last_investigation_report", self.last_investigation_report)
         self.ctx_tokens = data.get("ctx_tokens", self.ctx_tokens) or 0
         self.intent_sequence = data.get("intent_sequence", self.intent_sequence) or 0
