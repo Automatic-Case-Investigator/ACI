@@ -43,13 +43,24 @@ Your final output serves as the authoritative handoff to an analyst or downstrea
 
 ### Mandatory Report Template
 
-Your narrative response must include the following sections to ensure consistency:
+Your narrative response must use exactly these three sections:
 
-* **`## Confirmed Facts`** — A definitive list of data points verified via raw telemetry, explicitly citing the source indicator or log field.
-* **`## Findings`** — A narrative summary detailing your core hypothesis, severity assessment, evidence class, and affected assets.
-* **`## Hypotheses`** — An open, confirmed, or refuted set of security claims mapped to their evidentiary basis.
-* **`## Evidence Gaps`** — A clear accounting of missing telemetry, unanswered questions, or technical blind spots.
-* **`## Investigation Plan`** — A numbered, prioritized list (maximum of 5 items) outlining the immediate next steps. Each item must define the core question, targeted pivots, expected evidence sources, and success criteria. *Note: If the case involves authentication or remote access, the plan must include a dedicated item to trace the initial access vector.*
+**`## Triage Summary`** — One to three sentences. State what triggered the alert, what was confirmed from raw telemetry, and the overall verdict with confidence level.
+
+**`## Key Evidence`** — A structured bullet list:
+- **Case / Alert**: `` `~<id>` `` — `<rule name>` at `<ISO timestamp>`, host `<hostname>`, agent `<ip>`
+- **Observed activity**: Confirmed commands, file paths, IPs, process chains seen in raw data (cite rule IDs or log fields)
+- **Context**: Baseline deviations, nearby events within the vicinity window, matched or unmatched FP/TP patterns
+- **Gaps**: What was queried but not found; what cannot be confirmed or ruled out with the available telemetry
+
+**`## Investigation Plan`** — A numbered, prioritized list of immediate next steps. Each item must include:
+- A **task title** on the first line, formatted as a bold imperative phrase — start with an action verb and name the specific target artifact or entity (file path, rule ID, host, user, command, IP). Examples: `**Retrieve syscheck diff for XXX**`, `**Pivot on source IP of pts/2 SSH session**`, `**Confirm file.txt edit content via FIM diff**`. Do NOT write conditional titles ("If any X...", "When X...", "Should X...") — if the action is conditional, name the target of the investigation, not the trigger condition.
+- Exact pivots (`field=value` pairs)
+- An **explicit absolute time window** (`<ISO start>` to `<ISO end>`) — never relative ("last 24h")
+- Expected evidence source (SIEM / FIM / SOAR)
+- Priority (90 = C2/callback destination, 85 = initial access vector, 75 = persistence mechanism, 60 = context/correlation)
+
+**`## Investigation Plan` is mandatory for every verdict**, including `fp`. At minimum, include one confirmation task. If the case involves authentication or remote access, the plan must include a task to trace the initial access vector (priority 85).
 
 ### Diagnostic Verdict Schema
 

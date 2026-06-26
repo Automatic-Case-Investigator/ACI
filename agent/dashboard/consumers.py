@@ -19,11 +19,13 @@ from .events import group_name
 
 ACTIVE_STATUSES = {"pending", "claimed", "blocked"}
 
-# Internal seed task titles created by the graph runtime — these are orchestration
-# artifacts and should not be displayed in the investigation queue panel.
+# Internal seed task title prefixes created by the graph runtime — these are
+# orchestration artifacts and should not be displayed in the investigation queue panel.
+# Note: the fallback no-handoff task ("Investigate case <id>") is filtered by exact
+# match below (using case_id) so that real seeder tasks whose titles begin with
+# "Investigate case <id>: ..." are not accidentally hidden.
 _INTERNAL_TASK_PREFIXES = (
     "Populate investigation queue",
-    "Investigate case ",  # fallback seed when no triage handoff is present
 )
 
 # The board content for a TI result is formatted as
@@ -111,9 +113,11 @@ def _snapshot(session_id: str) -> dict:
 
         try:
             raw = task_store.list_tasks(case_id, run_id, "investigation")
+            fallback_title = f"Investigate case {case_id}"
             raw = [
                 t for t in raw
                 if not any(t["title"].startswith(p) for p in _INTERNAL_TASK_PREFIXES)
+                and t["title"] != fallback_title
             ]
             active = [t for t in raw if t["status"] in ACTIVE_STATUSES]
             done = [t for t in raw if t["status"] not in ACTIVE_STATUSES]

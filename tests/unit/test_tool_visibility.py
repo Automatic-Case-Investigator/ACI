@@ -48,12 +48,13 @@ class TestToolVisibility(unittest.TestCase):
         self.assertNotIn("create_task", names)
         self.assertIn("search", names)  # real work tools still present
 
-    def test_investigation_seed_task_has_full_tools(self):
-        # Seed task is no longer restricted — model gets all tools except graph-managed ones.
+    def test_investigation_always_hides_create_task(self):
+        # create_task is always hidden from investigation — tasks are created by the
+        # seeder agent (at seed time) and the pivot node (for new leads).
         current = {"title": "Populate investigation queue from triage handoff"}
         names = _names(_model_tools_for_agent("investigation", ALL_TOOLS, current))
         self.assertFalse(names & HIDDEN)
-        self.assertIn("create_task", names)
+        self.assertNotIn("create_task", names)
         self.assertIn("search", names)
 
     def test_triage_hides_create_task_and_graph_tools(self):

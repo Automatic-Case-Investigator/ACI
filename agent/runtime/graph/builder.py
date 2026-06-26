@@ -36,7 +36,7 @@ def _route_assess(state: AgentState) -> str:
         state["steps"] >= state["max_steps"]
         or state["tool_calls_made"] >= state["max_tool_calls"]
     )
-    if state.get("status") in {"seed_guard", "triage_siem_guard", "investigation_siem_guard", "summary_format_guard"}:
+    if state.get("status") in {"triage_siem_guard", "investigation_siem_guard", "summary_format_guard"}:
         return "finish" if over_budget else "think"
     if over_budget:
         return "finish"

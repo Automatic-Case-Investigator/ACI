@@ -22,4 +22,5 @@ def list_agents() -> list[str]:
 
 # Import agents so they self-register.
 from . import investigation  # noqa: E402, F401
+from . import seeder  # noqa: E402, F401
 from . import triage  # noqa: E402, F401

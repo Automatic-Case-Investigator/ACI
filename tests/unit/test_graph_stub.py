@@ -180,18 +180,18 @@ class TriageNearbyEventsGuardModel(BaseChatModel):
                 ],
             )
         return AIMessage(content=(
-            "## Confirmed Facts\n"
-            "- Case loaded.\n"
-            "- Nearby SIEM events were checked with `search_keyword` for `kali user 80792 nano` "
-            "from 2025-04-20T02:54:10Z to 2025-04-20T04:54:10Z.\n\n"
-            "## Findings\n"
-            "- No corroborating nearby SIEM event was returned by the stub search.\n\n"
-            "## Hypotheses\n"
-            "- Needs deeper investigation if higher-fidelity telemetry is required.\n\n"
-            "## Evidence Gaps\n"
-            "- Stub SIEM result has no real production telemetry.\n\n"
+            "## Triage Summary\n"
+            "Alert ~5345344 on host kali triggered rule 80792 (nano exec on a tmp crontab path). "
+            "Nearby SIEM events were checked; no corroborating evidence retrieved from the stub. "
+            "Verdict: needs_investigation (medium confidence) — insufficient raw telemetry.\n\n"
+            "## Key Evidence\n"
+            "- **Case / Alert**: `~TEST-1` — rule 80792 at 2025-04-20T03:54:10Z, host kali, agent 10.0.2.15\n"
+            "- **Observed activity**: `/usr/bin/nano /tmp/crontab.Tgi9hP/crontab` (auditd exec, tty pts2)\n"
+            "- **Context**: No matched FP/TP patterns; baseline reviewed.\n"
+            "- **Gaps**: Stub SIEM result has no real production telemetry; syscheck FIM events not retrieved.\n\n"
             "## Investigation Plan\n"
-            "1. Review real nearby Wazuh events for the same host and user.\n\n"
+            "1. **Review real nearby Wazuh events** — pivots: host=kali, rule=80792, "
+            "window 2025-04-20T01:54:10Z to 2025-04-20T05:54:10Z, source: SIEM. Priority: 75.\n\n"
             "```json\n"
             "{"
             "\"verdict\":\"needs_investigation\","
@@ -549,7 +549,7 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Nano opened a temporary crontab path", final["final_answer"])
 
     async def test_investigation_seeds_queue_from_handoff(self):
-        """Investigation should convert the orchestrator handoff into its own queue."""
+        """Investigation should convert the orchestrator handoff into its own queue via seeder."""
         inv_run_id = "inv-run-001"
         case_id = "~001"
 
@@ -560,13 +560,16 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
             run_id=inv_run_id,
             case_id=case_id,
             agent_name="investigation",
-            question=(
-                "Orchestrator handoff to investigation.\n\n"
-                "## Triage report\n\n"
-                "- Proposed work: investigate SSH brute-force from 1.2.3.4.\n"
-                "- Proposed work: enrich actor IP 1.2.3.4."
-            ),
-            handoff=None,
+            question="Investigate case ~001.",
+            handoff={
+                "analyst_request": "Investigate case ~001.",
+                "triage_report": (
+                    "- Proposed work: investigate SSH brute-force from 1.2.3.4.\n"
+                    "- Proposed work: enrich actor IP 1.2.3.4."
+                ),
+                "source_run_id": "triage-run-001",
+                "artifacts": {},
+            },
             current_task=None,
             messages=[],
             steps=0,
@@ -591,8 +594,8 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
         inv_tasks = list_tasks(case_id, inv_run_id, "investigation")
         titles = {t["title"] for t in inv_tasks}
 
-        # The seed task is a handoff task; the model extracts the two plan tasks.
-        self.assertIn("Populate investigation queue from triage handoff", titles)
+        # Seeder creates tasks directly — no meta seed-task in the queue.
+        self.assertNotIn("Populate investigation queue from triage handoff", titles)
         self.assertIn("Investigate SSH brute-force from 1.2.3.4", titles)
         self.assertIn("Enrich actor IP 1.2.3.4", titles)
         print(f"Investigation seeded from handoff. Final status: {final['status']}")
@@ -637,8 +640,8 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
 
         await GRAPH.ainvoke(state, config=config)
         titles = {t["title"] for t in list_tasks(case_id, inv_run_id, "investigation")}
-        self.assertIn("Populate investigation queue from triage handoff", titles)
-        # The two tasks the stub model extracted from the handoff are present.
+        # Seeder creates tasks directly — no meta seed-task in the queue.
+        self.assertNotIn("Populate investigation queue from triage handoff", titles)
         self.assertIn("Investigate SSH brute-force from 1.2.3.4", titles)
         self.assertIn("Enrich actor IP 1.2.3.4", titles)
 
@@ -685,8 +688,8 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
 
         await GRAPH.ainvoke(state, config=config)
         titles = {t["title"] for t in list_tasks(case_id, inv_run_id, "investigation")}
-        # Seed task is created; model creates sub-tasks from the handoff.
-        self.assertIn("Populate investigation queue from triage handoff", titles)
+        # Seeder creates tasks directly — no meta seed-task in the queue.
+        self.assertNotIn("Populate investigation queue from triage handoff", titles)
         self.assertIn("Investigate SSH brute-force from 1.2.3.4", titles)
         self.assertIn("Enrich actor IP 1.2.3.4", titles)
 
@@ -749,58 +752,54 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
         print(f"\nInvestigation skipped seed, processed 1 existing task.")
         print(f"Investigation status: {final['status']}")
 
-    async def test_seed_guard_retries_when_no_tasks_created(self):
-        """Seed guard: if the seed task completes without create_task calls, the graph
-        re-injects a correction and routes back to think rather than finishing early."""
-        inv_run_id = "inv-run-sg"
-        case_id = "~sg"
+    async def test_seeder_creates_tasks_from_triage_handoff(self):
+        """Seeder: when a triage handoff is provided, the seeder agent creates
+        investigation tasks directly without a meta seed-task in the queue."""
+        inv_run_id = "inv-run-seeder"
+        case_id = "~seeder"
 
-        class SeedGuardModel(BaseChatModel):
-            """Turn 1: completes seed task without creating any tasks.
-            Turn 2+: creates two tasks after receiving the seed-guard correction."""
+        class SeederAndInvModel(BaseChatModel):
+            """Turn 1 (seeder): creates a task via tool calls.
+            Turn 2 (seeder): returns plain text — done seeding.
+            Turn 3+ (investigation): completes each claimed task."""
             def __init__(self):
                 super().__init__()
                 self._turn = 0
 
             @property
-            def _llm_type(self):
-                return "seed-guard-stub"
+            def _llm_type(self): return "seeder-and-inv-stub"
 
-            def _generate(self, *a, **kw):
-                raise NotImplementedError
+            def _generate(self, *a, **kw): raise NotImplementedError
 
-            def bind_tools(self, tools):
-                return self
+            def bind_tools(self, tools): return self
 
             async def ainvoke(self, messages, **kwargs):
                 self._turn += 1
                 if self._turn == 1:
-                    # Skip create_task — returns a plain text answer for the seed task
-                    return AIMessage(content="Queue populated (incorrectly — no tasks created).")
-                if self._turn == 2:
-                    # Correction received; now create the tasks
+                    # Seeder call: create one investigation task
                     return AIMessage(
                         content="",
-                        tool_calls=[
-                            {
-                                "id": "tc-sg1",
-                                "name": "create_task",
-                                "args": {
-                                    "case_id": case_id,
-                                    "run_id": inv_run_id,
-                                    "agent_name": "investigation",
-                                    "title": "Investigate SSH brute-force",
-                                    "description": "Check for brute-force.",
-                                    "priority": 90,
-                                },
+                        tool_calls=[{
+                            "id": "tc-seed-1",
+                            "name": "create_task",
+                            "args": {
+                                "case_id": case_id,
+                                "run_id": inv_run_id,
+                                "agent_name": "investigation",
+                                "title": "Investigate SSH brute-force from 1.2.3.4",
+                                "description": "Query SIEM for SSH events from 1.2.3.4.",
+                                "priority": 90,
                             },
-                        ],
+                        }],
                     )
-                # Subsequent turns: complete the task
-                return AIMessage(content="SSH investigation complete.")
+                if self._turn == 2:
+                    # Seeder done: no more tool calls
+                    return AIMessage(content="Tasks created.")
+                # Investigation turns: complete each task
+                return AIMessage(content="Task complete.")
 
         tools = _make_triage_tools(case_id, inv_run_id)
-        model = SeedGuardModel()
+        model = SeederAndInvModel()
         state = AgentState(
             run_id=inv_run_id,
             case_id=case_id,
@@ -808,205 +807,8 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
             question="Investigate SSH brute-force.",
             handoff={
                 "analyst_request": "Investigate SSH brute-force.",
-                "triage_report": "Plan: 1) investigate SSH brute-force",
-                "source_run_id": "triage-run-sg",
-                "artifacts": {},
-            },
-            current_task=None,
-            messages=[],
-            steps=0,
-            tool_calls_made=0,
-            max_steps=20,
-            max_tool_calls=60,
-            status="running",
-            final_answer="",
-            ctx_tokens=0,
-        )
-        config = {
-            "configurable": {
-                "model": model,
-                "tools": tools,
-                "system_prompt": "You are an investigation agent.",
-            }
-        }
-
-        await GRAPH.ainvoke(state, config=config)
-        titles = {t["title"] for t in list_tasks(case_id, inv_run_id, "investigation")}
-        self.assertIn("Populate investigation queue from triage handoff", titles,
-                      "Seed task should exist")
-        self.assertIn("Investigate SSH brute-force", titles,
-                      "Seed guard should have prompted the model to create investigation tasks")
-
-    async def test_seed_guard_retries_until_all_handoff_leads_created(self):
-        """Seed guard must not accept a partially populated queue when the handoff
-        contains multiple investigation items."""
-        inv_run_id = "inv-run-sg-partial"
-        case_id = "~sg-partial"
-
-        class PartialSeedModel(BaseChatModel):
-            def __init__(self):
-                super().__init__()
-                self._turn = 0
-
-            @property
-            def _llm_type(self):
-                return "seed-guard-partial-stub"
-
-            def _generate(self, *a, **kw):
-                raise NotImplementedError
-
-            def bind_tools(self, tools):
-                return self
-
-            async def ainvoke(self, messages, **kwargs):
-                self._turn += 1
-                if self._turn == 1:
-                    return AIMessage(content=(
-                        "Only one task is needed.\n\n"
-                        "## New Leads\n"
-                        "- title: Verify crontab contents changed during the nano session\n"
-                        "  pivots: host=kali\n"
-                        "  evidence: event=evt-1\n"
-                        "  priority: 70"
-                    ))
-                if self._turn == 2:
-                    return AIMessage(
-                        content="",
-                        tool_calls=[{
-                            "id": "tc-one",
-                            "name": "create_task",
-                            "args": {
-                                "case_id": case_id,
-                                "run_id": inv_run_id,
-                                "agent_name": "investigation",
-                                "title": "Verify crontab contents changed during the nano session",
-                                "description": "Check cron content.",
-                                "priority": 70,
-                            },
-                        }],
-                    )
-                if self._turn == 3:
-                    return AIMessage(content="Queue is complete.")
-                if self._turn == 4:
-                    return AIMessage(
-                        content="",
-                        tool_calls=[{
-                            "id": "tc-two",
-                            "name": "create_task",
-                            "args": {
-                                "case_id": case_id,
-                                "run_id": inv_run_id,
-                                "agent_name": "investigation",
-                                "title": "Check for surrounding cron persistence or follow-on execution on kali",
-                                "description": "Check follow-on cron execution.",
-                                "priority": 60,
-                            },
-                        }],
-                    )
-                return AIMessage(content="Investigation queue is now fully populated.")
-
-        tools = _make_triage_tools(case_id, inv_run_id)
-        model = PartialSeedModel()
-        state = AgentState(
-            run_id=inv_run_id,
-            case_id=case_id,
-            agent_name="investigation",
-            question="Investigate cron persistence.",
-            handoff={
-                "analyst_request": "Investigate cron persistence.",
-                "triage_report": (
-                    "## New Leads\n"
-                    "- title: Verify crontab contents changed during the nano session\n"
-                    "  pivots: host `kali`\n"
-                    "  evidence: event=evt-1\n"
-                    "  priority: 70\n"
-                    "- title: Check for surrounding cron persistence or follow-on execution on kali\n"
-                    "  pivots: host `kali`\n"
-                    "  evidence: event=evt-2\n"
-                    "  priority: 60\n"
-                ),
-                "source_run_id": "triage-run-sg-partial",
-                "artifacts": {},
-            },
-            current_task=None,
-            messages=[],
-            steps=0,
-            tool_calls_made=0,
-            max_steps=20,
-            max_tool_calls=60,
-            status="running",
-            final_answer="",
-            ctx_tokens=0,
-        )
-        config = {
-            "configurable": {
-                "model": model,
-                "tools": tools,
-                "system_prompt": "You are an investigation agent.",
-            }
-        }
-
-        await GRAPH.ainvoke(state, config=config)
-        titles = {t["title"] for t in list_tasks(case_id, inv_run_id, "investigation")}
-        self.assertIn("Verify crontab contents changed during the nano session", titles)
-        self.assertIn("Check for surrounding cron persistence or follow-on execution on kali", titles)
-
-    async def test_seed_guard_does_not_count_new_lead_metadata_bullets_as_tasks(self):
-        inv_run_id = "inv-run-sg-leads-meta"
-        case_id = "~sg-leads-meta"
-
-        class MetadataLeadSeedModel(BaseChatModel):
-            def __init__(self):
-                super().__init__()
-                self._turn = 0
-
-            @property
-            def _llm_type(self):
-                return "seed-guard-leads-meta-stub"
-
-            def _generate(self, *a, **kw):
-                raise NotImplementedError
-
-            def bind_tools(self, tools):
-                return self
-
-            async def ainvoke(self, messages, **kwargs):
-                self._turn += 1
-                if self._turn == 1:
-                    return AIMessage(
-                        content="",
-                        tool_calls=[{
-                            "id": "tc-meta-one",
-                            "name": "create_task",
-                            "args": {
-                                "case_id": case_id,
-                                "run_id": inv_run_id,
-                                "agent_name": "investigation",
-                                "title": "Verify crontab contents changed during the nano session",
-                                "description": "Check cron content.",
-                                "priority": 70,
-                            },
-                        }],
-                    )
-                return AIMessage(content="Queue complete.")
-
-        tools = _make_triage_tools(case_id, inv_run_id)
-        model = MetadataLeadSeedModel()
-        state = AgentState(
-            run_id=inv_run_id,
-            case_id=case_id,
-            agent_name="investigation",
-            question="Investigate cron persistence.",
-            handoff={
-                "analyst_request": "Investigate cron persistence.",
-                "triage_report": (
-                    "## New Leads\n"
-                    "- title: Verify crontab contents changed during the nano session\n"
-                    "  - pivots: host `kali`\n"
-                    "  - evidence: event=evt-1\n"
-                    "  - priority: 70\n"
-                ),
-                "source_run_id": "triage-run-sg-meta",
+                "triage_report": "## Investigation Plan\n1. Investigate SSH brute-force from 1.2.3.4",
+                "source_run_id": "triage-run-seeder",
                 "artifacts": {},
             },
             current_task=None,
@@ -1035,10 +837,15 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
         await GRAPH.ainvoke(state, config=config)
         tasks = list_tasks(case_id, inv_run_id, "investigation")
         titles = [t["title"] for t in tasks]
-        self.assertEqual(
-            titles.count("Verify crontab contents changed during the nano session"),
-            1,
-            f"seed guard should not demand duplicate tasks for lead metadata bullets: {titles}",
+
+        # Seeder creates tasks directly — no "populate investigation queue" meta-task
+        self.assertNotIn(
+            "Populate investigation queue from triage handoff", titles,
+            "Seeder should not leave a meta seed-task in the queue",
+        )
+        self.assertIn(
+            "Investigate SSH brute-force from 1.2.3.4", titles,
+            "Seeder should create the investigation task from the triage plan",
         )
 
     async def test_investigation_verdict_contract_publishes_reassessed_tp(self):

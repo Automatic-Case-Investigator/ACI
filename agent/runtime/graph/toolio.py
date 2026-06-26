@@ -52,9 +52,9 @@ def _model_tools_for_agent(
     if agent_name == "triage":
         excluded.add("create_task")
     if agent_name == "investigation":
-        title = ((current_task or {}).get("title") or "").lower()
-        if _SEED_TASK_TITLE not in title:
-            excluded.add("create_task")
+        # Tasks are created by the seeder (at seed time) and pivot node (for new leads).
+        # The investigation model never calls create_task directly.
+        excluded.add("create_task")
         # Investigation agents must not write to the case system without explicit
         # analyst authorization (which the orchestrator enforces). Hide write tools
         # so MCP instructions cannot prompt the model into calling them autonomously.

@@ -22,7 +22,7 @@ from ..infra.logbus import emit, src_label
 
 from .board import _record_board_entry, _record_hypotheses_text
 from .lead_model import validate_leads_model
-from .parsing import _CONFIRMED_FACTS_RE, _EVENT_ID_DUMP_RE, _FACT_BULLET_RE, _HYPOTHESES_RE, _NEW_LEADS_HEADER_RE, _extract_report_section, _extract_source_refs, _is_none_bullet, _missing_summary_sections, _normalize_fact_key, _section_body, _section_has_concrete_items, _strip_markers
+from .parsing import _CONFIRMED_FACTS_RE, _EVENT_ID_DUMP_RE, _FACT_BULLET_RE, _HYPOTHESES_RE, _NEW_LEADS_HEADER_RE, _extract_source_refs, _is_none_bullet, _missing_summary_sections, _normalize_fact_key, _section_body, _strip_markers
 from .sanitize import _sanitize_history, _sanitize_message
 from .state import AgentState
 from .synthesis import _build_investigation_summary, _execution_record
@@ -57,26 +57,51 @@ _TRIAGE_SIEM_TOOLS = frozenset({
 # Keywords that signal a task explicitly requires SIEM event queries.
 # Used by the investigation SIEM guard to avoid applying the guard to
 # administrative or SOAR-only tasks (reporting, case comments, etc.).
+#
+# Two structural patterns catch most tasks automatically:
+#   "pivots:"  — every task created by the pivot node starts its description with "Pivots: ..."
+#   "pivot:"   — every task created by the seeder from a triage plan item contains "- Pivot: ..."
+# Together these cover the majority of investigation tasks without needing a long keyword list.
 _INVESTIGATION_SIEM_KEYWORDS = (
+    # structural prefixes (cover all seeder-created and pivot-node-created tasks)
+    "pivot:",
+    "pivots:",
+    # explicit SIEM mentions
     "siem",
     "pivot to",
     "events from",
     "events to",
     "search events",
     "siem event",
+    # time-window patterns
     "48-hour",
     "24-hour",
     "time window",
     "surrounding the alert",
+    # evidence-type patterns
     "connection evidence",
     "ssh evidence",
     "http evidence",
     "all events",
+    # FIM / file-integrity tasks
+    "syscheck",
+    "fim",
+    "file integr",
+    "file modif",
+    "file change",
+    # auth / session tasks
+    "initial access",
+    "source ip",
+    "pam",
+    "login",
+    "auth log",
+    # network / C2 tasks
+    "outbound",
+    "callback",
+    "c2",
 )
 
 _VERDICT_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL | re.IGNORECASE)
-_PLAN_ITEM_RE = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+(.+)$", re.MULTILINE)
-_LEAD_TITLE_RE = re.compile(r"^\s*(?:[-*]|\d+[.)])\s*(?:\*\*)?title(?:\*\*)?\s*:\s*(.+)$", re.IGNORECASE)
 
 
 def _has_tool_message(messages: list, names: set[str] | frozenset[str]) -> bool:
@@ -122,40 +147,6 @@ def _attach_verdict_block(final_answer: str, verdict: dict) -> str:
     return base.rstrip() + ("\n\n" if base.strip() else "") + _format_verdict_block(verdict)
 
 
-def _expected_seed_task_titles(seed_description: str) -> list[str]:
-    """Extract the intended investigation task titles from the seed handoff text.
-
-    For `## New Leads`, only count top-level lead titles; do not count metadata
-    sub-bullets such as pivots/evidence/priority. For `## Investigation Plan`,
-    count the listed plan items directly.
-    """
-    triage_report = (seed_description or "").split("## Triage report", 1)
-    if len(triage_report) == 2:
-        triage_report = triage_report[1]
-    else:
-        triage_report = seed_description or ""
-
-    leads_section = _extract_report_section(triage_report, "New Leads")
-    if leads_section.strip():
-        titles: list[str] = []
-        for raw_line in leads_section.splitlines():
-            match = _LEAD_TITLE_RE.match(raw_line)
-            if not match:
-                continue
-            title = match.group(1).strip().strip("`").strip()
-            if title and not _is_none_bullet(title):
-                titles.append(title)
-        if titles:
-            return titles
-
-    plan_section = _extract_report_section(triage_report, "Investigation Plan")
-    if plan_section.strip():
-        bullets = [m.group(1).strip() for m in _PLAN_ITEM_RE.finditer(plan_section) if not _is_none_bullet(m.group(1))]
-        if bullets:
-            return bullets
-    return []
-
-
 def _apply_verdict_policies(
     state: AgentState,
     verdict: dict,
@@ -175,15 +166,6 @@ def _apply_verdict_policies(
         emit(src, "note",
              f"verdict {verdict.get('demoted_from','').upper()} demoted to "
              "INCONCLUSIVE — no supporting evidence cited")
-
-    if (
-        state["agent_name"] == "triage"
-        and verdict.get("verdict") in ("tp", "fp")
-        and not verdict.get("missing_evidence")
-        and _section_has_concrete_items(_extract_report_section(final_answer, "Evidence Gaps"))
-    ):
-        verdict = dict(verdict)
-        verdict["missing_evidence"] = ["Evidence gaps listed in report but omitted from verdict JSON."]
 
     if normalize_followups:
         normalized = normalize_followup_gaps(verdict)
@@ -246,65 +228,6 @@ async def assess(state: AgentState, config) -> dict:
                 log.warning("[%s] assess synthesis failed: %s", state["agent_name"], exc)
         if not final_answer:
             final_answer = _execution_record(state["messages"])
-
-    # Seed guard: if the investigation seed task completed without creating any
-    # investigation tasks, re-inject a correction and route back to think so the
-    # model gets another chance to populate the queue before the run finishes.
-    if (
-        state["agent_name"] == "investigation"
-        and task
-        and _SEED_TASK_TITLE in (task.get("title") or "").lower()
-    ):
-        tasks = await _list_tasks(tools, state["case_id"], state["run_id"], state["agent_name"])
-        seeded = [
-            t for t in tasks
-            if _SEED_TASK_TITLE not in (t.get("title") or "").lower()
-        ]
-        expected_titles = _expected_seed_task_titles(task.get("description") or "")
-        seeded_by_key = {
-            _normalize_fact_key(t.get("title") or ""): (t.get("title") or "")
-            for t in seeded
-            if (t.get("title") or "").strip()
-        }
-        expected_keys: list[tuple[str, str]] = []
-        for title in expected_titles:
-            key = _normalize_fact_key(title)
-            if key:
-                expected_keys.append((key, title))
-        missing_titles = [title for key, title in expected_keys if key not in seeded_by_key]
-        minimum_required = max(1, len(expected_keys))
-        if (expected_keys and missing_titles) or (not expected_keys and len(seeded) < 1):
-            emit(src, "note",
-                 "seed guard: seed task completed before populating full investigation queue — re-injecting correction")
-            if expected_keys:
-                missing_text = "; ".join(missing_titles[:6])
-                correction_text = (
-                    f"You have already created {len(seeded_by_key)} of {minimum_required} required "
-                    "investigation task(s) from the triage handoff. "
-                    f"The remaining missing task title(s) are: {missing_text}. "
-                    "Call `list_tasks` first, then create ONLY the missing task titles above. "
-                    "Do not recreate tasks whose titles are already present in the queue. "
-                    "Do not write a summary until all missing titles are created."
-                )
-            else:
-                remaining = 1 - len(seeded)
-                correction_text = (
-                    f"You have created {len(seeded)} investigation task(s), but at least 1 "
-                    f"is required from the triage handoff. {remaining} more task(s) must still be created. "
-                    "Your ONLY goal for this task is to call `create_task` for every numbered "
-                    "or bulleted item in the triage investigation plan / New Leads section. "
-                    "Do not write a summary until all required tasks are created. "
-                    "Please call `create_task` now for the missing task(s)."
-                )
-            correction = HumanMessage(content=(
-                correction_text
-            ))
-            return {
-                "current_task": task,
-                "messages": list(state["messages"]) + [correction],
-                "status": "seed_guard",
-                "ctx_tokens": new_ctx,
-            }
 
     if state["agent_name"] == "triage" and task:
         available_siem_tools = set(_tmap(tools)) & _TRIAGE_SIEM_TOOLS
@@ -417,9 +340,13 @@ async def assess(state: AgentState, config) -> dict:
              f"completed '{task.get('title', task['id'])}' "
              f"(steps={state['steps']}, calls={state['tool_calls_made']})",
              detail=final_answer)
+    prior = list(state.get("completed_task_titles") or [])
+    if task:
+        prior = prior + [{"title": task.get("title", ""), "summary": final_answer[:800]}]
     return {
         "current_task": None,
         "last_completed_task": task,
+        "completed_task_titles": prior,
         "messages": [],
         "final_answer": final_answer,
         "ctx_tokens": new_ctx,
@@ -543,6 +470,19 @@ async def pivot(state: AgentState, config) -> dict:
         if t.get("id") != completed_task_id
         and _SEED_TASK_TITLE not in (t.get("title") or "").lower()
     ]
+    # Augment with previously completed tasks not returned by list_tasks (queue
+    # removes them on completion).  Passed as synthetic "completed" entries so
+    # the lead validator's _task_blocks_duplicate logic applies correctly —
+    # conclusive outcomes suppress re-investigation; inconclusive ones allow it.
+    for ct in (state.get("completed_task_titles") or []):
+        title = ct.get("title", "")
+        if title and not any(t.get("title") == title for t in dedup_tasks):
+            dedup_tasks.append({
+                "title": title,
+                "description": "",
+                "summary": ct.get("summary", ""),
+                "status": "completed",
+            })
     # Model-based extraction + validation: the model reassembles inconsistently
     # formatted leads into whole candidates (avoiding the regex fragmentation that
     # split one lead into several invalid ones) and judges relevance/duplication;

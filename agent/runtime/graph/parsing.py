@@ -50,15 +50,6 @@ _FINDINGS_RE = re.compile(
     r"(?:^|\n)(?:#{2,3}\s*|(?:\*\*))Findings(?:\*\*)?\s*\n",
     re.IGNORECASE,
 )
-# Triage-specific required section patterns.
-_TRIAGE_SOAR_ONLY_RE = re.compile(
-    r"(?:^|\n)(?:#{2,3}\s*|(?:\*\*))SOAR.Only(?:\*\*)?\s*",
-    re.IGNORECASE,
-)
-_TRIAGE_EVIDENCE_GAPS_RE = re.compile(
-    r"(?:^|\n)(?:#{2,3}\s*|(?:\*\*))Evidence\s+Gaps(?:\*\*)?\s*",
-    re.IGNORECASE,
-)
 _SECTION_HEADER_RE = re.compile(
     r"\n(?:#{2,6}\s+[^\n]+|\*\*[^\n*]+\*\*\s*)\n",
     re.IGNORECASE,

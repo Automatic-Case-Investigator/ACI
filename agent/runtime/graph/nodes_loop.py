@@ -9,6 +9,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from ...agents.base import Handoff
 from ...workspace.avfs_writer import update_memory_indexes
 from ..analysis.artifacts import record_artifacts
+from ..engine.seeder_runner import run_seeder
 from ..infra.logbus import emit, src_label, summarize_args, summarize_result, summarize_think, update_context_usage
 
 from .board import _format_board_context
@@ -48,9 +49,6 @@ def _format_queue_context(tasks: list[dict]) -> str:
 async def _queue_context_for_state(state: AgentState, tools: list) -> str:
     """Return a compact queue snapshot that helps investigation avoid duplicate leads."""
     if state["agent_name"] != "investigation":
-        return ""
-    task = state.get("current_task") or {}
-    if "populate investigation queue" in (task.get("title") or "").lower():
         return ""
     tasks = await _list_tasks(tools, state["case_id"], state["run_id"], state["agent_name"])
     return _format_queue_context(tasks)
@@ -107,49 +105,55 @@ async def seed(state: AgentState, config) -> dict:
                 emit(src, "note", "created triage task")
 
     else:
-        # investigation: only seed a task if queue is empty
+        # investigation: only seed if queue is empty
         already_seeded = await _has_pending_tasks(
             tools, state["case_id"], state["run_id"], state["agent_name"]
         )
-        if not already_seeded and create:
+        if not already_seeded:
             handoff = Handoff.from_dict(state.get("handoff"))
-            has_triage = handoff is not None or "## Triage report" in state["question"]
-            if has_triage:
-                title = "Populate investigation queue from triage handoff"
-                description = handoff.to_seed_text() if handoff else state["question"]
-                description += (
-                    f"\n\nWhen a triage plan item or open gap does not already specify an "
-                    f"absolute time window, derive one using this run's configured default "
-                    f"vicinity window of ±{vicinity_hours} hours around the anchor timestamp. "
-                    "Do not silently substitute a narrower 24h or same-day range unless that "
-                    "is the explicit evidence-backed window."
-                )
-                seed_tag = "created triage handoff task"
+            if handoff is not None and not handoff.prior_investigation_report:
+                # Normal triage handoff → dedicated seeder agent
+                model = config["configurable"]["model"]
+                await run_seeder(handoff, tools, model, vicinity_hours)
+            elif handoff is not None:
+                # Resume run (prior investigation report) → meta-task for open-gap re-seeding
+                if create:
+                    description = handoff.to_seed_text() + (
+                        f"\n\nWhen an open gap does not already specify an absolute time window, "
+                        f"derive one using this run's configured default vicinity window of "
+                        f"±{vicinity_hours} hours around the anchor timestamp."
+                    )
+                    result = await _call(create, {
+                        "title": "Populate investigation queue from triage handoff",
+                        "description": description,
+                        "priority": 100,
+                    }, _dbg=src)
+                    if _is_error_tool_result(result):
+                        emit(src, "error", "seed: create_task FAILED", detail=str(result))
+                    else:
+                        emit(src, "note", "created resume handoff task")
             else:
-                title = f"Investigate case {state['case_id']}"
-                description = (
-                    f"{state['question']}\n\n"
-                    "Use available SIEM and SOAR capabilities to investigate. "
-                    f"For nearby/vicinity event searches without an explicit absolute window, "
-                    f"start from the configured default vicinity window of ±{vicinity_hours} "
-                    "hours around the anchor timestamp. "
-                    "Write findings to AVFS. "
-                    "Create follow-up tasks for new evidence-backed leads. "
-                    "When finished, post a report to the case system."
-                )
-                seed_tag = "created fallback investigation task"
-            result = await _call(create, {
-                "case_id": state["case_id"],
-                "run_id": state["run_id"],
-                "agent_name": state["agent_name"],
-                "title": title,
-                "description": description,
-                "priority": 100,
-            }, _dbg=src)
-            if _is_error_tool_result(result):
-                emit(src, "error", "seed: create_task FAILED", detail=str(result))
-            else:
-                emit(src, "note", seed_tag)
+                # No handoff — create a plain investigation task
+                if create:
+                    description = (
+                        f"{state['question']}\n\n"
+                        "Use available SIEM and SOAR capabilities to investigate. "
+                        f"For nearby/vicinity event searches without an explicit absolute window, "
+                        f"start from the configured default vicinity window of ±{vicinity_hours} "
+                        "hours around the anchor timestamp. "
+                        "Write findings to AVFS. "
+                        "Create follow-up tasks for new evidence-backed leads. "
+                        "When finished, post a report to the case system."
+                    )
+                    result = await _call(create, {
+                        "title": f"Investigate case {state['case_id']}",
+                        "description": description,
+                        "priority": 100,
+                    }, _dbg=src)
+                    if _is_error_tool_result(result):
+                        emit(src, "error", "seed: create_task FAILED", detail=str(result))
+                    else:
+                        emit(src, "note", "created fallback investigation task")
         elif already_seeded:
             emit(src, "note", "queue already populated, skipping seed")
 
@@ -202,11 +206,10 @@ async def think(state: AgentState, config) -> dict:
         task = state["current_task"]
         task_text = f"**Task:** {task['title']}\n\n{task.get('description') or ''}".strip()
 
-        # Inject cross-task board and queue context for investigation tasks (not seed task)
+        # Inject cross-task board and queue context for investigation tasks
         board_context = ""
         queue_context = await _queue_context_for_state(state, tools)
-        if (state["agent_name"] == "investigation"
-                and "populate investigation queue" not in (task.get("title") or "").lower()):
+        if state["agent_name"] == "investigation":
             get_board_fn = _tmap(tools).get("get_board")
             if get_board_fn:
                 raw = await _call(get_board_fn, {})
@@ -232,20 +235,31 @@ async def think(state: AgentState, config) -> dict:
     call_messages = messages
     if call_messages and isinstance(call_messages[-1], ToolMessage):
         queue_context = await _queue_context_for_state(state, tools)
-        call_messages = call_messages + [HumanMessage(content=(
-            "Tool calls complete. Write your response now using the mandatory "
-            "structured format:\n\n"
-            "## Confirmed Facts\n"
-            "## Findings\n"
-            "## Hypotheses\n"
-            "## New Leads\n\n"
-            "All four sections are required (use '- None.' if a section is empty). "
-            "For each proposed lead use this exact structure: title, pivots, evidence, "
-            "priority. The platform validates and queues approved leads; do not call "
-            "`create_task` for follow-up work. Only propose leads that are evidence-backed "
-            "and not already covered in the current queue."
-            f"{queue_context}"
-        ))]
+        if state["agent_name"] == "triage":
+            format_nudge = (
+                "Tool calls complete. Write your triage report now using the mandatory "
+                "structured format:\n\n"
+                "## Triage Summary\n"
+                "## Key Evidence\n"
+                "## Investigation Plan\n\n"
+                "All three sections are required. End with the diagnostic verdict JSON block."
+            )
+        else:
+            format_nudge = (
+                "Tool calls complete. Write your response now using the mandatory "
+                "structured format:\n\n"
+                "## Confirmed Facts\n"
+                "## Findings\n"
+                "## Hypotheses\n"
+                "## New Leads\n\n"
+                "All four sections are required (use '- None.' if a section is empty). "
+                "For each proposed lead use this exact structure: title, pivots, evidence, "
+                "priority. The platform validates and queues approved leads; do not call "
+                "`create_task` for follow-up work. Only propose leads that are evidence-backed "
+                "and not already covered in the current queue."
+                f"{queue_context}"
+            )
+        call_messages = call_messages + [HumanMessage(content=format_nudge)]
 
     response = await _invoke_bound_model(bound, call_messages, state["agent_name"])
     _sanitize_message(response)

@@ -30,3 +30,4 @@ class AgentState(TypedDict):
     pivot_tasks_created: int  # follow-up tasks the pivot node has auto-created
     escalation_posted: bool  # True once an in-band escalation comment has been posted
     summary_format_retries: int  # per-task count of report-format correction nudges
+    completed_task_titles: list  # [{title, summary}] for each finished task — used by lead validator to block re-investigation

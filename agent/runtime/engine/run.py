@@ -125,6 +125,7 @@ async def _run_agent_bound(
             verdict=None,
             pivot_tasks_created=0,
             summary_format_retries=0,
+            completed_task_titles=[],
         )
 
         config = {
