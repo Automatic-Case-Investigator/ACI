@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""State container for the analyst-facing orchestrator conversation."""
+
 import asyncio
 import json
 import logging
@@ -41,6 +43,7 @@ class OrchestratorSession:
     last_triage_run_id: Optional[str] = None
     last_triage_verdict: Optional[dict] = None
     last_investigation_report: Optional[str] = None
+    last_investigation_status: Optional[str] = None
     thinking: bool = False
     log_buffer: deque = field(default_factory=deque)
     messages: list = field(default_factory=list)
@@ -50,6 +53,7 @@ class OrchestratorSession:
     model_calls_made: int = 0
 
     def to_state(self) -> dict:
+        """Serialize session fields that must survive across dashboard requests."""
         return {
             "case_id": self.case_id,
             "investigation_run_id": self.investigation_run_id,
@@ -58,6 +62,7 @@ class OrchestratorSession:
             "last_triage_run_id": self.last_triage_run_id,
             "last_triage_verdict": self.last_triage_verdict,
             "last_investigation_report": self.last_investigation_report,
+            "last_investigation_status": self.last_investigation_status,
             "ctx_tokens": self.ctx_tokens,
             "messages": _serialize_messages(self.messages),
             "visible_transcript": self.visible_transcript,
@@ -66,6 +71,7 @@ class OrchestratorSession:
         }
 
     def load_state(self, data: dict | None) -> None:
+        """Restore dashboard-persisted state into the live session object."""
         if not data:
             return
         self.case_id = data.get("case_id", self.case_id)
@@ -75,6 +81,7 @@ class OrchestratorSession:
         self.last_triage_run_id = data.get("last_triage_run_id", self.last_triage_run_id)
         self.last_triage_verdict = data.get("last_triage_verdict", self.last_triage_verdict)
         self.last_investigation_report = data.get("last_investigation_report", self.last_investigation_report)
+        self.last_investigation_status = data.get("last_investigation_status", self.last_investigation_status)
         self.ctx_tokens = data.get("ctx_tokens", self.ctx_tokens) or 0
         self.intent_sequence = data.get("intent_sequence", self.intent_sequence) or 0
         self.model_calls_made = data.get("model_calls_made", self.model_calls_made) or 0

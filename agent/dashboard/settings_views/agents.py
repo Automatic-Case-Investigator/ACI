@@ -59,6 +59,7 @@ def settings_agent_save(request):
             "max_tool_calls": _posint("max_tool_calls"),
             "tool_policy": tool_policy,
             "stream_intent": p.get("stream_intent") == "1",
+            "vicinity_window_hours": _posint("vicinity_window_hours"),
         },
     )
     messages.success(request, f"Agent '{name}' settings saved.")

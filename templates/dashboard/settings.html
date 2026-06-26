@@ -335,7 +335,7 @@
         <div class="settings-section-head">
           <div>
             <h2>Agents</h2>
-            <p class="muted">Override budget and tool policy per agent. Takes effect on the next run.</p>
+            <p class="muted">Override budget, tool policy, and default vicinity search range per agent. Takes effect on the next run.</p>
           </div>
         </div>
         <div class="settings-cards">
@@ -350,6 +350,10 @@
             <label class="inl">Max tool calls
               <input type="number" name="max_tool_calls" min="1" value="{{ a.max_tool_calls }}">
             </label>
+            <label class="inl">Vicinity range (hours)
+              <input type="number" name="vicinity_window_hours" min="1" value="{{ a.vicinity_window_hours_override }}" placeholder="{{ a.inherited_vicinity_window_hours }}">
+            </label>
+            <p class="muted tiny">Current effective default: ±{{ a.default_vicinity_window_hours }}h. Leave blank to fall back to the inherited default of ±{{ a.inherited_vicinity_window_hours }}h. Used only when no explicit absolute time window is already provided.</p>
             <div class="settings-kv"><b>Tool policy</b></div>
             <div class="check-grid">
               {% for p in a.available_providers %}

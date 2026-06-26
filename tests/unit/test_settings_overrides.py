@@ -31,6 +31,7 @@ from agent.runtime.config import is_enabled, provider_category, resolve_settings
 from agent.runtime.config.overrides import (
     resolve_agent_definition, resolve_workflow, resolve_escalation_map,
 )
+from agent.runtime.config.prompts import compose_system_prompt
 
 
 def _post(data):
@@ -60,22 +61,63 @@ class TestAgentOverride(DjangoTestCase):
         # Runs inside the per-test savepoint — rolled back automatically after
         # each test, so real production data is never permanently modified.
         AgentConfig.objects.filter(agent_name="triage").delete()
+        AgentConfig.objects.filter(agent_name="investigation").delete()
 
     def test_budget_and_tools_override(self):
         sv.settings_agent_save(_post({
             "agent_name": "triage", "max_steps": "5", "max_tool_calls": "6",
             "tool_policy": ["aci-thehive", "aci-memory"], "stream_intent": "1",
+            "vicinity_window_hours": "12",
         }))
         a = resolve_agent_definition(get_agent("triage"))
         self.assertEqual(a.budget.max_steps, 5)
         self.assertEqual(a.budget.max_tool_calls, 6)
         self.assertEqual(a.tool_policy, ["aci-thehive", "aci-memory"])
+        self.assertEqual(a.default_vicinity_window_hours, 12)
 
     def test_blank_budget_keeps_default(self):
         base = get_agent("triage")
         sv.settings_agent_save(_post({"agent_name": "triage", "max_steps": "", "max_tool_calls": ""}))
         a = resolve_agent_definition(get_agent("triage"))
         self.assertEqual(a.budget.max_steps, base.budget.max_steps)
+        self.assertEqual(a.default_vicinity_window_hours, 24)
+
+    def test_blank_vicinity_window_clears_override(self):
+        AgentConfig.objects.update_or_create(
+            agent_name="triage",
+            defaults={"vicinity_window_hours": 18},
+        )
+        sv.settings_agent_save(_post({"agent_name": "triage", "vicinity_window_hours": ""}))
+        row = AgentConfig.objects.get(agent_name="triage")
+        self.assertIsNone(row.vicinity_window_hours)
+        self.assertEqual(resolve_agent_definition(get_agent("triage")).default_vicinity_window_hours, 24)
+
+    def test_agents_have_independent_vicinity_windows(self):
+        AgentConfig.objects.update_or_create(
+            agent_name="triage",
+            defaults={"vicinity_window_hours": 8},
+        )
+        AgentConfig.objects.update_or_create(
+            agent_name="investigation",
+            defaults={"vicinity_window_hours": 36},
+        )
+        self.assertEqual(resolve_agent_definition(get_agent("triage")).default_vicinity_window_hours, 8)
+        self.assertEqual(resolve_agent_definition(get_agent("investigation")).default_vicinity_window_hours, 36)
+
+    def test_prompt_includes_resolved_vicinity_window(self):
+        prompt = compose_system_prompt(
+            get_agent("triage").prompt_layers,
+            {
+                "case_id": "~1",
+                "run_id": "run-1",
+                "agent_name": "triage",
+                "budget": {"max_steps": 5, "max_tool_calls": 6},
+                "default_vicinity_window_hours": 18,
+                "available_tools": [],
+            },
+        )
+        self.assertIn("Default vicinity window", prompt)
+        self.assertIn("±18h", prompt)
 
 
 class TestWorkflowOverride(DjangoTestCase):

@@ -129,6 +129,7 @@ class AgentConfig(models.Model):
     # Override the agent's MCP tool policy (list of provider keys). Null = default.
     tool_policy = models.JSONField(null=True, blank=True, default=None)
     stream_intent = models.BooleanField(null=True, blank=True, default=None)
+    vicinity_window_hours = models.PositiveIntegerField(null=True, blank=True, default=None)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

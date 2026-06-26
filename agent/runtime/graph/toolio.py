@@ -29,6 +29,19 @@ _SEED_TASK_TITLE = "populate investigation queue"
 # completes every claimed task itself, so the model never needs either.
 _GRAPH_MANAGED_TOOLS = frozenset({"claim_next", "complete_task"})
 
+# Write tools that modify the case management system. The investigation agent
+# must never call these autonomously — writes require explicit analyst authorization
+# which only the orchestrator can grant. Keeping them out of the model tool list
+# is the only reliable enforcement (prompt instructions are overridden by MCP guidance).
+_CASE_WRITE_TOOLS = frozenset({
+    "post_case_report",
+    "update_case",
+    "close_case",
+    "resolve_case",
+    "add_case_comment",
+    "post_case_comment",
+})
+
 _MAX_SYNTHESIS_FINDINGS_CHARS = 2000
 
 
@@ -42,6 +55,10 @@ def _model_tools_for_agent(
         title = ((current_task or {}).get("title") or "").lower()
         if _SEED_TASK_TITLE not in title:
             excluded.add("create_task")
+        # Investigation agents must not write to the case system without explicit
+        # analyst authorization (which the orchestrator enforces). Hide write tools
+        # so MCP instructions cannot prompt the model into calling them autonomously.
+        excluded |= _CASE_WRITE_TOOLS
     return [t for t in tools if getattr(t, "name", "") not in excluded]
 
 

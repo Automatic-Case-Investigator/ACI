@@ -84,7 +84,12 @@ def _make_tools(session: OrchestratorSession) -> list[StructuredTool]:
 def _make_agent_tool(session: OrchestratorSession, agent_def: AgentDefinition) -> StructuredTool:
     name = agent_def.name
 
-    async def _execute(case_id: str, question: str, triage_report: Optional[str]) -> str:
+    async def _execute(
+        case_id: str,
+        question: str,
+        triage_report: Optional[str],
+        prior_investigation_report: Optional[str] = None,
+    ) -> str:
         # Normalise bare numeric IDs — TheHive requires the ~ prefix.
         case_id = case_id if case_id.startswith("~") else f"~{case_id}"
         session.case_id = case_id
@@ -109,17 +114,33 @@ def _make_agent_tool(session: OrchestratorSession, agent_def: AgentDefinition) -
         # when there is no session-stored report for the requested case.
         handoff = None
         if agent_def.consumes_handoff:
-            stored_report = (
-                session.last_triage_report
-                if session.last_triage_case_id == case_id else None
+            # Resume mode: prior investigation ran out of budget; use its report
+            # to seed a new investigation focused on the remaining open gaps.
+            resume_report = prior_investigation_report or (
+                session.last_investigation_report
+                if session.last_investigation_status == "incomplete_budget"
+                   and session.last_triage_case_id == case_id
+                else None
             )
-            report = stored_report or triage_report
-            if report:
+            if resume_report:
                 handoff = Handoff(
                     analyst_request=question,
-                    triage_report=report,
                     source_run_id=session.last_triage_run_id or "",
+                    prior_investigation_report=resume_report,
                 )
+                emit("orch", "note", "investigation: resume mode — seeding from prior run's open gaps")
+            else:
+                stored_report = (
+                    session.last_triage_report
+                    if session.last_triage_case_id == case_id else None
+                )
+                report = stored_report or triage_report
+                if report:
+                    handoff = Handoff(
+                        analyst_request=question,
+                        triage_report=report,
+                        source_run_id=session.last_triage_run_id or "",
+                    )
 
         emit("orch", "route", f"{name}(case={case_id})", detail=f"handoff={'yes' if handoff else 'no'}")
         run = await dispatch_run(
@@ -138,22 +159,29 @@ def _make_agent_tool(session: OrchestratorSession, agent_def: AgentDefinition) -
             session.last_triage_run_id = str(run.id)
             session.last_triage_verdict = run.verdict if isinstance(run.verdict, dict) else None
             session.investigation_run_id = None
+            session.last_investigation_status = None  # reset resume state for new case
             await _propagate_verdict_to_session(run.verdict)
         if agent_def.consumes_handoff:
             session.investigation_run_id = str(run.id)
             # Keep the FULL investigation report so the orchestrator can deliver it
             # verbatim to the analyst (the in-context tool summary below is truncated).
             session.last_investigation_report = run.result or ""
+            session.last_investigation_status = run.status
             # Dashboard verdict totals count session rows, not interactive child runs.
             await _propagate_verdict_to_session(run.verdict)
 
         return _agent_run_summary(agent_def, run)
 
-    # Only handoff-consuming agents expose the `triage_report` parameter, so the
-    # tool schema matches what each agent actually accepts.
+    # Only handoff-consuming agents expose the triage/resume report parameters,
+    # so the tool schema matches what each agent actually accepts.
     if agent_def.consumes_handoff:
-        async def _run(case_id: str, question: str, triage_report: Optional[str] = None) -> str:
-            return await _execute(case_id, question, triage_report)
+        async def _run(
+            case_id: str,
+            question: str,
+            triage_report: Optional[str] = None,
+            prior_investigation_report: Optional[str] = None,
+        ) -> str:
+            return await _execute(case_id, question, triage_report, prior_investigation_report)
     else:
         async def _run(case_id: str, question: str) -> str:
             return await _execute(case_id, question, None)

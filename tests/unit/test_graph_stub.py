@@ -26,6 +26,7 @@ django.setup()
 
 from aci_taskqueue.store import init_db, list_tasks, create_task as sq_create
 from agent.runtime.graph import GRAPH, AgentState
+from agent.runtime.graph import seed
 from agent.runtime.analysis.verdict import parse_verdict
 from langchain_core.messages import AIMessage
 from langchain_core.language_models import BaseChatModel
@@ -112,6 +113,16 @@ class StubModel(BaseChatModel):
         return AIMessage(content="Task complete.")
 
 
+class TQTool:
+    def __init__(self, name, fn):
+        self.name = name
+        self._fn = fn
+
+    async def ainvoke(self, args: dict):
+        result = self._fn(**args)
+        return json.dumps(result, default=str) if result is not None else "null"
+
+
 class EmptyCompletionModel(BaseChatModel):
     """Returns no text or tool calls, including during completion recovery."""
 
@@ -134,7 +145,7 @@ class TriageNearbyEventsGuardModel(BaseChatModel):
 
     def __init__(self):
         super().__init__()
-        self.turns = 0
+        self._turns = 0
 
     @property
     def _llm_type(self):
@@ -147,10 +158,10 @@ class TriageNearbyEventsGuardModel(BaseChatModel):
         return self
 
     async def ainvoke(self, messages, **kwargs):
-        self.turns += 1
-        if self.turns == 1:
+        self._turns += 1
+        if self._turns == 1:
             return AIMessage(content="## Confirmed Facts\n- Case loaded.\n\n## Findings\n- Done.")
-        if self.turns == 2:
+        if self._turns == 2:
             return AIMessage(
                 content="",
                 tool_calls=[
@@ -200,12 +211,51 @@ class TriageNearbyEventsGuardModel(BaseChatModel):
         ))
 
 
+class SeedWindowPropagationTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        init_db()
+        import sqlite3
+        con = sqlite3.connect(os.environ["TASKQUEUE_DB_PATH"])
+        con.execute("DELETE FROM tasks")
+        con.commit()
+        con.close()
+
+    async def test_triage_seed_task_includes_configured_vicinity_hours(self):
+        state = AgentState(
+            run_id="seed-run-1",
+            case_id="~seed",
+            agent_name="triage",
+            question="triage this case",
+            handoff=None,
+            current_task=None,
+            last_completed_task=None,
+            messages=[],
+            steps=0,
+            tool_calls_made=0,
+            max_steps=12,
+            max_tool_calls=18,
+            default_vicinity_window_hours=48,
+            status="running",
+            final_answer="",
+            ctx_tokens=0,
+            verdict=None,
+            pivot_tasks_created=0,
+            escalation_posted=False,
+            summary_format_retries=0,
+        )
+        config = {"configurable": {"tools": [TQTool("create_task", sq_create)]}}
+        await seed(state, config)
+        tasks = list_tasks("~seed", "seed-run-1", "triage")
+        self.assertEqual(len(tasks), 1)
+        self.assertIn("±48 hours", tasks[0]["description"])
+
+
 class TriageContractModel(BaseChatModel):
     """Writes a triage report without JSON, then returns the contract JSON."""
 
     def __init__(self):
         super().__init__()
-        self.turns = 0
+        self._turns = 0
 
     @property
     def _llm_type(self):
@@ -218,7 +268,7 @@ class TriageContractModel(BaseChatModel):
         return self
 
     async def ainvoke(self, messages, **kwargs):
-        self.turns += 1
+        self._turns += 1
         text = "\n".join(getattr(m, "content", "") or "" for m in messages)
         if "canonical verdict JSON contract" in text:
             return AIMessage(content=(
@@ -456,7 +506,7 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
 
         triage_tasks = list_tasks(case_id, triage_run_id, "triage")
         self.assertEqual(final["status"], "completed")
-        self.assertEqual(model.turns, 4)
+        self.assertEqual(model._turns, 4)
         self.assertEqual(triage_tasks[0]["status"], "completed")
         self.assertIn("Nearby SIEM events were checked", triage_tasks[0]["summary"])
 
@@ -492,7 +542,7 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(final["status"], "completed")
-        self.assertEqual(model.turns, 2)
+        self.assertEqual(model._turns, 2)
         self.assertEqual(final["verdict"]["verdict"], "needs_investigation")
         self.assertEqual(final["final_answer"].count("```json"), 1)
         self.assertEqual(parse_verdict(final["final_answer"]), final["verdict"])
@@ -901,6 +951,96 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Verify crontab contents changed during the nano session", titles)
         self.assertIn("Check for surrounding cron persistence or follow-on execution on kali", titles)
 
+    async def test_seed_guard_does_not_count_new_lead_metadata_bullets_as_tasks(self):
+        inv_run_id = "inv-run-sg-leads-meta"
+        case_id = "~sg-leads-meta"
+
+        class MetadataLeadSeedModel(BaseChatModel):
+            def __init__(self):
+                super().__init__()
+                self._turn = 0
+
+            @property
+            def _llm_type(self):
+                return "seed-guard-leads-meta-stub"
+
+            def _generate(self, *a, **kw):
+                raise NotImplementedError
+
+            def bind_tools(self, tools):
+                return self
+
+            async def ainvoke(self, messages, **kwargs):
+                self._turn += 1
+                if self._turn == 1:
+                    return AIMessage(
+                        content="",
+                        tool_calls=[{
+                            "id": "tc-meta-one",
+                            "name": "create_task",
+                            "args": {
+                                "case_id": case_id,
+                                "run_id": inv_run_id,
+                                "agent_name": "investigation",
+                                "title": "Verify crontab contents changed during the nano session",
+                                "description": "Check cron content.",
+                                "priority": 70,
+                            },
+                        }],
+                    )
+                return AIMessage(content="Queue complete.")
+
+        tools = _make_triage_tools(case_id, inv_run_id)
+        model = MetadataLeadSeedModel()
+        state = AgentState(
+            run_id=inv_run_id,
+            case_id=case_id,
+            agent_name="investigation",
+            question="Investigate cron persistence.",
+            handoff={
+                "analyst_request": "Investigate cron persistence.",
+                "triage_report": (
+                    "## New Leads\n"
+                    "- title: Verify crontab contents changed during the nano session\n"
+                    "  - pivots: host `kali`\n"
+                    "  - evidence: event=evt-1\n"
+                    "  - priority: 70\n"
+                ),
+                "source_run_id": "triage-run-sg-meta",
+                "artifacts": {},
+            },
+            current_task=None,
+            messages=[],
+            steps=0,
+            tool_calls_made=0,
+            max_steps=20,
+            max_tool_calls=60,
+            default_vicinity_window_hours=24,
+            status="running",
+            final_answer="",
+            ctx_tokens=0,
+            verdict=None,
+            pivot_tasks_created=0,
+            escalation_posted=False,
+            summary_format_retries=0,
+        )
+        config = {
+            "configurable": {
+                "model": model,
+                "tools": tools,
+                "system_prompt": "You are an investigation agent.",
+            }
+        }
+
+        await GRAPH.ainvoke(state, config=config)
+        tasks = list_tasks(case_id, inv_run_id, "investigation")
+        titles = [t["title"] for t in tasks]
+        self.assertEqual(
+            titles.count("Verify crontab contents changed during the nano session"),
+            1,
+            f"seed guard should not demand duplicate tasks for lead metadata bullets: {titles}",
+        )
+
     async def test_investigation_verdict_contract_publishes_reassessed_tp(self):
         run_id = "inv-run-contract"
         case_id = "~contract"
@@ -990,7 +1130,9 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual(len(final_writes), 1)
         self.assertEqual(parse_verdict(final_writes[0]["content"]), final["verdict"])
-        self.assertEqual(parse_verdict(post_tool.calls[0]["summary"]), final["verdict"])
+        # post_case_report is no longer called automatically from the finish node;
+        # writing to TheHive now requires explicit analyst authorization.
+        self.assertEqual(len(post_tool.calls), 0)
 
     async def test_empty_agent_response_still_records_completion_summary(self):
         run_id = "inv-run-empty-summary"

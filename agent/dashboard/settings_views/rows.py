@@ -184,6 +184,7 @@ def _agent_rows() -> list[dict]:
     """Registered agents with their EFFECTIVE (override-applied) settings, plus the
     list of providers available to toggle in each agent's tool policy."""
     from agent.agents.registry import get_agent, list_agents
+    from agent.models import AgentConfig
     from agent.runtime.config.overrides import resolve_agent_definition
 
     # Tool-policy options = built-in providers + enabled custom MCP servers.
@@ -195,6 +196,7 @@ def _agent_rows() -> list[dict]:
         base = get_agent(name)
         if not base:
             continue
+        row = AgentConfig.objects.filter(agent_name=name).first()
         a = resolve_agent_definition(base)
         rows.append({
             "name": a.name,
@@ -208,6 +210,11 @@ def _agent_rows() -> list[dict]:
             "produces_handoff": a.produces_handoff,
             "consumes_handoff": a.consumes_handoff,
             "stream_intent": getattr(a, "stream_intent", True),
+            "inherited_vicinity_window_hours": base.default_vicinity_window_hours,
+            "default_vicinity_window_hours": a.default_vicinity_window_hours,
+            "vicinity_window_hours_override": (
+                row.vicinity_window_hours if row and row.vicinity_window_hours else ""
+            ),
         })
     return rows
 

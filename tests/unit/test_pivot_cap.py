@@ -1,18 +1,8 @@
 """
-Offline test: the investigation pivot node caps how many follow-up tasks it
-auto-creates from a "## New Leads" section.
-
-Without the cap, each completed task can spawn new leads that spawn more, so the
-queue never drains and the run only ends by exhausting its step budget
-(status=incomplete_budget) instead of reaching a verdict. The pivot node now:
-  - creates at most `_MAX_PIVOT_TASKS` follow-up tasks across the whole run,
-  - keeps the highest-priority leads when the cap is hit,
-  - surfaces the rest as open leads on the Findings Board (not silently dropped).
+Offline test: the investigation pivot node auto-creates validated follow-up
+tasks from a "## New Leads" section without applying a lead budget cap.
 
 No real Wazuh, TheHive, LLM, or AVFS needed.
-
-Run from project root with:
-    python .claude/skills/run-aci-backend/tests/test_pivot_cap.py
 """
 from __future__ import annotations
 
@@ -34,7 +24,7 @@ import django
 django.setup()
 
 from aci_taskqueue.store import init_db, list_tasks as sq_list, create_task, list_tasks
-from agent.runtime.graph import pivot, _MAX_APPROVED_LEADS_PER_TASK, _MAX_PIVOT_TASKS
+from agent.runtime.graph import pivot
 from langchain_core.messages import AIMessage
 
 
@@ -67,8 +57,7 @@ def _lead_dicts(priorities):
 
 class StubLeadModel:
     """Returns a fixed validated-lead JSON array regardless of prompt — the lead
-    model is now responsible for extraction+validation, so the budget cap is what
-    this test exercises."""
+    model is now responsible for extraction+validation."""
     def __init__(self, leads):
         self._payload = json.dumps(leads)
 
@@ -108,7 +97,7 @@ def _state(run_id, final_answer, already=0):
     }
 
 
-class PivotCapTest(unittest.IsolatedAsyncioTestCase):
+class PivotLeadQueueTest(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
         init_db()
@@ -118,39 +107,30 @@ class PivotCapTest(unittest.IsolatedAsyncioTestCase):
         con.commit()
         con.close()
 
-    async def test_caps_followups_and_keeps_highest_priority(self):
+    async def test_queues_all_validated_followups(self):
         run_id = "cap-run-1"
-        # More leads than the cap, with descending priorities.
         priorities = list(range(95, 95 - 13 * 5, -5))  # 13 leads: 95,90,...,35
-        self.assertGreater(len(priorities), _MAX_PIVOT_TASKS)
         config = _config(priorities)
 
         out = await pivot(_state(run_id, _leads_block(priorities)), config)
 
         tasks = sq_list("~cap", run_id, "investigation")
-        self.assertEqual(len(tasks), _MAX_APPROVED_LEADS_PER_TASK,
-                         "pivot must not create more than the per-task cap")
-        self.assertEqual(out.get("pivot_tasks_created"), _MAX_APPROVED_LEADS_PER_TASK)
-
-        # The kept tasks are the highest-priority leads; the rest are rejected/deferred.
+        self.assertEqual(len(tasks), len(priorities))
+        self.assertEqual(out.get("pivot_tasks_created"), len(priorities))
         kept = {t["priority"] for t in tasks}
-        top = sorted(priorities, reverse=True)[:_MAX_APPROVED_LEADS_PER_TASK]
-        self.assertEqual(kept, set(top))
-        for low in sorted(priorities)[: len(priorities) - _MAX_APPROVED_LEADS_PER_TASK]:
-            self.assertNotIn(low, kept, f"low-priority lead P{low} should be deferred")
+        self.assertEqual(kept, set(priorities))
 
-    async def test_no_new_tasks_once_budget_already_spent(self):
+    async def test_prior_created_count_does_not_block_new_leads(self):
         run_id = "cap-run-2"
         config = _config([90, 80, 70])
-        # Already at the cap from earlier pivots.
         out = await pivot(
-            _state(run_id, _leads_block([90, 80, 70]), already=_MAX_PIVOT_TASKS),
+            _state(run_id, _leads_block([90, 80, 70]), already=10),
             config,
         )
-        self.assertEqual(len(sq_list("~cap", run_id, "investigation")), 0)
-        self.assertEqual(out.get("pivot_tasks_created"), _MAX_PIVOT_TASKS)
+        self.assertEqual(len(sq_list("~cap", run_id, "investigation")), 3)
+        self.assertEqual(out.get("pivot_tasks_created"), 13)
 
-    async def test_under_cap_creates_all(self):
+    async def test_creates_all_under_previous_small_examples(self):
         run_id = "cap-run-3"
         config = _config([90, 80, 70])
         out = await pivot(_state(run_id, _leads_block([90, 80, 70])), config)

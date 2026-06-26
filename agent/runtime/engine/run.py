@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Entry points for executing a single triage or investigation agent run."""
+
 import asyncio
 import logging
 
@@ -21,6 +23,7 @@ log = logging.getLogger(__name__)
 
 
 def _prompt_tool_names(agent_name: str, tools: list) -> list[str]:
+    """Filter tool names exposed in prompts when an agent should not advertise all tools."""
     if agent_name == "triage":
         return [tool.name for tool in tools if tool.name != "create_task"]
     return [tool.name for tool in tools]
@@ -32,6 +35,7 @@ async def run_agent(
     case_id: str,
     question: str,
 ) -> None:
+    """Run one agent while binding log/session context for dashboard streaming."""
     # Tag every event from this run with the specific AgentRun id (dashboard display).
     clear_run_issues(run_id)
     session_token = bind_session(run_id) if current_session() is None else None
@@ -53,6 +57,7 @@ async def _run_agent_bound(
     case_id: str,
     question: str,
 ) -> None:
+    """Resolve runtime dependencies, invoke the graph, and persist the final result."""
     agent_def = get_agent(agent_name)
     if agent_def is None:
         raise ValueError(f"Unknown agent: {agent_name}")
@@ -90,6 +95,7 @@ async def _run_agent_bound(
                     "max_steps": agent_def.budget.max_steps,
                     "max_tool_calls": agent_def.budget.max_tool_calls,
                 },
+                "default_vicinity_window_hours": agent_def.default_vicinity_window_hours,
                 "avfs_home": home_dir(),
                 "avfs_memory_dir": memory_dir(),
                 "avfs_case_dir": case_dir(case_id),
@@ -112,6 +118,7 @@ async def _run_agent_bound(
             tool_calls_made=0,
             max_steps=agent_def.budget.max_steps,
             max_tool_calls=agent_def.budget.max_tool_calls,
+            default_vicinity_window_hours=agent_def.default_vicinity_window_hours,
             status="running",
             final_answer="",
             ctx_tokens=0,
@@ -158,4 +165,5 @@ def run_agent_sync(
     case_id: str,
     question: str,
 ) -> None:
+    """Synchronous wrapper used by Django management commands and worker entry points."""
     asyncio.run(run_agent(run_id, agent_name, case_id, question))

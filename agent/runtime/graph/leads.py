@@ -9,8 +9,6 @@ from typing import Iterable
 from .parsing import _normalize_fact_key
 
 
-_MAX_APPROVED_LEADS_PER_TASK = 3
-
 _ARTIFACT_RE = re.compile(
     r"\b\d{1,3}(?:\.\d{1,3}){3}\b|"
     r"\b(?:[0-9a-fA-F]{32}|[0-9a-fA-F]{40}|[0-9a-fA-F]{64})\b|"
@@ -137,42 +135,19 @@ def _lead_direction(decision: LeadDecision) -> str:
 def apply_lead_budget(
     approved_pool: list[LeadDecision],
     *,
-    max_approved: int = _MAX_APPROVED_LEADS_PER_TASK,
+    max_approved: int | None = None,
     remaining_run_budget: int | None = None,
 ) -> tuple[list[LeadDecision], list[LeadDecision]]:
-    """Deterministic budget gate over model-approved leads.
+    """Return model-approved leads in deterministic priority order.
 
-    Sorts by score/priority and splits into (approved, deferred-over-cap) so the
-    queue drains and the run converges. When the pool holds both a backward
-    (upstream / root cause) and a forward (downstream / impact) lead, reserves a
-    slot for the top of EACH so the higher-scoring direction can't take every
-    slot. No-op when only one direction is present. Stays deterministic on
-    purpose — budget accounting should never depend on a model call."""
+    Lead budgets are disabled. The optional cap arguments remain only for call
+    compatibility with older code/tests and are intentionally ignored.
+    """
     ordered = sorted(
         approved_pool,
         key=lambda d: (-d.score, -d.candidate.priority, d.candidate.original_index),
     )
-    limit = min(max_approved, remaining_run_budget if remaining_run_budget is not None else max_approved)
-    limit = max(0, limit)
-
-    picked: set[int] = set()
-    if limit >= 2:
-        for want in ("backward", "forward"):
-            for i, d in enumerate(ordered):
-                if i not in picked and _lead_direction(d) == want:
-                    picked.add(i)
-                    break
-    for i in range(len(ordered)):
-        if len(picked) >= limit:
-            break
-        picked.add(i)
-
-    approved = [d for i, d in enumerate(ordered) if i in picked]
-    deferred = [
-        LeadDecision(d.candidate, False, "approved lead over per-task or run lead cap", "over_cap", d.score, d.signature)
-        for i, d in enumerate(ordered) if i not in picked
-    ]
-    return approved, deferred
+    return ordered, []
 
 
 def _safe_priority(value) -> int:
@@ -196,8 +171,10 @@ def _artifacts(text: str) -> frozenset[str]:
         cleaned = value.strip("`'\".,;()[]{}").lower()
         if cleaned and len(cleaned) > 1:
             out.add(cleaned)
-    for ts in _ISO_OR_DATE_RE.findall(text or ""):
-        out.add(ts.lower())
+    # ISO timestamps deliberately excluded from artifact sets.
+    # Including them causes the same investigative question to produce a unique
+    # signature on each pivot round (each SIEM query surfaces different timestamps),
+    # defeating deduplication and making the investigation non-convergent.
     return frozenset(out)
 
 
@@ -216,21 +193,88 @@ def lead_signature(candidate: LeadCandidate) -> str:
 
 
 def _task_ref(task: dict) -> dict:
-    text = " ".join([
-        str(task.get("title") or ""),
-        str(task.get("description") or ""),
-        str(task.get("summary") or ""),
-    ])
-    objective = _objective_bucket(text)
+    title = str(task.get("title") or "")
+    description = str(task.get("description") or "")
+    summary = str(task.get("summary") or "")
+    text = " ".join([title, description, summary])
+    # Objective comes from title+description only — the summary may mention artifacts
+    # from other kill-chain phases (e.g. "reverse shell" in findings text) and would
+    # drag the task into the wrong bucket, breaking dedup signature matching.
+    objective = _objective_bucket(" ".join([title, description]))
     artifacts = _artifacts(text)
+    status = str(task.get("status") or "").strip().lower()
+    summary = str(task.get("summary") or "")
+    conclusion = str(task.get("conclusion") or "")
     return {
         "title": str(task.get("title") or ""),
         "text": text,
         "norm_title": _normalize_fact_key(str(task.get("title") or "")),
         "objective": objective,
         "artifacts": artifacts,
+        "status": status,
+        "summary": summary,
+        "conclusion": conclusion,
+        "blocks_duplicate": _task_blocks_duplicate(status, summary, conclusion),
         "signature": _signature(objective, artifacts, str(task.get("description") or ""), str(task.get("title") or "")),
     }
+
+
+def _task_blocks_duplicate(status: str, summary: str, conclusion: str) -> bool:
+    """Whether an existing task should suppress a follow-up lead as duplicate.
+
+    Active queued work still blocks exact duplicate efforts. Completed work only
+    blocks when it appears to have reached a firm conclusion; inconclusive or
+    still-open outcomes should not suppress a new lead.
+    """
+    normalized_status = (status or "").strip().lower()
+    if normalized_status in {"pending", "claimed", "running", "in_progress"}:
+        return True
+    if normalized_status not in {"completed"}:
+        return False
+
+    outcome = "\n".join(filter(None, [summary, conclusion])).lower()
+    if not outcome.strip():
+        return False
+
+    unresolved_markers = (
+        "[open]",
+        "open question",
+        "open gap",
+        "still unknown",
+        "remains unknown",
+        "remains open",
+        "not confirmed",
+        "did not confirm",
+        "did not find",
+        "did not retrieve",
+        "no direct evidence",
+        "no evidence",
+        "no results",
+        "no matching",
+        "no events found",
+        "no telemetry",
+        "nothing found",
+        "not found",
+        "zero events",
+        "could not confirm",
+        "could not establish",
+        "could not be confirmed",
+        "could not be established",
+        "cannot confirm",
+        "cannot be confirmed",
+        "insufficient data",
+        "inconclusive",
+        "unconfirmed",
+        "uncertain",
+        "unknown",
+        "not proven",
+        "not established",
+        "not fully reconstructed",
+        "has not been demonstrated",
+        "may have occurred",
+        "may still exist",
+    )
+    return not any(marker in outcome for marker in unresolved_markers)
 
 
 def duplicate_existing_task(candidate: LeadCandidate, existing_refs: list[dict]) -> str:
@@ -243,12 +287,16 @@ def duplicate_existing_task(candidate: LeadCandidate, existing_refs: list[dict])
     signature = _signature(objective, artifacts, candidate.pivots, candidate.title)
     title_key = _normalize_fact_key(candidate.title)
     for ref in existing_refs:
+        if not ref.get("blocks_duplicate"):
+            continue
+        is_active = ref.get("status") in {"pending", "claimed", "running", "in_progress"}
+        label = "active task" if is_active else "resolved task"
         if ref["signature"] == signature:
-            return f"duplicate of queued task: {ref['title']}"
+            return f"duplicate of {label}: {ref['title']}"
         if objective == ref["objective"] and artifacts and artifacts & ref["artifacts"]:
-            return f"same objective and artifact as queued task: {ref['title']}"
+            return f"same objective and artifact as {label}: {ref['title']}"
         if title_key and _title_similarity(title_key, ref["norm_title"]) >= 0.78:
-            return f"semantically similar to queued task: {ref['title']}"
+            return f"semantically similar to {label}: {ref['title']}"
     return ""
 
 

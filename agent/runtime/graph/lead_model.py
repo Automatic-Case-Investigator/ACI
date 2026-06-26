@@ -39,8 +39,9 @@ _LEAD_SYSTEM = (
     "- FORWARD (downstream / impact): what the actor did or does next — C2/callback "
     "confirmation, lateral movement, data access/exfiltration, additional persistence, "
     "post-exploitation commands after the confirmed event.\n"
-    "Bias toward action, but never re-run finished work: reject a lead when it is "
-    "genuinely empty/vague, or would repeat a queued OR completed task. Be decisive."
+    "Bias toward action, but avoid redundant work: reject a lead when it is "
+    "genuinely empty/vague, would repeat an already-active queued task, or would "
+    "repeat a completed task that already reached a clear conclusion. Be decisive."
 )
 
 # Tolerant extraction of the first JSON array in a model response.
@@ -53,22 +54,35 @@ def _build_prompt(
     existing_tasks: list[dict],
     current_task: dict | None,
 ) -> str:
-    # Include status so the model can tell pending from already-completed work and
-    # never re-open a finished task.
+    # Include status so the model can distinguish pending from completed work.
+    # If a completed task did not reach a solid conclusion, it should not
+    # automatically block a follow-up investigation.
     existing = "\n".join(
-        f"- [{t.get('status', '?')}] {t.get('title', '')}" for t in (existing_tasks or [])
+        f"- [{t.get('status', '?')}] {t.get('title', '')}"
+        + (
+            f" | Outcome: {t.get('summary') or t.get('conclusion')}"
+            if (t.get("summary") or t.get("conclusion"))
+            else ""
+        )
+        for t in (existing_tasks or [])
     ) or "- (none)"
+
     task_line = ""
     if current_task:
         task_line = (
-            f"\n## Task just completed\n{current_task.get('title') or ''}\n"
+            f"\n## Task just completed\n"
+            f"{current_task.get('title') or ''}\n"
             f"{current_task.get('description') or ''}\n"
         )
+
     return (
-        f"## Analyst report (for context)\n{(final_answer or '').strip()[:6000]}\n"
+        f"## Analyst report (for context)\n"
+        f"{(final_answer or '').strip()[:6000]}\n"
         f"{task_line}\n"
-        f"## Already-queued / completed investigation tasks\n{existing}\n\n"
-        f"## Proposed New Leads section to validate\n{(leads_section or '').strip()[:6000]}\n\n"
+        f"## Already-queued / completed investigation tasks\n"
+        f"{existing}\n\n"
+        f"## Proposed New Leads section to validate\n"
+        f"{(leads_section or '').strip()[:6000]}\n\n"
         "Extract and validate leads. Return ONLY a JSON array (no prose, no code "
         "fences). Each element:\n"
         "{\n"
@@ -89,12 +103,27 @@ def _build_prompt(
         "Validation rules:\n"
         "- REJECT as 'invalid' only a lead with no real title or a placeholder/no-op.\n"
         "- REJECT as 'low_relevance' only a vague lead with no concrete artifact.\n"
-        "- REJECT as 'duplicate' when the lead would re-run essentially the same "
-        "query/scope as a task listed above — INCLUDING tasks marked [completed]; do "
-        "not re-open finished work. Sharing a host/IP/path/time-window is NOT enough — "
-        "a different angle (upstream cause vs downstream impact) is a NEW lead.\n"
-        "- Otherwise set approved=true. When in doubt about a genuinely new angle, "
-        "approve.\n"
+        "- REJECT as 'duplicate' when a pending or in-progress task is already "
+        "investigating essentially the same question. Overlapping active work "
+        "should not be queued twice.\n"
+        "- REJECT as 'duplicate' ONLY when a previous task investigated essentially the "
+        "same question AND reached a clear, definitive conclusion. Do NOT reject solely "
+        "because a similar task exists.\n"
+        "- CRITICAL — 'Inconclusive' ≠ 'answered': A completed task whose outcome "
+        "contains any of: 'no evidence', 'no direct evidence', 'not confirmed', "
+        "'unconfirmed', 'could not confirm', 'could not be established', 'no events "
+        "found', 'insufficient data', 'inconclusive', 'still unknown', 'remains open', "
+        "or similar negative findings means the question is STILL OPEN. APPROVE the "
+        "new lead. Only reject as duplicate if the outcome says the question was "
+        "positively answered (e.g. 'confirmed', 'established', 'identified').\n"
+        "- CRITICAL — Active overlap DOES block: Tasks that are [pending], [claimed], "
+        "[running], or [in_progress] should block a new lead when they semantically "
+        "overlap with the same investigative question. Active tasks do NOT block only "
+        "when the new lead is actually a different question/angle.\n"
+        "- Sharing a host/IP/path/time-window is NOT enough—a different investigative "
+        "angle (upstream cause vs downstream impact) is a NEW lead.\n"
+        "- Otherwise set approved=true. When uncertain whether previous work "
+        "definitively resolved the question, approve the lead.\n"
         "- Always fill title/pivots/evidence with the reassembled content even when "
         "rejecting, so the decision is auditable.\n"
         "Return [] only if there are genuinely no real leads in either direction."

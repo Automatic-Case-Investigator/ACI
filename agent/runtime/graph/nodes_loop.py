@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Graph nodes that drive task seeding, claiming, reasoning, and tool execution."""
+
 import json
 
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
@@ -44,6 +46,7 @@ def _format_queue_context(tasks: list[dict]) -> str:
 
 
 async def _queue_context_for_state(state: AgentState, tools: list) -> str:
+    """Return a compact queue snapshot that helps investigation avoid duplicate leads."""
     if state["agent_name"] != "investigation":
         return ""
     task = state.get("current_task") or {}
@@ -55,6 +58,7 @@ async def _queue_context_for_state(state: AgentState, tools: list) -> str:
 
 
 async def seed(state: AgentState, config) -> dict:
+    """Populate the initial task queue for triage or investigation runs."""
     tools = config["configurable"]["tools"]
     create = _tmap(tools).get("create_task")
     agent_name = state["agent_name"]
@@ -62,6 +66,7 @@ async def seed(state: AgentState, config) -> dict:
     src = src_label(agent_name)
     _emit_node_entry(src, "seed", state)
     emit(src, "note", f"seed case={state['case_id']} run={state['run_id']}")
+    vicinity_hours = int(state.get("default_vicinity_window_hours") or 24)
 
     if agent_name == "triage":
         if create:
@@ -76,7 +81,10 @@ async def seed(state: AgentState, config) -> dict:
                 "5. Check analyst corrections for these rule IDs.\n"
                 "6. Load other alerts / events close to the current case / alert timestamp. "
                 "After reading the case and linked alert summary, derive an absolute time "
-                "window around the alert timestamp and query the SIEM with `search_keyword`, "
+                f"window around the alert timestamp using the configured default vicinity "
+                f"window of ±{vicinity_hours} hours unless the task or evidence already gives "
+                "an explicit absolute range, "
+                "and query the SIEM with `search_keyword`, "
                 "`search`, or `profile_field` for nearby events on the same host, user, "
                 "source IP, and rule family. Summarize both matching events and zero-result "
                 "queries in the report.\n\n"
@@ -109,12 +117,22 @@ async def seed(state: AgentState, config) -> dict:
             if has_triage:
                 title = "Populate investigation queue from triage handoff"
                 description = handoff.to_seed_text() if handoff else state["question"]
+                description += (
+                    f"\n\nWhen a triage plan item or open gap does not already specify an "
+                    f"absolute time window, derive one using this run's configured default "
+                    f"vicinity window of ±{vicinity_hours} hours around the anchor timestamp. "
+                    "Do not silently substitute a narrower 24h or same-day range unless that "
+                    "is the explicit evidence-backed window."
+                )
                 seed_tag = "created triage handoff task"
             else:
                 title = f"Investigate case {state['case_id']}"
                 description = (
                     f"{state['question']}\n\n"
                     "Use available SIEM and SOAR capabilities to investigate. "
+                    f"For nearby/vicinity event searches without an explicit absolute window, "
+                    f"start from the configured default vicinity window of ±{vicinity_hours} "
+                    "hours around the anchor timestamp. "
                     "Write findings to AVFS. "
                     "Create follow-up tasks for new evidence-backed leads. "
                     "When finished, post a report to the case system."
@@ -139,6 +157,7 @@ async def seed(state: AgentState, config) -> dict:
 
 
 async def claim(state: AgentState, config) -> dict:
+    """Claim the next queued task, recovering stale claims once before giving up."""
     src = src_label(state["agent_name"])
     _emit_node_entry(src, "claim", state)
     if await _cancel_requested(state["run_id"]):
@@ -171,6 +190,7 @@ async def claim(state: AgentState, config) -> dict:
 
 
 async def think(state: AgentState, config) -> dict:
+    """Ask the model to reason about the current task and decide on tool calls or a report."""
     model = config["configurable"]["model"]
     tools = config["configurable"]["tools"]
     system_prompt = config["configurable"]["system_prompt"]

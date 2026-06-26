@@ -25,6 +25,8 @@ Before forming an opinion, categorize every core piece of evidence based on its 
 
 When dealing with a high volume of diverse alerts, prioritize investigating command-execution, shell launches, and script interpreters first. These fields often harbor high-risk indicators like reverse shells or encoded payloads.
 
+**File-editing alerts require content verification.** When the alert involves a file editor (nano, vi, emacs, ed) or a file that stores persistent configuration (crontabs, startup scripts, shell profiles, sudoers, authorized_keys, service definitions), you MUST also retrieve file-integrity monitoring (syscheck/FIM) events for the edited file path. Audit command events only show that an editor ran — they do not reveal what was written. A crontab edit that installs a reverse shell and one that schedules a backup produce identical audit events. Only syscheck file-diff events (typically rule groups containing "syscheck" or rule IDs in the 550x/2830-2834 range) reveal what content was added or modified. Do not conclude "benign" or "FP" for any file-editing alert without first querying syscheck events for the target file path.
+
 ### Contextual Synthesis (Baselines & History)
 
 An alert never exists in a vacuum. A robust triage requires checking three pillars of historical context:
@@ -51,7 +53,12 @@ Your narrative response must include the following sections to ensure consistenc
 
 ### Diagnostic Verdict Schema
 
-Conclude every report with a single, structured diagnostic block evaluating the incident state:
+Conclude every report with a single, structured diagnostic block evaluating the incident state.
+
+**Confidence calibration** — set based on evidence quality, not the number of queries run:
+- `high`: raw SIEM events directly confirm or refute the alert (e.g. you retrieved the actual log lines, syscheck diffs, or PAM session events). The verdict follows from the evidence with no major ambiguity.
+- `medium`: SIEM evidence was retrieved but is partial, indirect, or leaves a material gap (e.g. nearby events match the alert window but the exact triggering event was not fetched, or one key field is missing).
+- `low`: verdict is based primarily on the alert text/SOAR metadata without raw telemetry validation, or the retrieved data is contradictory.
 
 ```json
 {

@@ -160,7 +160,27 @@ async def _run_orchestrator_impl(session: OrchestratorSession, question: str, ma
 
     tmap = _tmap(tools)
     model = await build_model()
-    bound = model.bind_tools(tools)
+
+    # Gate case-write tools: only expose them when the analyst's message
+    # contains an explicit write directive. Without this gate the model follows
+    # MCP server instructions and posts reports after every investigation.
+    _CASE_WRITE_TOOLS = frozenset({
+        "post_case_report", "update_case", "close_case",
+        "resolve_case", "add_case_comment", "post_case_comment",
+    })
+    _WRITE_PHRASES = re.compile(
+        r"\b(post|write|submit|send|publish|add|create)\b.{0,40}"
+        r"\b(report|page|comment|note|findings?)\b"
+        r"|\b(close|resolve|update)\b.{0,20}\bcase\b"
+        r"|\bwrite to the case\b",
+        re.IGNORECASE,
+    )
+    write_authorized = bool(_WRITE_PHRASES.search(question))
+    if not write_authorized:
+        tools_for_model = [t for t in tools if getattr(t, "name", "") not in _CASE_WRITE_TOOLS]
+    else:
+        tools_for_model = tools
+    bound = model.bind_tools(tools_for_model)
 
     # Build from existing history (multi-turn) or start fresh, with updated system prompt.
     sys_msg = SystemMessage(content=_orchestrator_system_prompt(session, tool_names, mcp_prompt_guidance))
@@ -215,6 +235,32 @@ async def _run_orchestrator_impl(session: OrchestratorSession, question: str, ma
         )
         messages.append(HumanMessage(content=directive))
         emit("orch", "note", f"routing directive: investigation({inv_case_id})")
+
+    # Resume directive: fires when a prior investigation ran out of budget and the
+    # analyst sends a consent-like message ("continue", "yes", "go ahead", etc.).
+    # The investigation tool receives prior_investigation_report so the seed step
+    # creates tasks only for the remaining open gaps.
+    is_investigation_resume = (
+        bool(session.last_investigation_report)
+        and session.last_investigation_status == "incomplete_budget"
+        and "investigation" in tmap
+        and bool(_INV_CONSENT_RE.match(question))
+        and not is_investigation_consent  # don't fire both directives
+    )
+    if is_investigation_resume:
+        resume_case_id = session.case_id or ""
+        directive = (
+            f"[Routing directive — follow exactly] "
+            f"The prior investigation for case {resume_case_id} ran out of budget. "
+            f"The analyst wants to continue from where it left off. "
+            f"Your FIRST and ONLY correct action is to call the `investigation` tool with "
+            f"case_id='{resume_case_id}', question='Continue investigation of case {resume_case_id}', "
+            f"and the stored prior investigation report as `prior_investigation_report`. "
+            f"Do NOT call any data-source tools directly — those are for the "
+            f"investigation sub-agent to use, not for you."
+        )
+        messages.append(HumanMessage(content=directive))
+        emit("orch", "note", f"routing directive: investigation resume({resume_case_id})")
 
     for _ in range(max_rounds):
         if _should_compact(session.ctx_tokens):

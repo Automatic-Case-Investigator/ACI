@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Graph nodes that assess completed work, enforce contracts, and finalize output."""
+
 import asyncio
 import json
 import logging
@@ -33,20 +35,18 @@ log = logging.getLogger(__name__)
 
 
 
-# Cap on follow-up tasks the pivot node may auto-create across a single run.
-# Without this, each completed task can spawn new "## New Leads" tasks that spawn
-# more, so the queue never drains and the run only ends by exhausting its step
-# budget (status=incomplete_budget) rather than reaching a verdict. Initial tasks
-# seeded from the triage plan are NOT counted — only leads discovered mid-run.
-# Past the cap, surplus leads are still surfaced as open leads on the Findings
-# Board (and in the final report); they are simply not auto-enqueued.
-_MAX_PIVOT_TASKS = 10
 _VERDICT_REPAIR_TIMEOUT_SECS = 45
 
 # How many times the assess node will nudge an investigation task to re-emit a
 # malformed report before accepting the best-effort answer so the run never
 # stalls on a model that cannot produce the required four-section format.
 _MAX_SUMMARY_FORMAT_RETRIES = 2
+
+# Hard convergence cap: maximum follow-up tasks the pivot node may auto-create
+# per investigation run. Once reached, the pivot processes board updates and
+# escalation but creates no new tasks; the queue drains to empty and the run
+# terminates cleanly. Prevents unbounded investigation loops.
+_MAX_PIVOT_TASKS = 12
 
 _TRIAGE_SIEM_TOOLS = frozenset({
     "search_keyword",
@@ -76,9 +76,11 @@ _INVESTIGATION_SIEM_KEYWORDS = (
 
 _VERDICT_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL | re.IGNORECASE)
 _PLAN_ITEM_RE = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+(.+)$", re.MULTILINE)
+_LEAD_TITLE_RE = re.compile(r"^\s*(?:[-*]|\d+[.)])\s*(?:\*\*)?title(?:\*\*)?\s*:\s*(.+)$", re.IGNORECASE)
 
 
 def _has_tool_message(messages: list, names: set[str] | frozenset[str]) -> bool:
+    """Return True when any prior tool result came from one of the named tools."""
     return any(getattr(msg, "name", "") in names for msg in messages)
 
 
@@ -91,6 +93,7 @@ def _task_requires_siem(task: dict) -> bool:
 
 
 def _format_verdict_block(verdict: dict) -> str:
+    """Render the canonical fenced JSON block appended to final reports."""
     return "```json\n" + json.dumps(verdict, indent=2, ensure_ascii=False) + "\n```"
 
 
@@ -114,12 +117,18 @@ def _strip_trailing_verdict_block(text: str) -> str:
 
 
 def _attach_verdict_block(final_answer: str, verdict: dict) -> str:
+    """Ensure the final answer ends with exactly one canonical verdict block."""
     base = _strip_trailing_verdict_block(final_answer)
     return base.rstrip() + ("\n\n" if base.strip() else "") + _format_verdict_block(verdict)
 
 
-def _expected_seed_task_count(seed_description: str) -> int:
-    """Count planned investigation items embedded in the seed-task handoff text."""
+def _expected_seed_task_titles(seed_description: str) -> list[str]:
+    """Extract the intended investigation task titles from the seed handoff text.
+
+    For `## New Leads`, only count top-level lead titles; do not count metadata
+    sub-bullets such as pivots/evidence/priority. For `## Investigation Plan`,
+    count the listed plan items directly.
+    """
     triage_report = (seed_description or "").split("## Triage report", 1)
     if len(triage_report) == 2:
         triage_report = triage_report[1]
@@ -128,16 +137,23 @@ def _expected_seed_task_count(seed_description: str) -> int:
 
     leads_section = _extract_report_section(triage_report, "New Leads")
     if leads_section.strip():
-        bullets = [m.group(1).strip() for m in _PLAN_ITEM_RE.finditer(leads_section) if not _is_none_bullet(m.group(1))]
-        if bullets:
-            return len(bullets)
+        titles: list[str] = []
+        for raw_line in leads_section.splitlines():
+            match = _LEAD_TITLE_RE.match(raw_line)
+            if not match:
+                continue
+            title = match.group(1).strip().strip("`").strip()
+            if title and not _is_none_bullet(title):
+                titles.append(title)
+        if titles:
+            return titles
 
     plan_section = _extract_report_section(triage_report, "Investigation Plan")
     if plan_section.strip():
         bullets = [m.group(1).strip() for m in _PLAN_ITEM_RE.finditer(plan_section) if not _is_none_bullet(m.group(1))]
         if bullets:
-            return len(bullets)
-    return 0
+            return bullets
+    return []
 
 
 def _apply_verdict_policies(
@@ -195,6 +211,7 @@ def _apply_verdict_policies(
 
 
 async def assess(state: AgentState, config) -> dict:
+    """Validate the latest task output and decide whether to retry, persist, or advance."""
     src = src_label(state["agent_name"])
     _emit_node_entry(src, "assess", state)
     tools = config["configurable"]["tools"]
@@ -243,18 +260,44 @@ async def assess(state: AgentState, config) -> dict:
             t for t in tasks
             if _SEED_TASK_TITLE not in (t.get("title") or "").lower()
         ]
-        expected = _expected_seed_task_count(task.get("description") or "")
-        if len(seeded) < max(1, expected):
+        expected_titles = _expected_seed_task_titles(task.get("description") or "")
+        seeded_by_key = {
+            _normalize_fact_key(t.get("title") or ""): (t.get("title") or "")
+            for t in seeded
+            if (t.get("title") or "").strip()
+        }
+        expected_keys: list[tuple[str, str]] = []
+        for title in expected_titles:
+            key = _normalize_fact_key(title)
+            if key:
+                expected_keys.append((key, title))
+        missing_titles = [title for key, title in expected_keys if key not in seeded_by_key]
+        minimum_required = max(1, len(expected_keys))
+        if (expected_keys and missing_titles) or (not expected_keys and len(seeded) < 1):
             emit(src, "note",
                  "seed guard: seed task completed before populating full investigation queue — re-injecting correction")
-            remaining = max(1, expected) - len(seeded)
+            if expected_keys:
+                missing_text = "; ".join(missing_titles[:6])
+                correction_text = (
+                    f"You have already created {len(seeded_by_key)} of {minimum_required} required "
+                    "investigation task(s) from the triage handoff. "
+                    f"The remaining missing task title(s) are: {missing_text}. "
+                    "Call `list_tasks` first, then create ONLY the missing task titles above. "
+                    "Do not recreate tasks whose titles are already present in the queue. "
+                    "Do not write a summary until all missing titles are created."
+                )
+            else:
+                remaining = 1 - len(seeded)
+                correction_text = (
+                    f"You have created {len(seeded)} investigation task(s), but at least 1 "
+                    f"is required from the triage handoff. {remaining} more task(s) must still be created. "
+                    "Your ONLY goal for this task is to call `create_task` for every numbered "
+                    "or bulleted item in the triage investigation plan / New Leads section. "
+                    "Do not write a summary until all required tasks are created. "
+                    "Please call `create_task` now for the missing task(s)."
+                )
             correction = HumanMessage(content=(
-                f"You have created {len(seeded)} investigation task(s), but at least {max(1, expected)} "
-                f"are required from the triage handoff. {remaining} more task(s) must still be created. "
-                "Your ONLY goal for this task is to call `create_task` for every numbered "
-                "or bulleted item in the triage investigation plan / New Leads section. "
-                "Do not write a summary until all required tasks are created. "
-                "Please call `create_task` now for the missing task(s)."
+                correction_text
             ))
             return {
                 "current_task": task,
@@ -272,11 +315,14 @@ async def assess(state: AgentState, config) -> dict:
                 "triage SIEM guard: task completed without nearby SIEM events query — re-injecting correction",
             )
             tool_list = ", ".join(sorted(available_siem_tools))
+            vicinity_hours = int(state.get("default_vicinity_window_hours") or 24)
             correction = HumanMessage(content=(
                 "You finished the triage report without loading other alerts/events close "
                 "to the current case or alert timestamp. Before writing the final report, "
                 "use the SIEM now. Derive an absolute time window around the linked alert "
-                "timestamp and call one of these available tools: "
+                f"timestamp using the configured default vicinity window of ±{vicinity_hours} "
+                "hours unless the task or evidence already gives an explicit absolute range, and "
+                "call one of these available tools: "
                 f"{tool_list}. Query nearby events for the same host, user, source IP, "
                 "rule family, command, or file path. Then revise the report to include "
                 "what nearby events were found, or state the exact zero-result SIEM query."
@@ -305,12 +351,15 @@ async def assess(state: AgentState, config) -> dict:
                 "investigation SIEM guard: SIEM-pivot task completed without a SIEM query — re-injecting correction",
             )
             tool_list = ", ".join(sorted(available_siem_tools))
+            vicinity_hours = int(state.get("default_vicinity_window_hours") or 24)
             correction = HumanMessage(content=(
                 "You completed this investigation task without querying the SIEM, but the "
                 "task explicitly requires SIEM event data. Use one of these tools now: "
                 f"{tool_list}. "
                 "Search for events related to the task's target (IP address, user, host, "
-                "hash, or command) in the time window specified. A zero-result query is a "
+                f"hash, or command) in the time window specified, or use the configured "
+                f"default vicinity window of ±{vicinity_hours} hours around the anchor "
+                "timestamp when no explicit absolute window was provided. A zero-result query is a "
                 "valid confirmed negative — record it and revise your answer to include the "
                 "exact query and its result. Do not write a final answer until you have "
                 "made at least one SIEM query."
@@ -477,10 +526,16 @@ async def pivot(state: AgentState, config) -> dict:
 
     src = src_label(state["agent_name"])
 
-    # Bound total follow-up tasks created across the run so the queue can drain and
-    # the investigation converges to a verdict instead of exhausting its budget.
     already_created = state.get("pivot_tasks_created", 0) or 0
-    remaining = max(0, _MAX_PIVOT_TASKS - already_created)
+
+    # Convergence cap: stop creating tasks once the limit is reached so the
+    # queue drains to empty and the investigation finishes cleanly.
+    if already_created >= _MAX_PIVOT_TASKS:
+        emit(src, "note",
+             f"pivot: convergence cap reached ({already_created}/{_MAX_PIVOT_TASKS}) "
+             f"— no further tasks created; queue will drain to finish")
+        return {"escalation_posted": escalation_posted}
+
     completed_task = state.get("last_completed_task") or state.get("current_task")
     completed_task_id = (completed_task or {}).get("id")
     dedup_tasks = [
@@ -498,7 +553,7 @@ async def pivot(state: AgentState, config) -> dict:
         final_answer=final_answer,
         existing_tasks=dedup_tasks,
         current_task=completed_task,
-        remaining_run_budget=remaining,
+        remaining_run_budget=None,
         agent_name=state["agent_name"],
     )
     counts = validation.counts()
@@ -517,21 +572,6 @@ async def pivot(state: AgentState, config) -> dict:
         return {"escalation_posted": escalation_posted}
 
     created = 0
-    deferred: list[str] = []
-    preserve_deferred = remaining < 3
-    for decision in validation.deferred:
-        candidate = decision.candidate
-        if preserve_deferred:
-            deferred.append(candidate.title)
-            _record_board_entry(
-                state,
-                kind="hypothesis",
-                content=f"Open lead (deferred — investigation lead budget reached): {candidate.title}",
-                source="; ".join(filter(None, [candidate.pivots, candidate.evidence])),
-                confidence="low",
-                status="open",
-                dedup_key=_normalize_fact_key(candidate.title),
-            )
     for decision in validation.approved:
         candidate = decision.candidate
         result = await _call(create_fn, {
@@ -554,10 +594,6 @@ async def pivot(state: AgentState, config) -> dict:
 
     if created:
         emit(src, "note", f"pivot: {created} follow-up task(s) queued")
-    if deferred:
-        emit(src, "note",
-             f"pivot: lead budget reached ({_MAX_PIVOT_TASKS}); deferred "
-             f"{len(deferred)} lead(s) to open leads: {', '.join(deferred)[:200]}")
     return {
         "pivot_tasks_created": already_created + created,
         "escalation_posted": escalation_posted,
@@ -1011,20 +1047,5 @@ async def publish_finish(state: AgentState, config) -> dict:
             created_by=state["agent_name"],
             summary="Final investigation report.",
         )
-
-    post_report_fn = tmap.get("post_case_report")
-    if post_report_fn:
-        import datetime
-        date_str = datetime.date.today().isoformat()
-        report_title = f"Investigation Report — {state['case_id']} — {date_str}"
-        post_result = await _call(post_report_fn, {
-            "case_id": state["case_id"],
-            "summary": final_answer,
-            "title": report_title,
-        }, _dbg=src)
-        if _is_error_tool_result(post_result):
-            emit(src, "warning", "post_case_report failed", detail=post_result)
-        else:
-            emit(src, "note", "investigation report posted to case system")
 
     return {"final_answer": final_answer}

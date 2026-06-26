@@ -38,9 +38,18 @@ def resolve_agent_definition(agent_def):
     if isinstance(row.tool_policy, list) and row.tool_policy:
         tool_policy = list(row.tool_policy)
     stream_intent = agent_def.stream_intent if row.stream_intent is None else bool(row.stream_intent)
+    vicinity_window_hours = (
+        row.vicinity_window_hours
+        if row.vicinity_window_hours
+        else agent_def.default_vicinity_window_hours
+    )
 
     return dataclasses.replace(
-        agent_def, budget=budget, tool_policy=tool_policy, stream_intent=stream_intent
+        agent_def,
+        budget=budget,
+        tool_policy=tool_policy,
+        stream_intent=stream_intent,
+        default_vicinity_window_hours=vicinity_window_hours,
     )
 
 

@@ -33,6 +33,11 @@ def _format_run_context(ctx: dict) -> str:
     budget = ctx.get("budget", {})
     if budget:
         lines.append(f"- **Budget:** {budget.get('max_steps', '?')} steps, {budget.get('max_tool_calls', '?')} tool calls")
+    vicinity_window_hours = ctx.get("default_vicinity_window_hours")
+    if vicinity_window_hours:
+        lines.append(
+            f"- **Default vicinity window:** ±{vicinity_window_hours}h around the anchor timestamp unless the task/report already specifies an absolute window"
+        )
     avfs_home = ctx.get("avfs_home", "")
     tools = ctx.get("available_tools") or []
     has_avfs = any(t in tools for t in ("whoami", "write", "mkdir", "ls", "cat", "read"))
