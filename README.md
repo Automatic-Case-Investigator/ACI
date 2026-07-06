@@ -48,120 +48,34 @@ Most AI SOC tools optimize for speed across the full alert-to-response lifecycle
       (SIEM)         (SOAR)       (Workspace)
 ```
 
-See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the canonical runtime design and [`docs/current_project_state.md`](docs/current_project_state.md) for the current implementation snapshot.
+See the [documentation](docs/README.md) for the full design, organized by subsystem —
+start with the [Architecture Overview](docs/architecture/overview.md). For the current
+implementation snapshot, see [Current State](docs/project/current-state.md).
 
-## Prerequisites
-
-- **Python 3.13** with pip
-- **Docker & Docker Compose** (for AVFS workspace)
-- **External services** (local or remote):
-  - Wazuh 4.x (SIEM)
-  - TheHive 5.x (SOAR)
-  - LLM API compatible with OpenAI (vLLM, Ollama, or Claude API)
-
-## Installation
-
-### 1. Clone and set up the environment
+## Quick Start
 
 ```bash
-cd ACI
-python3.13 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\Activate.ps1
-
+python3.13 -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-pip install -e aci-mcp-servers/aci-taskqueue
-pip install -e aci-mcp-servers/aci-board
-pip install -e aci-mcp-servers/aci-memory
-pip install -e aci-mcp-servers/aci-wazuh
-pip install -e aci-mcp-servers/aci-thehive
-```
-
-### 2. Configure environment variables
-
-```bash
-cp sample.env .env
-```
-
-Edit `.env` with your actual endpoints and credentials:
-
-> The LLM/model provider (base URL, API key, model name, sampling, context
-> length, timeout) is configured in the dashboard under **Settings → Model
-> provider** and stored in the database — not in `.env`.
-
-```env
-# SIEM (Wazuh)
-WAZUH_URL=https://wazuh.example.com:9201
-WAZUH_USER=admin
-WAZUH_PASSWORD=your-password
-WAZUH_VERIFY_TLS=false
-
-# SOAR (TheHive)
-THEHIVE_HOST=http://thehive.example.com
-THEHIVE_PORT=9000
-THEHIVE_API_KEY=your-api-key
-
-# Workspace (AVFS)
-AVFS_URL=http://127.0.0.1:8765/
-AVFS_AUTH_TOKEN=your-secure-token    # NOT "change-me-avfs-token"
-AVFS_AGENT_ID=agent_1
-```
-
-### 3. Run database migrations
-
-```bash
+for pkg in taskqueue board memory wazuh thehive; do pip install -e aci-mcp-servers/aci-$pkg; done
+cp sample.env .env            # then edit endpoints/credentials
 python manage.py migrate
-```
-
-### 4. Start AVFS (Docker)
-
-```bash
 docker compose up -d avfs
+python -m daphne -p 8000 aci.asgi:application   # open http://localhost:8000/dashboard/
 ```
 
-## Running the System
+Full setup, run options (dashboard / CLI / REST), and testing are in the guides:
 
-### Option A: Web Dashboard (Interactive)
+- [Getting Started](docs/guides/getting-started.md) — prerequisites, installation, configuration, running.
+- [Operations](docs/guides/operations.md) — testing, development, troubleshooting.
 
-```bash
-python -m daphne -p 8000 aci.asgi:application
-```
+## Documentation
 
-Open [http://localhost:8000/dashboard/](http://localhost:8000/dashboard/) and type an incident question. The orchestrator keeps a durable analyst session, routes to triage and investigation as needed, and now republishes resumed or restarted specialist results back into that same analyst-visible session state.
+Full documentation lives in [`docs/`](docs/README.md), organized by subsystem:
 
-### Option B: CLI Agent
-
-```bash
-python manage.py run_agent \
-  --agent-name investigation \
-  --case-id "~254202040" \
-  --question "Were there any failed SSH logins in the last 24 hours?"
-```
-
-### Option C: REST API
-
-```bash
-curl -X POST http://localhost:8000/api/agent/runs/ \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{"agent_name": "investigation", "case_id": "~254202040", "question": "Investigate the case"}'
-```
-
-See [API Reference](ARCHITECTURE.md#api-reference) in `ARCHITECTURE.md`.
-
-## Testing
-
-All tests run offline (no LLM, Wazuh, TheHive, or AVFS needed):
-
-```bash
-# Full offline suite
-PYTHONPATH=. python -m pytest tests/unit tests/django -q
-
-# Individual test files
-PYTHONPATH=. python -m pytest tests/unit/graph/test_graph_stub.py -v
-PYTHONPATH=. python -m pytest tests/unit/analysis/test_verdict_parsing.py -v
-```
-
-Tests live under `tests/unit/` (graph logic, per-task self-review, Findings Board + board-driven compromise detection, seeder dedup, Wazuh query-shape guards, provider contracts, prompt composition, verdict parsing, alert metadata, feedback loop, TI enrichment, orchestrator lifecycle) and `tests/django/` (settings and resume/session behavior). Local helper scripts are documented in [`scripts/dev/README.md`](scripts/dev/README.md).
+- **Architecture** — [overview](docs/architecture/overview.md), [runtime & agent graph](docs/architecture/runtime/agent-graph.md), [prompts](docs/architecture/runtime/prompts.md), [queue & streaming](docs/architecture/runtime/queue-and-streaming.md), [orchestrator](docs/architecture/orchestrator.md), [tools](docs/architecture/tools.md), [findings board](docs/architecture/findings-board.md), [workspace](docs/architecture/workspace.md), [automation](docs/architecture/automation.md).
+- **Reference** — [configuration](docs/reference/configuration.md), [API](docs/reference/api.md).
+- **Project** — [current state](docs/project/current-state.md), [SOC rubric](docs/project/soc-rubric.md).
 
 ## Project Structure
 
@@ -207,13 +121,15 @@ ACI/
 │   ├── django/                   # Settings + resume/session behavior (Django test client)
 │   └── integration/              # End-to-end scenario tests
 ├── scripts/dev/                  # Local inspection scripts (inspect_events, poll, submit) — see scripts/dev/README.md
-├── docs/
-│   ├── current_project_state.md  # Current runtime/configuration snapshot (bridges README/ARCHITECTURE)
-│   └── soc_agent_rubric.md       # SOC investigation quality rubric
+├── docs/                         # Documentation, organized by subsystem (see docs/README.md)
+│   ├── architecture/             # Explanation: overview, runtime, orchestrator, tools, board, workspace, automation
+│   ├── reference/                # Configuration + API reference
+│   ├── guides/                   # Getting started + operations (testing, dev, troubleshooting)
+│   └── project/                  # current-state.md, soc-rubric.md
 ├── sample.env                    # Environment variable template
 ├── requirements.txt              # Python dependencies
 ├── manage.py                     # Django management CLI
-├── ARCHITECTURE.md               # Runtime design, graph diagrams, API reference, configuration, troubleshooting
+├── ARCHITECTURE.md               # Redirect stub → docs/
 └── README.md                     # This file
 ```
 
@@ -223,7 +139,8 @@ ACI/
 
 ## See Also
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) — Runtime design, graph diagrams, API reference, configuration, and troubleshooting
-- [docs/current_project_state.md](docs/current_project_state.md) — Current runtime shape, built-in providers, configuration model, and workflows
+- [Documentation](docs/README.md) — full docs index, organized by subsystem
+- [Architecture Overview](docs/architecture/overview.md) — runtime design, graph diagrams, and design philosophy
+- [Current State](docs/project/current-state.md) — current runtime shape, built-in providers, configuration model, and workflows
 - [Agent Prompts](agent/prompts/) — Triage, investigation, and orchestrator instructions
 - [Sample Configuration](sample.env) — Environment variable template
