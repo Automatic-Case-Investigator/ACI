@@ -12,135 +12,49 @@ Most AI SOC tools optimize for speed across the full alert-to-response lifecycle
 - **MCP tool ecosystem**: Pluggable integrations with SIEM, SOAR, workspace, and memory providers via Model Context Protocol
 - **Durable analyst session state**: Orchestrator conversations, specialist handoffs, resumes, and restarts are persisted back into the analyst-visible session state
 
-## Architecture
+## Getting Started
 
-```
-┌─────────────────────────────────────────────────────┐
-│                    Dashboard (WebSocket)             │
-│         Analyst ↔ Live Event Stream                  │
-└──────────────────────┬──────────────────────────────┘
-                       │
-┌──────────────────────┴──────────────────────────────┐
-│              Django 5 + Daphne ASGI                  │
-│  ┌─────────────────────────────────────────────┐   │
-│  │  Orchestrator Session Runtime                │   │
-│  │    ↓ triage() ↓ investigate()                │   │
-│  │  ┌──────────────┐  ┌──────────────┐         │   │
-│  │  │Triage Agent  │  │Investigation │         │   │
-│  │  │(Alert→Plan)  │  │Agent(Queue)  │         │   │
-│  │  └──────────────┘  └──────────────┘         │   │
-│  └─────────────────────────────────────────────┘   │
-│                       │                             │
-│  ┌────────────────────┴─────────────────────────┐  │
-│  │     MCP Provider Layer                        │  │
-│  │  • aci-wazuh (SIEM search/events)           │  │
-│  │  • aci-thehive (SOAR case mgmt)             │  │
-│  │  • aci-board (findings board)               │  │
-│  │  • aci-taskqueue (task queue)               │  │
-│  │  • aci-memory / avfs / custom MCP           │  │
-│  └──────────────────────────────────────────────┘  │
-│                       │                             │
-└───────────────────────┼─────────────────────────────┘
-                        │
-        ┌───────────────┼───────────────┐
-        │               │               │
-      Wazuh          TheHive          AVFS
-      (SIEM)         (SOAR)       (Workspace)
-```
+To install, configure, and run ACI (dashboard, CLI, or REST API), see
+[Getting Started](docs/guides/getting-started.md). For the system diagram, repository
+layout, and design philosophy, see the [Architecture Overview](docs/architecture/overview.md).
 
-See the [documentation](docs/README.md) for the full design, organized by subsystem —
-start with the [Architecture Overview](docs/architecture/overview.md). For the current
-implementation snapshot, see [Current State](docs/project/current-state.md).
+## Documentation
 
-## Quick Start
+Full documentation lives in [`docs/`](docs/README.md), organized by subsystem.
 
-```bash
-python3.13 -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-for pkg in taskqueue board memory wazuh thehive; do pip install -e aci-mcp-servers/aci-$pkg; done
-cp sample.env .env            # then edit endpoints/credentials
-python manage.py migrate
-docker compose up -d avfs
-python -m daphne -p 8000 aci.asgi:application   # open http://localhost:8000/dashboard/
-```
-
-Full setup, run options (dashboard / CLI / REST), and testing are in the guides:
+**Guides**
 
 - [Getting Started](docs/guides/getting-started.md) — prerequisites, installation, configuration, running.
 - [Operations](docs/guides/operations.md) — testing, development, troubleshooting.
 
-## Documentation
+**Architecture**
 
-Full documentation lives in [`docs/`](docs/README.md), organized by subsystem:
+- [Overview](docs/architecture/overview.md) — system diagram, repository layout, and design philosophy.
+- [Runtime & Agent Graph](docs/architecture/runtime/agent-graph.md) — the queue-driven node loop.
+- [Prompt Composition](docs/architecture/runtime/prompts.md) — layered prompts and the role ladder.
+- [Queue & Model Streaming](docs/architecture/runtime/queue-and-streaming.md)
+- [Orchestrator](docs/architecture/orchestrator.md)
+- [MCP & Tool Policy](docs/architecture/tools.md)
+- [Findings Board](docs/architecture/findings-board.md)
+- [AVFS Workspace](docs/architecture/workspace.md)
+- [Workflows & Webhooks](docs/architecture/automation.md)
 
-- **Architecture** — [overview](docs/architecture/overview.md), [runtime & agent graph](docs/architecture/runtime/agent-graph.md), [prompts](docs/architecture/runtime/prompts.md), [queue & streaming](docs/architecture/runtime/queue-and-streaming.md), [orchestrator](docs/architecture/orchestrator.md), [tools](docs/architecture/tools.md), [findings board](docs/architecture/findings-board.md), [workspace](docs/architecture/workspace.md), [automation](docs/architecture/automation.md).
-- **Reference** — [configuration](docs/reference/configuration.md), [API](docs/reference/api.md).
-- **Project** — [current state](docs/project/current-state.md), [SOC rubric](docs/project/soc-rubric.md).
+**Reference**
 
-## Project Structure
+- [Configuration](docs/reference/configuration.md) — all environment variables and settings.
+- [API](docs/reference/api.md) — REST endpoints.
 
-```
-ACI/
-├── aci/                          # Django project config (settings, urls, asgi/wsgi)
-├── agent/                        # Django app: agent runtime, dashboard, models
-│   ├── agents/                   # Agent registry + definitions: triage, investigation, seeder
-│   ├── prompts/                  # Layered system prompts (platform, triage, investigation, seeder, playbook, orchestrator)
-│   ├── runtime/                  # Harness layer — see breakdown below
-│   ├── ti/                       # Threat-intelligence enrichment (cache, providers e.g. VirusTotal)
-│   ├── workspace/                # AVFS writer, citation helpers, workspace indexer
-│   ├── dashboard/                # WebSocket consumer, run views/actions, settings views, runner lifecycle
-│   ├── models/                   # Django models: AgentRun, AgentEvent, config, learning (patterns/baselines/feedback)
-│   ├── views/                    # REST API views: runs, webhooks, public endpoints
-│   ├── management/commands/      # run_agent, run_workflow, compute_baselines
-│   └── templatetags/
-├── agent/runtime/                # (expanded)
-│   ├── engine/                   # run_agent, dispatch_run, MCP client, model client, streaming, seeder_runner
-│   ├── graph/                    # LangGraph build: builder, nodes_loop, interpretation/ (interpret node),
-│   │                              # nodes_flow/ (assess/pivot/completion), observation, reflection (self-review),
-│   │                              # leads/lead_model, board, validation, synthesis, publication, parsing, timeutil, state
-│   ├── analysis/                 # Deterministic enrichment: artifacts (incl. decode layer), correlation_leads,
-│   │                              # kill_chain, query_memo, pattern_matcher, alert_metadata, intent
-│   ├── orchestrator/             # Conversational orchestrator: driver, session, messages, prompts, tools,
-│   │                              # specialist_sync (publishes resumed/restarted results back to session)
-│   ├── providers/                # Built-in MCP provider configs + standardized capability contracts
-│   ├── config/                   # Prompt composition, runtime/agent-config overrides
-│   ├── policy/                   # Workflow automation policy: dedup, escalation routing (separate from reasoning)
-│   ├── triggers/                 # Webhook trigger bindings/providers/registry
-│   ├── learning/                 # Baseline computation + adapters
-│   └── infra/                    # AVFS path helpers, event logbus
-├── aci-mcp-servers/              # Installable MCP server packages (each `pip install -e`-able)
-│   ├── aci-taskqueue/            # MCP: task queue (claim authority)
-│   ├── aci-board/                # MCP: Findings Board (facts/hypotheses/artifacts/correlations/kill-chain/TI)
-│   ├── aci-memory/                # MCP: cross-case patterns, baselines, analyst feedback (read-only)
-│   ├── aci-wazuh/                # MCP: SIEM search/events/profiling + query-shape robustness guards
-│   └── aci-thehive/              # MCP: SOAR case/alert reads, comments, report publication
-├── static/dashboard/             # Frontend JavaScript and CSS
-├── templates/                    # Django templates
-├── tests/
-│   ├── unit/                     # Graph/reflection/board/seeder/Wazuh-client/prompt-layer unit tests (offline)
-│   ├── django/                   # Settings + resume/session behavior (Django test client)
-│   └── integration/              # End-to-end scenario tests
-├── scripts/dev/                  # Local inspection scripts (inspect_events, poll, submit) — see scripts/dev/README.md
-├── docs/                         # Documentation, organized by subsystem (see docs/README.md)
-│   ├── architecture/             # Explanation: overview, runtime, orchestrator, tools, board, workspace, automation
-│   ├── reference/                # Configuration + API reference
-│   ├── guides/                   # Getting started + operations (testing, dev, troubleshooting)
-│   └── project/                  # current-state.md, soc-rubric.md
-├── sample.env                    # Environment variable template
-├── requirements.txt              # Python dependencies
-├── manage.py                     # Django management CLI
-├── ARCHITECTURE.md               # Redirect stub → docs/
-└── README.md                     # This file
-```
+**Project**
+
+- [Current State](docs/project/current-state.md) — current runtime shape, built-in providers, and workflows.
+- [SOC Agent Rubric](docs/project/soc-rubric.md) — the investigation quality rubric.
+
+**Contributing & configuration**
+
+- [Contribution Guide](CONTRIBUTION.md) — development philosophy and conventions.
+- [Agent Prompts](agent/prompts/) — triage, investigation, and orchestrator instructions.
+- [Sample Configuration](sample.env) — environment variable template.
 
 ## License
 
 (License information to be added)
-
-## See Also
-
-- [Documentation](docs/README.md) — full docs index, organized by subsystem
-- [Architecture Overview](docs/architecture/overview.md) — runtime design, graph diagrams, and design philosophy
-- [Current State](docs/project/current-state.md) — current runtime shape, built-in providers, configuration model, and workflows
-- [Agent Prompts](agent/prompts/) — Triage, investigation, and orchestrator instructions
-- [Sample Configuration](sample.env) — Environment variable template

@@ -6,6 +6,45 @@ shared queue-driven LangGraph graph for `triage` and `investigation`, plus a
 package-based conversational orchestrator that owns analyst session state,
 handoffs, and publication back into the dashboard/session record.
 
+## System Diagram
+
+```
+┌─────────────────────────────────────────────────────┐
+│                    Dashboard (WebSocket)             │
+│         Analyst ↔ Live Event Stream                  │
+└──────────────────────┬──────────────────────────────┘
+                       │
+┌──────────────────────┴──────────────────────────────┐
+│              Django 5 + Daphne ASGI                  │
+│  ┌─────────────────────────────────────────────┐   │
+│  │  Orchestrator Session Runtime                │   │
+│  │    ↓ triage() ↓ investigate()                │   │
+│  │  ┌──────────────┐  ┌──────────────┐         │   │
+│  │  │Triage Agent  │  │Investigation │         │   │
+│  │  │(Alert→Plan)  │  │Agent(Queue)  │         │   │
+│  │  └──────────────┘  └──────────────┘         │   │
+│  └─────────────────────────────────────────────┘   │
+│                       │                             │
+│  ┌────────────────────┴─────────────────────────┐  │
+│  │     MCP Provider Layer                        │  │
+│  │  • aci-wazuh (SIEM search/events)           │  │
+│  │  • aci-thehive (SOAR case mgmt)             │  │
+│  │  • aci-board (findings board)               │  │
+│  │  • aci-taskqueue (task queue)               │  │
+│  │  • aci-memory / avfs / custom MCP           │  │
+│  └──────────────────────────────────────────────┘  │
+│                       │                             │
+└───────────────────────┼─────────────────────────────┘
+                        │
+        ┌───────────────┼───────────────┐
+        │               │               │
+      Wazuh          TheHive          AVFS
+      (SIEM)         (SOAR)       (Workspace)
+```
+
+For the runtime control flow (the node loop), see
+[Runtime & Agent Graph](runtime/agent-graph.md).
+
 ## Architectural Philosophy
 
 ACI should evolve as a **thin deterministic harness around a strong general-purpose
@@ -113,3 +152,60 @@ improvements over orchestration changes, semantic reasoning in the LLM,
 deterministic computation in code, standardized MCP capability contracts over
 backend-specific coupling, and simpler architectures over accumulating
 guardrail machinery.**
+
+## Repository Layout
+
+```
+ACI/
+├── aci/                          # Django project config (settings, urls, asgi/wsgi)
+├── agent/                        # Django app: agent runtime, dashboard, models
+│   ├── agents/                   # Agent registry + definitions: triage, investigation, seeder
+│   ├── prompts/                  # Layered system prompts (platform, triage, investigation, seeder, playbook, orchestrator)
+│   ├── runtime/                  # Harness layer — see breakdown below
+│   ├── ti/                       # Threat-intelligence enrichment (cache, providers e.g. VirusTotal)
+│   ├── workspace/                # AVFS writer, citation helpers, workspace indexer
+│   ├── dashboard/                # WebSocket consumer, run views/actions, settings views, runner lifecycle
+│   ├── models/                   # Django models: AgentRun, AgentEvent, config, learning (patterns/baselines/feedback)
+│   ├── views/                    # REST API views: runs, webhooks, public endpoints
+│   ├── management/commands/      # run_agent, run_workflow, compute_baselines
+│   └── templatetags/
+├── agent/runtime/                # (expanded)
+│   ├── engine/                   # run_agent, dispatch_run, MCP client, model client, streaming, seeder_runner
+│   ├── graph/                    # LangGraph build: builder, nodes_loop, interpretation/ (interpret node),
+│   │                              # nodes_flow/ (assess/pivot/completion), observation, reflection (self-review),
+│   │                              # leads/lead_model, board, validation, synthesis, publication, parsing, timeutil, state
+│   ├── analysis/                 # Deterministic enrichment: artifacts (incl. decode layer), correlation_leads,
+│   │                              # kill_chain, query_memo, pattern_matcher, alert_metadata, intent
+│   ├── orchestrator/             # Conversational orchestrator: driver, session, messages, prompts, tools,
+│   │                              # specialist_sync (publishes resumed/restarted results back to session)
+│   ├── providers/                # Built-in MCP provider configs + standardized capability contracts
+│   ├── config/                   # Prompt composition, runtime/agent-config overrides
+│   ├── policy/                   # Workflow automation policy: dedup, escalation routing (separate from reasoning)
+│   ├── triggers/                 # Webhook trigger bindings/providers/registry
+│   ├── learning/                 # Baseline computation + adapters
+│   └── infra/                    # AVFS path helpers, event logbus
+├── aci-mcp-servers/              # Installable MCP server packages (each `pip install -e`-able)
+│   ├── aci-taskqueue/            # MCP: task queue (claim authority)
+│   ├── aci-board/                # MCP: Findings Board (facts/hypotheses/artifacts/correlations/kill-chain/TI)
+│   ├── aci-memory/               # MCP: cross-case patterns, baselines, analyst feedback (read-only)
+│   ├── aci-wazuh/                # MCP: SIEM search/events/profiling + query-shape robustness guards
+│   └── aci-thehive/              # MCP: SOAR case/alert reads, comments, report publication
+├── static/dashboard/             # Frontend JavaScript and CSS
+├── templates/                    # Django templates
+├── tests/
+│   ├── unit/                     # Graph/reflection/board/seeder/Wazuh-client/prompt-layer unit tests (offline)
+│   ├── django/                   # Settings + resume/session behavior (Django test client)
+│   └── integration/              # End-to-end scenario tests
+├── scripts/dev/                  # Local inspection scripts (inspect_events, poll, submit) — see scripts/dev/README.md
+├── docs/                         # Documentation, organized by subsystem (see docs/README.md)
+│   ├── architecture/             # Explanation: overview, runtime, orchestrator, tools, board, workspace, automation
+│   ├── reference/                # Configuration + API reference
+│   ├── guides/                   # Getting started + operations (testing, dev, troubleshooting)
+│   └── project/                  # current-state.md, soc-rubric.md
+├── sample.env                    # Environment variable template
+├── requirements.txt              # Python dependencies
+├── manage.py                     # Django management CLI
+├── CONTRIBUTION.md               # Development philosophy and contribution conventions
+├── ARCHITECTURE.md               # Redirect stub → docs/
+└── README.md                     # Project overview and documentation index
+```
