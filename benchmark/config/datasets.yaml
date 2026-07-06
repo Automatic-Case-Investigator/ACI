@@ -1,0 +1,9 @@
+# Source of the labelled attack dataset the benchmark evaluates against.
+# AIT-LDSv2 — AIT Log Data Set (Landauer et al.), 8 victim-host scenarios.
+ait-ldsv2:
+  source: zenodo
+  record: "5789064"          # Zenodo record id (verify against the release used)
+  url: "https://zenodo.org/records/5789064"
+  scenarios: [fox, harrison, russellmitchell, santos, shaw, wardbeck, wilson, wheeler]
+  labels: fixtures/labels.csv  # committed ground-truth phase windows
+  # checksums: filled in by the acquire stage on first download

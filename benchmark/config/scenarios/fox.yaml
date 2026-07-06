@@ -1,0 +1,118 @@
+# Fox scenario — AIT-LDSv2 victim host `wazuh-client`.
+# Ground truth is the canonical AIT label file (benchmark/fixtures/labels.csv,
+# rows where scenario == fox); phase windows below are copied from it verbatim.
+#
+# Three distinct hosts share the agent.name "wazuh-client" but differ by agent.id:
+#   27 (10.35.35.206) — the web -> credential-access -> privesc chain (the main chain)
+#   1  (10.35.33.111) — service_stop, a day earlier
+#   18 (172.17.131.81) — dnsteal, a day earlier
+# No confirmed network link between 27 and 1/18 was found; treat 1/18 as a
+# scope-boundary test, not an assumed continuation of the 27 chain.
+name: fox
+dataset: ait-ldsv2
+
+host_map:
+  "27": {ip: 10.35.35.206, role: "web/credential-access/privesc chain (main)"}
+  "1":  {ip: 10.35.33.111, role: "service_stop (separate host, prior day)"}
+  "18": {ip: 172.17.131.81, role: "dnsteal (separate host, prior day)"}
+
+# What the SIEM would REALISTICALLY hand the agent vs. what we inject to probe a
+# specific reasoning direction. Only `recon` exists organically as a TheHive case;
+# it is the only phase whose rule (31151, level 10) clears the import severity floor.
+entry_points:
+  - id: recon
+    kind: organic
+    case_id: "~449101824"
+    reasoning_direction: forward       # start at recon noise, chain forward to impact
+  - id: privilege_escalation
+    kind: synthetic                    # rule 5501 (level 3) never promotes on its own
+    anchor_event_id: "1700000000.110417"
+    reasoning_direction: backward      # confirmed privesc -> attribute the entry vector
+
+expected_verdict:
+  verdict: tp
+  severity: critical
+  scope: ["wazuh-client"]              # the agent.id=27 host; a correct scope excludes 1/18 unless linked
+
+# Ordered attack phases. The authoritative, stable matcher is the timestamp WINDOW:
+# preprocess preserves event times deterministically from the raw log, and the agent
+# cites ISO timestamps in its report timeline.
+#
+# `marker_event_ids` below are the preprocessed `_source.id` values (stable, deterministic
+# by line index). NOTE: they do NOT match agent citations today — the agent cites the
+# OpenSearch envelope `_id` (`observation._EVENT_ID_KEYS` prefers `_id`), which `make_id()`
+# regenerates RANDOMLY on every preprocess/import, so it cannot be hardcoded as ground truth.
+# phase_recall therefore relies on the window; markers only start matching if PREPROCESS is
+# changed to write a deterministic `_id` (e.g. `_id = _source.id`) — elasticdump preserves the
+# file's `_id`, so this is a preprocess concern, not a load one. `marker_rules` are
+# documentation only (rules are shared across phases).
+phases:
+  - name: service_stop
+    start: 2022-01-17T09:04:46Z
+    end:   2022-01-17T09:04:48Z
+    agent_id: "1"
+    marker_rules: ["80700"]
+    marker_event_ids: ["1700000000.100824", "1700000000.100825"]
+
+  - name: dnsteal
+    start: 2022-01-17T09:04:48Z
+    end:   2022-01-17T10:00:00Z
+    agent_id: "18"
+    marker_rules: []
+    marker_event_ids: []
+
+  - name: network_scans
+    start: 2022-01-18T11:59:00Z
+    end:   2022-01-18T12:17:00Z
+    agent_id: "27"
+    marker_rules: ["31151", "31101"]
+    marker_event_ids: []
+
+  - name: service_scans
+    start: 2022-01-18T12:17:00Z
+    end:   2022-01-18T12:17:47Z
+    agent_id: "27"
+    marker_rules: ["31151"]
+    marker_event_ids: []
+
+  - name: wpscan
+    start: 2022-01-18T12:17:47Z
+    end:   2022-01-18T12:18:30Z
+    agent_id: "27"
+    marker_rules: ["31151"]
+    marker_event_ids: []
+
+  - name: dirb
+    start: 2022-01-18T12:18:30Z
+    end:   2022-01-18T12:38:00Z
+    agent_id: "27"
+    marker_rules: ["31101", "31151", "30305"]
+    marker_event_ids: []
+
+  - name: webshell
+    start: 2022-01-18T12:38:00Z
+    end:   2022-01-18T12:38:30Z
+    agent_id: "27"
+    marker_rules: ["31108"]
+    marker_event_ids: ["1700000000.110407", "1700000000.110408"]
+
+  - name: cracking
+    start: 2022-01-18T12:38:30Z
+    end:   2022-01-18T13:13:50Z
+    agent_id: "27"
+    marker_rules: ["86601"]
+    marker_event_ids: []
+
+  - name: reverse_shell
+    start: 2022-01-18T13:13:50Z
+    end:   2022-01-18T13:14:30Z
+    agent_id: "27"
+    marker_rules: ["31108"]
+    marker_event_ids: ["1700000000.110414"]
+
+  - name: privilege_escalation
+    start: 2022-01-18T13:14:30Z
+    end:   2022-01-18T13:14:53Z
+    agent_id: "27"
+    marker_rules: ["5501"]
+    marker_event_ids: ["1700000000.110415", "1700000000.110416", "1700000000.110417"]

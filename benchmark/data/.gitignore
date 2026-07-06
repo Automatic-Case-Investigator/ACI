@@ -1,0 +1,6 @@
+# All generated benchmark artifacts are reproducible from the pipeline — ignore them.
+raw/
+preprocessed/
+runs/
+results/
+manifests/
