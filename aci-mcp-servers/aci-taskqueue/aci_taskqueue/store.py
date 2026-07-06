@@ -14,6 +14,10 @@ from datetime import datetime, timezone
 from typing import Any
 
 _lock = threading.Lock()
+AGENT_VISIBLE_TASK_FIELDS = frozenset({
+    "id", "case_id", "run_id", "agent_name", "title", "description",
+    "priority", "status", "origin", "summary", "avfs_paths",
+})
 
 
 def _now() -> str:
@@ -88,6 +92,22 @@ def get_task(task_id: str) -> dict[str, Any] | None:
     with _conn() as conn:
         row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
     return dict(row) if row else None
+
+
+def agent_visible_task(task: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Return the task shape safe to show to agents.
+
+    Queue lifecycle timestamps (`created_at`, `updated_at`, `claimed_at`) are useful
+    for ordering and UI state, but they are not investigative evidence. Do not expose
+    them in model-facing task payloads.
+    """
+    if task is None:
+        return None
+    return {k: v for k, v in task.items() if k in AGENT_VISIBLE_TASK_FIELDS}
+
+
+def agent_visible_tasks(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [t for task in tasks if (t := agent_visible_task(task)) is not None]
 
 
 def list_tasks(case_id: str, run_id: str, agent_name: str) -> list[dict[str, Any]]:

@@ -2,8 +2,9 @@
 
 Puts the project root on sys.path and configures Django once, before any test
 module imports `agent.*`. Tests can also still be run as standalone scripts
-(`python tests/unit/test_x.py`) thanks to their own bootstrap, but running the
-whole tree with `python -m pytest tests/unit tests/django` is the supported path.
+(`python tests/unit/<subsystem>/test_x.py`) thanks to their own bootstrap, but
+running the whole tree with `python -m pytest tests/unit tests/django` is the
+supported path.
 """
 from __future__ import annotations
 

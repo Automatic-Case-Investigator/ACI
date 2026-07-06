@@ -47,6 +47,13 @@ def start_session(question: str, case_id: str = "", *, orch_state: dict | None =
 
 def start_investigation_from_triage(source_run: AgentRun) -> str:
     """Start an analyst session that proceeds from an approved triage report."""
+    if (
+        source_run.status != AgentRun.STATUS_COMPLETED
+        or not (source_run.result or "").strip()
+    ):
+        raise ValueError(
+            "Cannot start investigation from triage: source run did not complete with a durable report."
+        )
     case_id = source_run.case_id or ""
     question = (
         f"Investigate case {case_id} using the approved triage report from workflow "
@@ -57,6 +64,7 @@ def start_investigation_from_triage(source_run: AgentRun) -> str:
         "last_triage_case_id": case_id,
         "last_triage_report": source_run.result or "",
         "last_triage_run_id": str(source_run.id),
+        "last_triage_status": source_run.status,
         "review_auto_investigate": True,
     }
     return start_session(question, case_id=case_id, orch_state=orch_state)
@@ -199,6 +207,7 @@ def _session_loop(session_id: str, q: queue.Queue) -> None:
                 _loops[session_id] = loop
                 _processing.add(session_id)
             answer = "(stopped)"
+            final_status = AgentRun.STATUS_COMPLETED
             try:
                 if direct_review_investigation:
                     direct_review_investigation = False
@@ -209,6 +218,7 @@ def _session_loop(session_id: str, q: queue.Queue) -> None:
                     answer = loop.run_until_complete(run_orchestrator(sess, question))
             except asyncio.CancelledError:
                 answer = "Stopped by analyst. Ask a follow-up to continue from here."
+                final_status = AgentRun.STATUS_CANCELLED
                 logbus.emit(
                     "orch", "note",
                     "stopped by analyst — ask a follow-up to continue",
@@ -216,6 +226,7 @@ def _session_loop(session_id: str, q: queue.Queue) -> None:
                 )
             except Exception as exc:
                 answer = f"orchestrator error: {exc}"
+                final_status = AgentRun.STATUS_FAILED
                 traceback.print_exc()
                 logbus.emit("orch", "error", "orchestrator crashed", detail=str(exc))
             else:
@@ -234,7 +245,7 @@ def _session_loop(session_id: str, q: queue.Queue) -> None:
             _set_status(
                 session_id,
                 unless_cancelled=True,
-                status=AgentRun.STATUS_RUNNING,
+                status=final_status,
                 result=answer,
                 case_id=sess.case_id or "",
             )
@@ -254,7 +265,7 @@ async def _run_review_investigation(
     """Deterministically continue a held workflow triage report into investigation."""
     case_id = sess.last_triage_case_id or sess.case_id or ""
     triage_report = (sess.last_triage_report or "").strip()
-    if not case_id or not triage_report:
+    if not case_id or not triage_report or sess.last_triage_status != AgentRun.STATUS_COMPLETED:
         msg = "Cannot start investigation: the approved workflow triage report was not available."
         logbus.emit("orch", "error", msg)
         return msg

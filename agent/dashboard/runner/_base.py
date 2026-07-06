@@ -3,14 +3,11 @@ from __future__ import annotations
 import asyncio
 import queue
 import threading
-from typing import Optional
 
 from agent.models import AgentEvent, AgentRun
-from agent.agents.base import Handoff
-from agent.runtime.engine.dispatch import dispatch_run
 from agent.runtime.infra import logbus
-from agent.runtime.engine.run import run_agent_sync
-from agent.runtime.orchestrator import OrchestratorSession, run_orchestrator
+
+from .session_state import load_session_state as _load_session_state, publish_specialist_result_to_session, save_session_state as _save_session_state, set_session_status as _set_status
 
 
 _active_sessions: dict[str, queue.Queue] = {}       # session_id → message queue
@@ -99,41 +96,5 @@ def _current_context_run(session_id: str) -> AgentRun | None:
         return max(running_specialists, key=lambda r: r.updated_at)
     return AgentRun.objects.filter(id=session_id).first()
 
-
 # ── internal ───────────────────────────────────────────────────────────────────
-
-def _set_status(session_id: str, *, unless_cancelled: bool = False, **fields) -> None:
-    try:
-        qs = AgentRun.objects.filter(id=session_id)
-        if unless_cancelled:
-            # Don't resurrect a session an analyst stopped from the runs page.
-            qs = qs.exclude(status=AgentRun.STATUS_CANCELLED)
-        qs.update(**fields)
-    except Exception:
-        pass
-
-
-def _load_session_state(session_id: str) -> dict | None:
-    """A3: durable orchestrator-session state persisted in the run's metadata."""
-    try:
-        run = AgentRun.objects.filter(id=session_id).first()
-        if run and isinstance(run.metadata, dict):
-            return run.metadata.get("orch_session")
-    except Exception:
-        pass
-    return None
-
-
-def _save_session_state(session_id: str, sess: OrchestratorSession) -> None:
-    """Merge the orchestrator session essentials into the run's metadata (A3)."""
-    try:
-        run = AgentRun.objects.filter(id=session_id).first()
-        if run is None:
-            return
-        meta = dict(run.metadata or {})
-        meta["orch_session"] = sess.to_state()
-        run.metadata = meta
-        run.save(update_fields=["metadata", "updated_at"])
-    except Exception:
-        pass
 

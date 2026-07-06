@@ -25,12 +25,44 @@ All run paths converge on `agent.runtime.engine.run.run_agent`, which:
 The graph package was split from the older monolithic graph module. Historical
 imports from `agent.runtime.graph` are preserved through package-level re-exports.
 
+The canonical orchestrator surface is the package
+`agent.runtime.orchestrator`. The flat `agent.runtime.orchestrator.py` file is
+now only a compatibility shim.
+
+Stable high-level runtime entrypoints are:
+
+- `run_orchestrator`
+- `OrchestratorSession`
+- `dispatch_run`
+- `run_agent`
+- `build_mcp_client`
+- `compose_system_prompt`
+
+## Prompt And Provider Boundaries
+
+Prompt composition is layered deliberately:
+
+- platform-agnostic reasoning method and identity stay in `agent/prompts/`;
+- runtime context assembly lives in
+  `agent.runtime.config.prompts` and `agent.runtime.config.prompt_sections`;
+- provider capability contracts are rendered separately from core reasoning;
+- MCP-specific instructions are loaded from each MCP server package and appended
+  as guidance, rather than duplicated into the core agent prompt.
+
+Built-in provider registration also has a clearer internal split between:
+
+- provider registration and capability mapping;
+- provider config/env resolution;
+- MCP instruction loading;
+- provider capability-contract rendering.
+
 ## Registered Agents
 
-| Agent | Role | Default Tool Policy | Default Budget |
-|---|---|---|---|
-| `triage` | Reads SOAR case context, checks nearby SIEM evidence and memory, assesses severity/category, and returns a report plus prioritized investigation plan. | `aci-thehive`, `aci-wazuh`, `aci-taskqueue`, `aci-memory`, `avfs` | 12 steps, 18 tool calls |
-| `investigation` | Performs SIEM-backed investigation, enriches artifacts, maintains the findings board, and posts a grounded final report. | `aci-thehive`, `aci-wazuh`, `aci-taskqueue`, `aci-board`, `aci-memory`, `avfs` | 40 steps, 60 tool calls |
+| Agent | Role | Default Tool Policy | Default Budget | Orchestrator-routable |
+|---|---|---|---|---|
+| `triage` | Reads SOAR case context, checks nearby SIEM evidence and memory, assesses severity/category, and returns a report plus prioritized investigation plan. | `aci-thehive`, `aci-wazuh`, `aci-taskqueue`, `aci-memory`, `avfs` | 12 steps, 18 tool calls | yes |
+| `investigation` | Performs SIEM-backed investigation, enriches artifacts, maintains the findings board, and posts a grounded final report. | `aci-thehive`, `aci-wazuh`, `aci-taskqueue`, `aci-board`, `aci-memory`, `avfs` | 40 steps, 60 tool calls | yes |
+| `seeder` | Internal-only. Parses a completed triage report into the investigation task queue; called directly by investigation's `seed`, never routed by the orchestrator. | `aci-taskqueue` | 20 steps, 25 tool calls | no |
 
 Triage produces structured handoff metadata; investigation consumes it. The
 orchestrator passes handoffs through `AgentRun.metadata` rather than prompt
@@ -47,25 +79,51 @@ seed -> claim -> think -> use_tools/assess -> pivot -> claim
 
 Key behavior:
 
-- `seed` creates initial queue work. Investigation creates a "Populate
-  investigation queue" task from the handoff when no pending work exists.
+- `seed` creates initial queue work. A normal triage handoff calls the
+  `seeder` agent (deterministic plan-item extraction + a bounded model pass
+  for gaps, deduplicated against the existing queue); a resume run creates an
+  open-gaps task directly.
 - `claim` owns queue claiming. `claim_next` is never exposed to the model.
 - `think` calls the model with allowed tools and compacts old non-evidence
   context when prompt tokens exceed about 80% of the configured context length.
 - `use_tools` executes MCP calls, caps oversized tool results, expands AVFS `~`
-  paths, records artifacts from event-shaped JSON, and can trigger TI enrichment.
-- `assess` completes the current task with a non-empty summary and applies guard
-  rails: seed population, triage SIEM query, investigation SIEM query, and
-  required investigation summary sections.
-- `pivot` updates the Findings Board from `## Confirmed Facts` and
-  `## Hypotheses`, validates `## New Leads`, queues approved follow-up tasks,
-  and posts an immediate escalation comment when active compromise is confirmed.
+  paths, deterministically extracts artifacts (including decoded hex/base64/
+  URL-encoded payloads) from event-shaped JSON, auto-correlates confirmed
+  entities, builds the kill-chain view, and can trigger TI enrichment.
+- `assess` completes the current task with a non-empty summary. For
+  `investigation`, a single **per-task self-review** (`graph/reflection.py`)
+  replaces the older fixed cascade of separate guard nodes — one model call
+  judges the task holistically (using deterministic signals: evidence-query
+  count, broad-result hit count, unpivoted IOCs, unqueried volume-profile
+  clusters, unreported board compromise artifacts) and either approves
+  completion or re-injects one consolidated correction (`needs_more_work`).
+  Fail-open and bounded by a retry budget plus a convergence guard so a task
+  cannot loop forever on orientation-only turns.
+- `pivot` updates the Findings Board from `## Findings` (gated by the
+  self-review's grounding/novelty verdicts) and `## Hypotheses`, validates
+  `## New Leads`, queues approved follow-up tasks, and posts an immediate
+  escalation comment when active compromise is confirmed — reading
+  confirmed compromise indicators directly off the board, not only the
+  agent's own narrative, so a decoded artifact the agent never re-narrates
+  still escalates.
 - `finish` builds the structured final investigation summary or marks budget
   exhaustion.
 - `verdict_contract` generates/repairs the canonical fenced JSON verdict block.
 - `reassess_verdict` compares triage and investigation verdicts, resolving
   conflicts with a focused model call only when needed.
 - `publish_finish` writes `final.md` to AVFS and posts the report to TheHive.
+
+## SIEM Query Robustness
+
+`aci-wazuh`'s `WazuhClient` (`aci-mcp-servers/aci-wazuh/aci_wazuh/client.py`)
+adds deterministic guards surfaced back to the model as a `hint`/`note`
+rather than a silent failure: malformed-query hints, ISO-timestamp-in-keyword
+stripping, and detection of a `bool` `should` clause with no `must`/
+`minimum_should_match` (scoring-only under ES/OS defaults — the most common
+way a query that looks narrow silently matches the whole time window).
+Prompt guidance also teaches verifying `agent.id` cardinality before treating
+events scoped only by `agent.name` as one host's activity, since a display
+name is not guaranteed unique.
 
 ## Configuration Model
 
@@ -103,6 +161,14 @@ entered through Dashboard -> Settings for normal operation.
 Internal providers cannot be disabled through settings. Default providers can be
 enabled/disabled and reconfigured, but not deleted. Custom MCP servers are full
 CRUD through settings.
+
+Provider metadata is standardized internally around:
+
+- `provider_key`
+- `provider_kind`
+- standardized capabilities
+- mapped tool names
+- `instructions_required`
 
 ## Learning, Memory, And TI
 
@@ -171,6 +237,24 @@ python manage.py run_workflow new_case <case_id>
 python manage.py run_workflow new_alert <case_id> --payload '{}'
 ```
 
+## Session Publication And Run Continuation
+
+Interactive orchestrator sessions persist durable analyst-visible state in
+`AgentRun.metadata["orch_session"]`.
+
+Specialist completion now refreshes analyst-visible session state through one
+shared path:
+
+- orchestrator-triggered completion updates `OrchestratorSession` directly;
+- direct resume and restart use
+  `agent.dashboard.runner.session_state.publish_specialist_result_to_session`;
+- shared mutation/publication helpers live in
+  `agent.runtime.orchestrator.specialist_sync`.
+
+This closes the earlier gap where a directly resumed specialist run could finish
+correctly in its own `AgentRun` record without republishing the updated result
+back into the orchestrator chat/session state.
+
 ## Development Commands
 
 Offline verification:
@@ -182,10 +266,10 @@ PYTHONPATH=. python -m pytest tests/unit tests/django -q
 Focused examples:
 
 ```bash
-PYTHONPATH=. python -m pytest tests/unit/test_graph_stub.py -q
-PYTHONPATH=. python -m pytest tests/unit/test_verdict_parsing.py -q
-PYTHONPATH=. python -m pytest tests/unit/test_lead_model.py -q
-PYTHONPATH=. python -m pytest tests/unit/test_compaction_preserves_tool_messages.py -q
+PYTHONPATH=. python -m pytest tests/unit/graph/test_graph_stub.py -q
+PYTHONPATH=. python -m pytest tests/unit/analysis/test_verdict_parsing.py -q
+PYTHONPATH=. python -m pytest tests/unit/graph/test_lead_model.py -q
+PYTHONPATH=. python -m pytest tests/unit/graph/test_compaction_preserves_tool_messages.py -q
 ```
 
 Local inspection scripts live in `scripts/dev/`; see `scripts/dev/README.md`.

@@ -35,4 +35,8 @@ register(MCPProvider(
     kind=KIND_UTILITY,
     setting_defaults=_defaults,
     build_config=_build,
+    capabilities={
+        "board_read_findings": ("list_entries",),
+        "board_write_findings": ("add_entry",),
+    },
 ))

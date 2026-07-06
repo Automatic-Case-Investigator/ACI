@@ -79,6 +79,8 @@ _BLOCKING_GAP_RE = re.compile(
 _NONBLOCKING_FOLLOWUP_GAP_RE = re.compile(
     r"initial access|source ip|network telemetry|connection attempt|callback|"
     r"authorization context|sudo authorization|cron executions|execution count|"
+    r"successful authenticated session|post-login|process execution|execution telemetry|"
+    r"shell-launch|persistence|c2|command and control|exfiltration|file-transfer|impact|"
     r"lateral movement|broader scope|campaign|analyst correction|pattern|hash",
     re.IGNORECASE,
 )
@@ -320,6 +322,56 @@ def apply_citation_policy(v: dict) -> tuple[dict, bool]:
     return demoted, True
 
 
+# Verdicts that affirmatively clear a case as not-a-threat. These cannot stand
+# when the run already escalated an active compromise or was cut short before
+# finishing — both contradict a confident "benign" conclusion.
+_CLEARING_VERDICTS = frozenset({"fp"})
+
+
+def apply_completeness_floor(
+    v: dict, *, escalation_posted: bool = False, over_budget: bool = False
+) -> tuple[dict, bool]:
+    """Floor a case-clearing verdict the run is not entitled to assert.
+
+    Two integrity rules, both flooring an `fp` to `needs_investigation`:
+
+    - **escalation_posted** — an active-compromise alert was posted to the case
+      during this run (a cited, active-compromise ## Findings fact). A benign
+      verdict directly contradicts that, so it must not be the final answer.
+    - **over_budget** — the run exhausted its step/call budget before completing.
+      An incomplete run cannot affirmatively clear a case as benign.
+
+    A `tp` is left untouched in both cases: escalation is consistent with TP, and
+    finding malice on partial budget is still a valid finding. `inconclusive` /
+    `needs_investigation` already hold for analyst review and are left untouched.
+
+    Idempotent: re-applying to an already-floored verdict is a no-op. Returns
+    (verdict, floored).
+    """
+    verdict = v.get("verdict")
+    if verdict not in _CLEARING_VERDICTS:
+        return v, False
+    reasons: list[str] = []
+    if escalation_posted:
+        reasons.append("an active-compromise escalation was posted during this run")
+    if over_budget:
+        reasons.append("the run exhausted its budget before completing")
+    if not reasons:
+        return v, False
+
+    floored = dict(v)
+    floored["demoted_from"] = verdict
+    floored["verdict"] = "needs_investigation"
+    note = (
+        f"Original verdict {verdict.upper()} floored to NEEDS_INVESTIGATION: "
+        + "; ".join(reasons) + "."
+    )
+    floored["reassessment_reason"] = note
+    action = floored.get("recommended_action") or ""
+    floored["recommended_action"] = (note + " " + action).strip() if action else note
+    return floored, True
+
+
 def apply_open_gaps_policy(v: dict, *, strict: bool = True) -> tuple[dict, bool]:
     """Demote tp/fp only when classification proof is absent or gaps block it.
 
@@ -359,3 +411,208 @@ def apply_open_gaps_policy(v: dict, *, strict: bool = True) -> tuple[dict, bool]
     action = demoted.get("recommended_action") or ""
     demoted["recommended_action"] = (note + " " + action).strip() if action else note
     return demoted, True
+
+
+# ---------------------------------------------------------------------------
+# Verdict-aware gap classification + offensive-close floor + unified pipeline.
+#
+# The pre-existing policies above are verdict-blind: they treat a "downstream
+# success / lateral / initial-access" gap as non-blocking follow-up regardless of
+# whether the verdict is TP or FP. That is correct for a TP (those are scoping
+# gaps) but wrong for an FP, where those are the exact checks that would OVERTURN
+# the benign call. The functions below make the classification verdict-aware and
+# add a floor for a benign close of an offensive alert whose success was never
+# ruled out. `apply_verdict_integrity` runs the whole ordered pipeline in one place.
+# ---------------------------------------------------------------------------
+
+# An alert whose signature is itself an offensive action (scan/recon/brute/exploit),
+# where "no observed success" is absence-of-proof, NOT positive benign evidence.
+# Derived from the verdict's own matched_patterns / supporting_evidence / action text.
+_OFFENSIVE_ALERT_RE = re.compile(
+    r"\bscan(ning|ner)?\b|recon|probe|brute[\s-]?force|initial access|exploit|"
+    r"web_scan|vulnerability scan|\bnmap\b|wpscan|t1595|t1190|t1110|t1078|t1046",
+    re.IGNORECASE,
+)
+
+# Gaps that would OVERTURN a benign verdict if resolved (blocking for FP), but are
+# merely downstream follow-up scoping for a TP (nonblocking).
+_OFFENSIVE_DOWNSTREAM_GAP_RE = re.compile(
+    r"success|follow-?on|follow[\s-]?up activity|logged[\s-]?in|authenticat|post-scan|"
+    r"downstream|lateral|initial access|got in|succeed|execution|persistence|"
+    r"callback|command and control|\bc2\b|exfil",
+    re.IGNORECASE,
+)
+
+# Text showing the run actually ADDRESSED downstream success (positive result or a
+# confirmed negative) — its presence means success was not simply ignored.
+_SUCCESS_ADDRESSED_RE = re.compile(
+    r"success|authenticat|logged[\s-]?in|200 ok|established|executed|"
+    r"valid credential|session opened|accepted|no .*(login|access|auth)",
+    re.IGNORECASE,
+)
+
+# Positive benign justification that legitimately supports an FP on an offensive alert.
+_BENIGN_JUSTIFICATION_RE = re.compile(
+    r"authorized|approved|expected|sanctioned|whitelist|known[\s-]?good|known scanner|"
+    r"legitimate|administrative|maintenance window|internal (scanner|scan)|"
+    r"security team|pentest|penetration test|vulnerability management|scheduled scan",
+    re.IGNORECASE,
+)
+
+
+def _verdict_text(v: dict) -> str:
+    """Flatten the verdict fields that describe what was matched/observed."""
+    parts = list(v.get("matched_patterns") or []) + list(v.get("supporting_evidence") or [])
+    parts.append(str(v.get("recommended_action") or ""))
+    return " ".join(str(p) for p in parts)
+
+
+def is_offensive_alert(v: dict) -> bool:
+    """True if the verdict describes an offensive-action alert (scan/recon/brute/exploit)."""
+    return bool(_OFFENSIVE_ALERT_RE.search(_verdict_text(v)))
+
+
+def classify_fp_gaps(v: dict) -> tuple[dict, bool]:
+    """Verdict-aware gap classification for an FP.
+
+    A downstream-success / lateral / initial-access / execution / callback gap is the
+    exact check that would OVERTURN a benign verdict, so for an ``fp`` it is BLOCKING —
+    the opposite of its follow-up (nonblocking) role under a ``tp``. Promote any such gap
+    out of ``nonblocking_gaps`` / ``missing_evidence`` into ``blocking_gaps`` so the
+    open-gaps policy then demotes an unearned FP to ``needs_investigation``. No-op for
+    non-FP verdicts. Returns (verdict, changed).
+    """
+    if v.get("verdict") != "fp":
+        return v, False
+    blocking = list(v.get("blocking_gaps") or [])
+    keep_nonblocking: list = []
+    promoted: list = []
+    for gap in (v.get("nonblocking_gaps") or []):
+        if _OFFENSIVE_DOWNSTREAM_GAP_RE.search(str(gap)):
+            promoted.append(gap)
+        else:
+            keep_nonblocking.append(gap)
+    for gap in (v.get("missing_evidence") or []):
+        if _OFFENSIVE_DOWNSTREAM_GAP_RE.search(str(gap)) and gap not in promoted:
+            promoted.append(gap)
+    promoted = [g for g in promoted if g not in blocking]
+    if not promoted:
+        return v, False
+    out = dict(v)
+    out["nonblocking_gaps"] = keep_nonblocking
+    out["blocking_gaps"] = blocking + promoted
+    return out, True
+
+
+def apply_success_verification_floor(v: dict, *, offensive_alert: bool) -> tuple[dict, bool]:
+    """Floor a benign close of an OFFENSIVE alert that never ruled out success.
+
+    An ``fp`` on a scan/recon/brute/exploit alert must rest on positive benign evidence
+    (authorized / known-scanner / maintenance) OR a downstream success check (a positive
+    result or a confirmed negative). "We saw the scan and no success" is absence-of-proof,
+    not proof of benign. When neither is present, floor ``fp -> needs_investigation`` so an
+    unverified benign close cannot auto-close the case. No-op for non-FP or non-offensive
+    alerts. Idempotent. Returns (verdict, floored).
+    """
+    if v.get("verdict") != "fp" or not offensive_alert:
+        return v, False
+    text = _verdict_text(v)
+    if _BENIGN_JUSTIFICATION_RE.search(text) or _SUCCESS_ADDRESSED_RE.search(text):
+        return v, False
+    floored = dict(v)
+    floored["demoted_from"] = "fp"
+    floored["verdict"] = "needs_investigation"
+    note = (
+        "Original verdict FP floored to NEEDS_INVESTIGATION: benign close on an offensive "
+        "(scan/recon/exploit) alert without positive benign evidence or a downstream success "
+        "check — the source's success was never ruled out."
+    )
+    floored["reassessment_reason"] = note
+    action = floored.get("recommended_action") or ""
+    floored["recommended_action"] = (note + " " + action).strip() if action else note
+    return floored, True
+
+
+def apply_verdict_integrity(
+    v: dict,
+    *,
+    strict: bool,
+    escalation_posted: bool = False,
+    over_budget: bool = False,
+    offensive_alert: bool | None = None,
+    classify_gaps: bool = True,
+) -> tuple[dict, list[tuple[str, str]]]:
+    """Single ordered verdict-integrity pipeline shared by every verdict node.
+
+    Runs, in order:
+      1. citation           — uncited tp/fp -> inconclusive
+      2. gap classification — tp: relieve follow-up gaps (nonblocking);
+                              fp: promote overturning gaps (blocking)
+      3. open-gaps          — demote a tp/fp with blocking gaps or a mismatched basis
+      4. success floor      — fp on an offensive alert w/o benign proof -> needs_investigation
+      5. completeness floor — escalated / over-budget fp -> needs_investigation
+
+    Returns ``(verdict, notes)`` where ``notes`` is a list of ``(emit_kind, message)``
+    for the caller to surface. Idempotent, so ``publish_finish`` can safely re-run it on
+    a reassess-resolved verdict that bypassed the pipeline.
+    """
+    notes: list[tuple[str, str]] = []
+    verdict = v
+    if offensive_alert is None:
+        offensive_alert = is_offensive_alert(verdict)
+
+    verdict, demoted = apply_citation_policy(verdict)
+    if demoted:
+        notes.append((
+            "note",
+            f"verdict {verdict.get('demoted_from', '').upper()} demoted to "
+            "INCONCLUSIVE — no supporting evidence cited",
+        ))
+
+    if classify_gaps:
+        current = verdict.get("verdict")
+        if current == "tp":
+            normalized = normalize_followup_gaps(verdict)
+            if (
+                normalized is not verdict
+                and normalized.get("blocking_gaps") != verdict.get("blocking_gaps")
+            ):
+                notes.append(("note", "verdict contract: moved follow-up gaps to nonblocking_gaps"))
+            verdict = normalized
+        elif current == "fp":
+            verdict, promoted = classify_fp_gaps(verdict)
+            if promoted:
+                notes.append((
+                    "note",
+                    "verdict contract: promoted overturning gaps (unconfirmed success / "
+                    "lateral / execution) to blocking_gaps for FP",
+                ))
+
+    verdict, demoted = apply_open_gaps_policy(verdict, strict=strict)
+    if demoted:
+        reason = "blocking gaps" if verdict.get("blocking_gaps") else "classification basis"
+        notes.append((
+            "note",
+            f"verdict {verdict.get('demoted_from', '').upper()} demoted to "
+            f"NEEDS_INVESTIGATION — {reason}",
+        ))
+
+    verdict, floored = apply_success_verification_floor(verdict, offensive_alert=offensive_alert)
+    if floored:
+        notes.append((
+            "note",
+            f"verdict {verdict.get('demoted_from', '').upper()} floored to "
+            "NEEDS_INVESTIGATION — offensive alert closed benign without a success check",
+        ))
+
+    verdict, floored = apply_completeness_floor(
+        verdict, escalation_posted=escalation_posted, over_budget=over_budget
+    )
+    if floored:
+        notes.append((
+            "note",
+            f"verdict {verdict.get('demoted_from', '').upper()} floored to "
+            f"NEEDS_INVESTIGATION — {verdict.get('reassessment_reason', '')[:160]}",
+        ))
+
+    return verdict, notes

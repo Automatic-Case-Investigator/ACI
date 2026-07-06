@@ -12,7 +12,7 @@ from agent.runtime.infra import logbus
 from agent.runtime.engine.run import run_agent_sync
 from agent.runtime.orchestrator import OrchestratorSession, run_orchestrator
 
-from ._base import _EVENT_DETAIL_LIMIT, _RESTARTABLE_AGENTS, _RESTART_CONTEXT_LIMIT, _append_with_limit, _clip, _events_for_run, _prior_board_entries, _prior_tasks
+from ._base import _EVENT_DETAIL_LIMIT, _RESTARTABLE_AGENTS, _RESTART_CONTEXT_LIMIT, _append_with_limit, _clip, _events_for_run, _prior_board_entries, _prior_tasks, publish_specialist_result_to_session
 
 
 
@@ -93,6 +93,8 @@ def _start_agent_thread(run: AgentRun, *, session_id: str = "") -> None:
         token = logbus.bind_session(session_id) if session_id else None
         try:
             run_agent_sync(str(run.id), run.agent_name, run.case_id, run.question)
+            if session_id:
+                publish_specialist_result_to_session(session_id, str(run.id), reason="restart")
         finally:
             if token is not None:
                 logbus.reset_session(token)

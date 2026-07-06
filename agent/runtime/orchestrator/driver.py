@@ -134,6 +134,12 @@ async def run_orchestrator(session: OrchestratorSession, question: str, max_roun
 def _format_triage_answer(session: OrchestratorSession) -> str:
     report = (session.last_triage_report or "").strip()
     verdict = session.last_triage_verdict if isinstance(session.last_triage_verdict, dict) else None
+    if session.last_triage_status and session.last_triage_status != "completed":
+        prefix = (
+            f"Triage did not complete successfully (status: {session.last_triage_status}). "
+            "Do not treat any partial output as a durable handoff to investigation."
+        )
+        return prefix + (f"\n\n{report}" if report else "")
     if not verdict:
         prefix = (
             "Triage completed, but it did not produce a valid structured verdict. "
@@ -213,7 +219,8 @@ async def _run_orchestrator_impl(session: OrchestratorSession, question: str, ma
     # investigation request.  Prevents the orchestrator from re-doing the work itself
     # using raw data-source tools instead of delegating to the investigation sub-agent.
     is_investigation_consent = (
-        bool(session.last_triage_report)
+        bool((session.last_triage_report or "").strip())
+        and session.last_triage_status == "completed"
         and not session.investigation_run_id
         and "investigation" in tmap
         and (

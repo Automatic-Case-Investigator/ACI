@@ -5,7 +5,8 @@ from __future__ import annotations
 from langgraph.graph import END, StateGraph
 
 from .nodes_flow import assess, finish, pivot, publish_finish, reassess_verdict, verdict_contract
-from .nodes_loop import claim, seed, think, use_tools
+from .interpretation import interpret
+from .nodes_loop import _MAX_TASK_TOOL_CALLS, claim, seed, think, use_tools
 from .state import AgentState
 
 
@@ -16,10 +17,21 @@ def _route_claim(state: AgentState) -> str:
 
 
 def _route_use_tools(state: AgentState) -> str:
-    """Return to reasoning unless the run was cancelled mid-tool phase."""
+    """Interpret tool output before the model is allowed to act again."""
     if state.get("status") == "cancelled":
         return "finish"
-    return "think"
+    return "interpret"
+
+
+def _route_interpret(state: AgentState) -> str:
+    """Either continue task reasoning or finalize the current task."""
+    over_budget = (
+        state["steps"] >= state["max_steps"]
+        or state["tool_calls_made"] >= state["max_tool_calls"]
+    )
+    if state.get("status") == "cancelled" or over_budget:
+        return "finish"
+    return "assess" if state.get("status") == "ready_to_assess" else "think"
 
 
 def _route_think(state: AgentState) -> str:
@@ -27,6 +39,17 @@ def _route_think(state: AgentState) -> str:
     last = state["messages"][-1] if state["messages"] else None
     if state["steps"] >= state["max_steps"] or state["tool_calls_made"] >= state["max_tool_calls"]:
         return "finish"
+    # Per-task call cap: a capped investigation task must close (→ assess), never loop
+    # back into use_tools — `think` already stripped its tools, but this also blocks a
+    # pathological hallucinated tool call from bypassing the cap via use_tools' full map.
+    # Keyed on the deterministic counter alone: the interpret→think continuation clears
+    # `messages` to [], so a ToolMessage-presence guard here silently defeats the cap.
+    task_calls = state["tool_calls_made"] - state.get("task_call_floor", 0)
+    if (
+        state["agent_name"] == "investigation"
+        and task_calls >= _MAX_TASK_TOOL_CALLS
+    ):
+        return "assess"
     return "use_tools" if (last and getattr(last, "tool_calls", None)) else "assess"
 
 
@@ -36,7 +59,7 @@ def _route_assess(state: AgentState) -> str:
         state["steps"] >= state["max_steps"]
         or state["tool_calls_made"] >= state["max_tool_calls"]
     )
-    if state.get("status") in {"triage_siem_guard", "investigation_siem_guard", "summary_format_guard"}:
+    if state.get("status") == "needs_more_work":
         return "finish" if over_budget else "think"
     if over_budget:
         return "finish"
@@ -50,6 +73,7 @@ def build_graph():
     g.add_node("claim", claim)
     g.add_node("think", think)
     g.add_node("use_tools", use_tools)
+    g.add_node("interpret", interpret)
     g.add_node("assess", assess)
     g.add_node("pivot", pivot)
     g.add_node("finish", finish)
@@ -60,7 +84,12 @@ def build_graph():
     g.set_entry_point("seed")
     g.add_edge("seed", "claim")
     g.add_conditional_edges("claim", _route_claim, {"think": "think", "finish": "finish"})
-    g.add_conditional_edges("use_tools", _route_use_tools, {"think": "think", "finish": "finish"})
+    g.add_conditional_edges("use_tools", _route_use_tools, {"interpret": "interpret", "finish": "finish"})
+    g.add_conditional_edges(
+        "interpret",
+        _route_interpret,
+        {"think": "think", "assess": "assess", "finish": "finish"},
+    )
     g.add_conditional_edges(
         "think",
         _route_think,

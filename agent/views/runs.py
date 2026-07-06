@@ -13,6 +13,7 @@ from rest_framework.views import APIView
 from ..agents.registry import get_agent
 from ..models import AgentEvent, AgentRun, FeedbackEntry, WorkflowTriggerConfig
 from ..runtime.infra.avfs import reports_dir
+from ..runtime.infra import logbus
 from ..runtime.engine.run import run_agent_sync
 
 log = logging.getLogger(__name__)
@@ -151,9 +152,22 @@ class AgentRunResumeView(APIView):
         run.status = AgentRun.STATUS_QUEUED
         run.metadata = metadata
         run.save(update_fields=["status", "metadata", "updated_at"])
+        session_id = metadata.get("session_id") or ""
+
+        def _target() -> None:
+            token = logbus.bind_session(session_id) if session_id else None
+            try:
+                run_agent_sync(str(run.id), run.agent_name, run.case_id, run.question)
+                if session_id:
+                    from ..dashboard.runner import publish_specialist_result_to_session
+
+                    publish_specialist_result_to_session(session_id, str(run.id), reason="resume")
+            finally:
+                if token is not None:
+                    logbus.reset_session(token)
+
         thread = threading.Thread(
-            target=run_agent_sync,
-            args=(str(run.id), run.agent_name, run.case_id, run.question),
+            target=_target,
             daemon=True,
         )
         thread.start()

@@ -17,6 +17,7 @@ from ...agents.base import AgentDefinition, Handoff
 from ...agents.registry import get_agent, list_agents
 from ...models import AgentRun
 from ..infra.avfs import reports_dir
+from ..providers.base import format_provider_capability_contracts
 from ..engine.dispatch import dispatch_run
 from ..graph import (
     _compact_history, _extract_input_tokens, _invoke_bound_model, _normalize,
@@ -44,6 +45,7 @@ def _orchestrator_system_prompt(
             "case_id": session.case_id or "none set yet — extract from the message or ask the analyst",
             "agent_name": "orchestrator",
             "available_tools": tool_names or [],
+            "provider_capability_contracts": format_provider_capability_contracts(_ORCHESTRATOR_TOOL_POLICY),
             "mcp_prompt_guidance": mcp_prompt_guidance,
             "last_triage_report_available": bool((session.last_triage_report or "").strip()),
             "last_triage_case_id": session.last_triage_case_id or "",

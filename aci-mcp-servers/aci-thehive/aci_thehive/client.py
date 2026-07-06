@@ -15,14 +15,59 @@ from typing import Any
 import httpx
 
 
-def _epoch_ms_to_iso(value: Any) -> str | None:
-    """Convert a TheHive epoch-millisecond timestamp to ISO 8601 UTC."""
+def _timestamp_to_iso(value: Any) -> str | None:
+    """Convert a TheHive timestamp to ISO 8601 UTC.
+
+    TheHive case/alert `date` fields are epoch milliseconds in the deployments ACI
+    targets. This parser also accepts seconds and ISO strings so fixture/import
+    variants normalize consistently. Lifecycle fields (`createdAt`, `updatedAt`,
+    `_createdAt`) are intentionally normalized separately and never promoted to the
+    incident anchor.
+    """
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc).isoformat()
     if not isinstance(value, (int, float)):
         return None
     try:
-        return datetime.fromtimestamp(value / 1000, tz=timezone.utc).isoformat()
+        # > 1e11 is safely epoch milliseconds for modern TheHive dates; smaller
+        # numeric values are treated as epoch seconds.
+        seconds = value / 1000 if abs(value) > 100_000_000_000 else value
+        return datetime.fromtimestamp(seconds, tz=timezone.utc).isoformat()
     except (ValueError, OverflowError, OSError):
         return None
+
+
+def _epoch_ms_to_iso(value: Any) -> str | None:
+    """Backward-compatible alias for alert date normalization."""
+    return _timestamp_to_iso(value)
+
+
+def _normalize_case_timestamps(case: dict) -> dict:
+    """Add explicit incident/lifecycle timestamp labels to a TheHive case.
+
+    `date` is the case's incident time. `createdAt` / `_createdAt` are case-system
+    lifecycle timestamps and must not be used as SIEM anchors.
+    """
+    out = dict(case)
+    case_date_iso = _timestamp_to_iso(out.get("date"))
+    if case_date_iso:
+        out["date_iso"] = case_date_iso
+        out["incident_time_iso"] = case_date_iso
+        out["incident_time_source"] = "case.date"
+    for key in ("createdAt", "_createdAt", "updatedAt", "_updatedAt"):
+        iso = _timestamp_to_iso(out.get(key))
+        if iso:
+            out[f"{key}_iso"] = iso
+    return out
 
 
 class TheHiveClient:
@@ -76,7 +121,8 @@ class TheHiveClient:
     # ── Cases ──────────────────────────────────────────────────────────────────
 
     def get_case(self, case_id: str) -> dict:
-        return self._get(f"/api/case/{case_id}")
+        result = self._get(f"/api/case/{case_id}")
+        return _normalize_case_timestamps(result) if isinstance(result, dict) else result
 
     def list_cases(self, max_results: int = 20) -> list[dict]:
         return self._get("/api/case", params={"range": f"0-{max_results}"})

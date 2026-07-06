@@ -150,11 +150,40 @@ def apply_lead_budget(
     return ordered, []
 
 
+# Qualitative priority labels mapped onto the numeric priority bands (see the
+# investigation prompt §3/§6). The prompt requires a numeric priority, but the
+# model sometimes emits a word; mapping it preserves the intended ranking instead
+# of collapsing every such lead to the mid-point.
+_QUALITATIVE_PRIORITY = {
+    "critical": 95,
+    "high": 85,
+    "medium": 60,
+    "moderate": 60,
+    "low": 40,
+}
+
+
 def _safe_priority(value) -> int:
+    """Coerce a model-supplied priority into an int in [0, 100].
+
+    Accepts plain ints, numeric strings, strings with an embedded number
+    (e.g. "P85", "priority: 85"), and qualitative labels (critical/high/medium/
+    low) mapped onto the priority bands. Falls back to 50 only when nothing
+    usable is present, so a stray label never silently destroys a lead's rank.
+    """
     try:
         return max(0, min(100, int(value)))
     except (TypeError, ValueError):
-        return 50
+        pass
+    if isinstance(value, str):
+        text = value.strip().lower()
+        for label, mapped in _QUALITATIVE_PRIORITY.items():
+            if label in text:
+                return mapped
+        match = re.search(r"\d{1,3}", text)
+        if match:
+            return max(0, min(100, int(match.group(0))))
+    return 50
 
 
 def _objective_bucket(text: str) -> str:

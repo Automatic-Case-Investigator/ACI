@@ -199,6 +199,63 @@ def summarize_args(args: dict) -> str:
     return _clip(s, 100)
 
 
+def _hhmm(ts) -> str:
+    """HH:MM from an ISO bucket key, else the raw value."""
+    s = str(ts or "")
+    return s[11:16] if len(s) >= 16 and s[10] in ("T", " ") else s
+
+
+def _stamp(ts) -> str:
+    """MM-DD HH:MM from an ISO bucket key — keeps the date so a multi-day span is not
+    rendered as a misleading same-looking HH:MM (e.g. '12:00->12:00' across two days)."""
+    s = str(ts or "")
+    return f"{s[5:10]} {s[11:16]}" if len(s) >= 16 and s[10] in ("T", " ") else s
+
+
+def _summarize_volume(obj: dict) -> str:
+    """One-line shape of a get_event_volume histogram: a saturation warning when the
+    active region fills the window, the active regime (onset→cessation) for a sustained
+    plateau, else peak + post-peak tail."""
+    total = obj.get("total", 0)
+    interval = obj.get("interval", "?")
+    peak = obj.get("peak_bucket") or {}
+    post = obj.get("post_spike_active_bins") or []
+    head = f"volume: {total} ev / {interval}"
+    onset, cessation = obj.get("onset") or {}, obj.get("cessation") or {}
+    active = obj.get("active_bins") or []
+    # Multiple distinct bursts: surface them so the agent picks the right sub-window
+    # instead of treating the whole span as one event.
+    bursts = obj.get("bursts") or []
+    if len(bursts) > 1:
+        shown = ", ".join(f"{_stamp(b.get('start'))}->{_stamp(b.get('end'))}({b.get('total')})"
+                          for b in bursts[:4])
+        more = f" +{len(bursts) - 4}" if len(bursts) > 4 else ""
+        return f"{head}; {len(bursts)} BURSTS: {shown}{more} - pick the one matching your objective"
+    # Saturated: activity fills the window — the profile localized nothing. Show dated
+    # stamps and tell the agent to narrow, not to "query the edges".
+    if obj.get("saturated") and onset and cessation:
+        return (
+            f"{head}; ACTIVE {_stamp(onset.get('time'))}->{_stamp(cessation.get('time'))} "
+            f"SPANS WHOLE WINDOW - too broad; SHRINK the time window (not the interval), don't conclude"
+        )
+    # Sustained activity: a multi-bin block bounded by onset/cessation. Surfacing the
+    # edges beats surfacing the peak — the plateau's start/end are the windows to drill.
+    if onset and cessation and len(active) > 2:
+        return (
+            f"{head}; ACTIVE {_hhmm(onset.get('time'))}->{_hhmm(cessation.get('time'))} "
+            f"({len(active)} bins) - plateau, query onset+cessation edges, don't conclude from shape"
+        )
+    if peak:
+        head += f"; peak {_hhmm(peak.get('time'))}({peak.get('count')})"
+    if post:
+        shown = ", ".join(_hhmm(b.get("time")) for b in post[:6])
+        more = f" +{len(post) - 6}" if len(post) > 6 else ""
+        head += f"; POST-PEAK at {shown}{more} - step past the spike, query these"
+    elif peak:
+        head += "; no activity after peak"
+    return head
+
+
 def summarize_result(tool: str, content: str) -> str:
     """Condense a tool result to one scannable line. Best-effort; never raises."""
     c = (content or "").strip()
@@ -210,6 +267,10 @@ def summarize_result(tool: str, content: str) -> str:
     if isinstance(obj, dict):
         if "error" in obj and len(obj) <= 2:
             return f"ERROR {_clip(str(obj['error']), 120)}"
+        # get_event_volume: surface the temporal SHAPE (peak + post-peak tail), not just
+        # the total — the tail is where post-spike activity lives.
+        if "bins" in obj and isinstance(obj.get("bins"), list):
+            return _summarize_volume(obj)
         if "total" in obj or "events" in obj:
             events = obj.get("events") or []
             n_total = obj.get("total") if obj.get("total") is not None else len(events)
@@ -223,7 +284,38 @@ def summarize_result(tool: str, content: str) -> str:
                 fid = events[0].get("_id") or events[0].get("id")
                 if fid:
                     first = f" first={fid}"
-            return f"{n} hit(s){first}"
+            # For an over-broad result, name the dominant behaviour class so the flood's
+            # composition is visible at a glance (scope to a class to escape it).
+            classes = obj.get("rule_groups_breakdown") or []
+            top_class = f" top-class:{classes[0].get('group')}({classes[0].get('count')})" if classes else ""
+            # When a flood has a discriminating axis, name it (and whether needle events
+            # were returned) so the agent sees the residue move at a glance.
+            disc = ""
+            smap = obj.get("selectivity_map") or []
+            d = next((e for e in smap if e.get("role") == "discriminator"), None)
+            if d and d.get("minorities"):
+                nsamp = len(obj.get("minority_sample") or [])
+                # Show the RAREST minority (the needle candidate), not the largest.
+                rarest = d["minorities"][-1].get("value")
+                disc = (f" discriminator:{d['field']} (dom {d.get('dominant')} "
+                        f"{round(d.get('dominant_share', 0) * 100)}%; needle~{rarest}; sample={nsamp})")
+            # When the count is a capped lower bound (total.relation="gte"), the returned
+            # events are an arbitrary slice of a much larger set — say so loudly so the
+            # agent narrows instead of trusting a sample that hides the key events.
+            if obj.get("truncated") or obj.get("total_relation") == "gte":
+                return f">={n} hits (TRUNCATED - narrow / scope by rule.groups){top_class}{disc}{first}"
+            # search_keyword flags: an OR-fallback (no all-term match → whole-host dump)
+            # or an all-term match that is still huge. Both mean "do not trust this".
+            if obj.get("broadened"):
+                return f"{n} hits (OR-FALLBACK: no all-term match; refine terms){first}"
+            if obj.get("too_broad"):
+                return f"{n} hits (TOO BROAD: add a discriminator / narrow window){first}"
+            return f"{n} hit(s){disc}{first}"
+        if "rare_values" in obj:
+            rv = obj.get("rare_values") or []
+            head = ", ".join(f"{b.get('value')}({b.get('count')})" for b in rv[:4])
+            return (f"{obj.get('field', '?')} RARE: {head}" + (" …" if len(rv) > 4 else "")
+                    if rv else f"{obj.get('field', '?')} RARE: (none ≤{obj.get('max_doc_count')})")
         if "top_values" in obj:
             tv = obj.get("top_values") or []
             head = ", ".join(f"{b.get('value')}({b.get('count')})" for b in tv[:3])

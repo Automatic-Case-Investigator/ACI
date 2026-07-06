@@ -24,15 +24,37 @@ def _format_board_context(raw: str) -> str:
     facts = [e for e in entries if e.get("kind") == "fact"]
     hyps = [e for e in entries if e.get("kind") == "hypothesis"]
     ti_results = [e for e in entries if e.get("kind") == "ti_result"]
+    correlations = [e for e in entries if e.get("kind") == "correlation"]
+    kill_chain = [e for e in entries if e.get("kind") == "kill_chain"]
+    query_memos = [e for e in entries if e.get("kind") == "query_memo"]
+    schema_fields = [e for e in entries if e.get("kind") == "schema_fields"]
     lines = [
         "\n\n---",
         "**Findings Board (use this state in the current task):**",
     ]
+    if kill_chain:
+        lines.append(
+            "*Kill-chain coverage (MITRE ATT&CK, auto-generated) — observed tactics in "
+            "kill-chain order, then core phases with NO evidence. Treat each GAP as a "
+            "lead: confirm the phase happened or record it as a confirmed negative:*"
+        )
+        for e in kill_chain:
+            lines.append(f"- {e['content']}")
     if artifacts:
         lines.append("*Found artifacts — use these as pivots where relevant:*")
         for e in artifacts:
             src = f" [{e['source']}]" if e.get("source") else ""
             lines.append(f"- {e['content']}{src}")
+    if correlations:
+        lines.append(
+            "*Entity correlations (auto-generated, grounded) — the relationship "
+            "neighborhood of confirmed entities, with sample event IDs. For IPs the "
+            "both-role view follows `|| cross_role`. Build pivots and findings directly "
+            "from these links; retrieve full events to cite, and do not re-run the same "
+            "correlation by hand:*"
+        )
+        for e in correlations:
+            lines.append(f"- {e['content']}")
     if facts:
         lines.append("*Confirmed facts — treat as established unless contradicted by newer evidence:*")
         for e in facts:
@@ -56,6 +78,21 @@ def _format_board_context(raw: str) -> str:
         for e in ti_results:
             ref = f" <{e['source']}>" if e.get("source") else ""
             lines.append(f"- {e['content']}{ref}")
+    if query_memos:
+        lines.append(
+            "*Query memos — broad query shapes already tried this run. Do NOT reissue "
+            "these; add a discriminator (rule.id, exact path/command, hash, tighter "
+            "window) instead of repeating a shape that returned an unusable hit count:*"
+        )
+        for e in query_memos:
+            lines.append(f"- {e['content']}")
+    if schema_fields:
+        lines.append(
+            "*Known index fields (discovered this run) — reuse these field names "
+            "directly instead of re-fetching the schema:*"
+        )
+        for e in schema_fields:
+            lines.append(f"- {e['content']}")
     lines.append(
         "Use the Findings Board actively: pivot on relevant artifacts, build on confirmed "
         "facts, and report how the current work changes each applicable hypothesis."

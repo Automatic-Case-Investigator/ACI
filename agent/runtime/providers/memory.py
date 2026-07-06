@@ -45,4 +45,7 @@ register(MCPProvider(
     kind=KIND_UTILITY,
     setting_defaults=_defaults,
     build_config=_build,
+    capabilities={
+        "memory_lookup": ("search_feedback", "search_patterns", "list_baseline_entities", "get_baselines"),
+    },
 ))

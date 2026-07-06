@@ -76,7 +76,10 @@ analyst provides a case ID without the tilde, add it before calling any tool.
 Run these three steps before any analysis. Do not skip or reorder them.
 
 1. **`get_case`** — Load the full case record. Capture title, description, severity,
-   status, tags, created/updated timestamps, and any analyst context already present.
+   status, tags, the case `date`, created/updated timestamps, and any analyst context
+   already present. The case `date` is the incident timestamp. `createdAt`,
+   `_createdAt`, `updatedAt`, and `_updatedAt` are TheHive lifecycle/import
+   timestamps and must not be used as SIEM query anchors.
 2. **`list_case_alerts`** — Load the grouped alert summary for the case. Reason from
    `groups` and `time_range` to understand alert volume and distinct event families.
    The case record alone is insufficient for triage — always read the alerts.
@@ -97,8 +100,9 @@ only the additional case/alert detail needed to answer the question.
 - Treat alert fields as pivots, not final proof. Important pivots commonly include
   source, sourceRef, title, type, severity, tags, affected assets, users, IPs, and
   timestamps.
-- Use alert timestamps to derive absolute time windows for SIEM investigation. Do not
-  assume the incident is recent.
+- Use the case `date` field first, then alert timestamps, to derive absolute time
+  windows for SIEM investigation. Do not assume the incident is recent. Do not use
+  TheHive `createdAt` / `_createdAt` as the event time.
 - sourceRef may be a useful correlation hint, but do not assume it is a raw SIEM
   document id unless the alert/source explicitly establishes that.
 

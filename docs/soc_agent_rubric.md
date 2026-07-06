@@ -99,16 +99,16 @@ labels, and section formats match the required templates?*
 
 | Score | Description |
 |---|---|
-| **5** | Triage report contains all seven required sections (Hypothesis, Severity/Confidence, Key Pivots, Confirmed Facts, SOAR-Only/Unverified, Evidence Gaps, Investigation Plan) plus the fenced JSON verdict at the end. Every investigation task answer starts with `## Confirmed Facts`, followed by `## Findings`, `## Hypotheses`, and optionally `## New Leads`. Hypotheses are claims (not questions), stated as single positive sentences, with `[Confirmed]`/`[Refuted]` prefixes applied correctly. None-bullets and placeholder text absent from final output. |
+| **5** | Triage report contains the required `## Triage Summary`, `## Key Evidence`, and `## Investigation Plan` sections plus the fenced JSON verdict at the end. Every investigation task answer contains exactly the three required sections, in order — `## Findings`, `## Hypotheses`, `## New Leads` — with no separate "Confirmed Facts" header; `## Findings` is itself the system of record for grounded evidence. Hypotheses are claims (not questions), stated as single positive sentences, with `[Confirmed]`/`[Refuted]` prefixes applied correctly. None-bullets and placeholder text absent from final output. |
 | **4** | Structure is correct but one section uses a non-standard heading or has a minor formatting slip (e.g. one hypothesis phrased as a question; one `None confirmed.` placeholder that slipped through). |
 | **3** | One required section missing from the triage report. Investigation tasks occasionally use freeform headings ("Task Completion Update") instead of the template. Hypothesis contains a question or a double-negative refuted claim. |
 | **2** | Multiple required sections absent. Freeform prose used instead of template structure in multiple tasks. `[Confirmed]` and `[Refuted]` labels applied to the wrong hypotheses (marks a claim confirmed when evidence disproves it, or refuted when evidence supports it). |
-| **1** | No structure. Output is a single prose paragraph. Required JSON verdict absent. `## Confirmed Facts` header absent from investigation task answers. |
+| **1** | No structure. Output is a single prose paragraph. Required JSON verdict absent. `## Findings` header absent from investigation task answers. |
 
 **Auto-caps:**
 - `[Confirmed]` applied to a hypothesis where the cited evidence disproves the claim, or `[Refuted]` applied where evidence supports it → **max 2** (inverted status is worse than missing status).
 - Triage report missing the fenced JSON verdict block → **max 3**.
-- Investigation task answer omits `## Confirmed Facts` header → facts silently lost from Findings Board; **max 3** for that task.
+- Investigation task answer omits `## Findings` header → facts silently lost from Findings Board; **max 3** for that task.
 
 ---
 
@@ -119,7 +119,7 @@ pivoting and hypothesis tracking, and respect tool-use policies?*
 
 | Score | Description |
 |---|---|
-| **5** | Triage calls `search_patterns`, `get_baselines`, and `search_feedback` before finalising a verdict, and cites results. Triage pulls raw alert bodies for representative groups only (max 4), not all alerts. Investigation uses `search`/`profile_field`/`search_keyword` for evidence; never `list_case_alerts`. Board artifacts are used as pivots in New Leads. Hypothesis updates go through `update_entry` (by entry id) rather than re-adding duplicate rows. `claim_next` and `complete_task` are not called manually during `think`. Seed task creates all queue entries before completing. |
+| **5** | Triage calls `search_patterns`, `get_baselines`, and `search_feedback` before finalising a verdict, and cites results. Triage pulls raw alert bodies for representative groups only (max 4), not all alerts. Investigation uses `search`/`profile_field`/`search_keyword` for evidence; never `list_case_alerts`. Board artifacts are used as pivots in New Leads. Hypothesis updates go through `update_entry` (by entry id) rather than re-adding duplicate rows. `claim_next` and `complete_task` are not called manually during `think`. The seeder agent's queue-population pass creates all entries before the investigation queue is worked. |
 | **4** | Mostly correct. One tool used suboptimally (e.g. `search_feedback` not called, or board queried redundantly, or one hypothesis re-added rather than updated). No critical policy violations. |
 | **3** | `search_patterns`/`search_feedback` not called before verdict. Board not used for pivoting. Hypothesis entries duplicated on the board. `list_case_alerts` called once inside an investigation task. |
 | **2** | Multiple policy violations: `list_case_alerts` used as investigation's primary evidence source; board tools ignored entirely; `claim_next` called manually causing queue routing errors; seed task completes before creating all queue entries. |
@@ -168,5 +168,5 @@ A response passes quality review when:
 | Agent stalls / times out | Tool Fluency | 1 |
 | `[Confirmed]`/`[Refuted]` labels inverted | Communication | 2 |
 | Triage JSON verdict block absent | Communication | 3 |
-| `## Confirmed Facts` header absent from task answer | Communication | 3 |
+| `## Findings` header absent from task answer | Communication | 3 |
 | Pattern name cited not returned by `search_patterns` | Tool Fluency | 2 |

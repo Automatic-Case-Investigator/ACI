@@ -2,24 +2,148 @@
 
 ACI is a Django service that hosts the agent runtime, REST API, live
 dashboard event stream, and MCP integration layer. The runtime is centered on a
-single queue-driven LangGraph graph shared by the `triage` and `investigation`
-agents.
+shared queue-driven LangGraph graph for `triage` and `investigation`, plus a
+package-based conversational orchestrator that owns analyst session state,
+handoffs, and publication back into the dashboard/session record.
+
+## Architectural Philosophy
+
+ACI should evolve as a **thin deterministic harness around a strong general-purpose
+reasoning core**. The runtime's job is to provide structure, durable state,
+tooling, validation, and policy boundaries. The model's job is to interpret,
+plan, prioritize, synthesize, and communicate. When the system fails, prefer
+fixes that improve its general reasoning and reusable workflow rather than
+patches that only handle one historical case.
+
+### Core design principles
+
+1. **Optimize for broad capability, not edge-case accumulation.**
+   Treat each failure as evidence of a broader weakness in reasoning, workflow,
+   tool affordances, or state handling. Prefer fixes that raise overall agent
+   quality across many incidents over narrow logic that only addresses one
+   manifestation.
+
+2. **Improve prompts before adding orchestration code.**
+   If the failure is about interpretation, planning, uncertainty handling,
+   prioritization, or communication, first improve prompts and method. Add code
+   only when the requirement is deterministic, cannot be expressed reliably in
+   prompting, or must be enforced regardless of model quality.
+
+3. **Favor methodology over prescriptions.**
+   Prompt guidance should teach the model how to reason: identify assumptions,
+   separate facts from inferences, anchor on evidence, explain uncertainty,
+   verify field existence before filtering, and move from hypothesis to proof.
+   Avoid large collections of instructions that hard-code "if X, do Y" unless
+   the situation is fundamentally deterministic.
+
+4. **Let graphs encode reusable reasoning workflows.**
+   Graph complexity should come from broadly useful phases such as
+   retrieve -> reason -> verify -> synthesize, not from branching on old
+   failure anecdotes. A graph node should represent a durable workflow step,
+   not a one-off behavioral correction unless that correction protects a
+   general invariant.
+
+5. **Let the LLM do semantic work.**
+   Use the model for ambiguity resolution, planning, prioritization,
+   summarization, contextual judgment, natural-language interpretation, and
+   evidence synthesis. These are semantic tasks where rigid code tends to
+   overfit.
+
+6. **Let code do deterministic work.**
+   Use traditional code for routing, validation, parsing, formatting,
+   structured state transitions, retries, caching, persistence, API
+   orchestration, budgets, cancellations, and capability exposure. Do not ask
+   the model to perform tasks that algorithms can do exactly.
+
+7. **Keep the agent layer platform-agnostic.**
+   The agent's core prompts should describe reasoning method and workflow, not
+   Wazuh-, TheHive-, or vendor-specific quirks. Backend-specific query syntax,
+   field names, and tool semantics belong in MCP/provider guidance so new
+   integrations can be added without rewriting agent cognition.
+
+8. **Standardize MCP capabilities, not provider implementations.**
+   Agents should reason in terms of stable capability roles such as
+   `read_case`, `search_events`, `fetch_event`, `inspect_schema`,
+   `profile_field_values`, `correlate_entity`, and `publish_case_report`.
+   Each provider can map those roles onto its own tool names. This keeps the
+   runtime portable and makes new MCP integrations easier to add.
+
+9. **Separate capabilities from policy.**
+   Core reasoning architecture should answer "how does the agent investigate
+   well?" Policies should answer "what is allowed?", "when may it act?", and
+   "what operational limits apply?" Authorization, safety constraints, and
+   execution boundaries should remain separate from the reasoning loop whenever
+   possible.
+
+10. **Prefer simple, explainable architecture.**
+    When multiple solutions exist, prefer the simpler design unless extra
+    complexity yields substantial general benefit. Every new node, state field,
+    prompt exception, or adapter must justify its ongoing maintenance cost.
+
+### Practical decision order
+
+When designing a fix or new feature, apply this order:
+
+1. Is the problem primarily a reasoning or interpretation failure?
+   Improve prompts and method first.
+2. Is it a reusable workflow failure?
+   Improve the graph or phase structure.
+3. Is it a backend/tool-shape problem?
+   Improve the MCP/provider contract.
+4. Is it deterministic?
+   Solve it in code.
+5. Does the change generalize?
+   If not, avoid it unless it protects correctness, safety, or durability.
+
+### Structural implications for this repository
+
+- `agent/runtime/` should remain a harness layer: orchestration entrypoints,
+  graph assembly, state management, provider contracts, and deterministic
+  runtime guarantees.
+- Prompt layers should stay modular: identity, capabilities, methodology,
+  run-context, and provider guidance should remain conceptually separate.
+- MCP-specific prompt content should live with the MCP server or provider, not
+  inside the platform-agnostic agent prompt.
+- Entry-point files should live higher in the tree, while specialized helpers,
+  transforms, validators, and implementation details should live deeper in the
+  package hierarchy.
+
+In short: **favor general intelligence over special-case handling, prompt
+improvements over orchestration changes, semantic reasoning in the LLM,
+deterministic computation in code, standardized MCP capability contracts over
+backend-specific coupling, and simpler architectures over accumulating
+guardrail machinery.**
 
 ## Runtime Entry
 
 An agent run starts through either the REST API, dashboard orchestrator, CLI, or
-workflow command. All paths converge on `agent.runtime.run.run_agent`, which:
+workflow command. All specialist run paths converge on
+`agent.runtime.engine.run.run_agent`, which:
 
 1. loads the registered `AgentDefinition` by `agent_name`;
-2. marks the `AgentRun` as `running`;
-3. builds an MCP client from the agent's deny-by-default `tool_policy`;
-4. loads MCP prompt guidance and tool schemas;
-5. builds the OpenAI-compatible model client;
-6. composes the platform and agent prompt layers;
-7. invokes the compiled LangGraph graph with an `AgentState`.
+2. applies any DB-backed `AgentConfig` overrides;
+3. marks the `AgentRun` as `running`;
+4. builds an MCP client from the agent's deny-by-default `tool_policy`;
+5. loads MCP prompt guidance and tool schemas;
+6. builds the OpenAI-compatible model client;
+7. composes the platform and agent prompt layers;
+8. invokes the compiled LangGraph graph with an `AgentState`.
 
 The graph returns a final state with `status` and `final_answer`, which is then
 persisted back to `AgentRun`.
+
+The stable high-level runtime entry surfaces are:
+
+- `run_orchestrator`
+- `OrchestratorSession`
+- `dispatch_run`
+- `run_agent`
+- `build_mcp_client`
+- `compose_system_prompt`
+
+The canonical orchestrator import surface is the package
+`agent.runtime.orchestrator`. The historical flat module
+`agent.runtime.orchestrator.py` remains only as a compatibility shim.
 
 Model calls intentionally have no client-side request timeout by default. Local
 vLLM/Ollama turns can run for a long time during tool-heavy investigations, so
@@ -28,39 +152,107 @@ deadlines. Blank or `0` disables the timeout.
 
 ## Agent Registry
 
-Agents are registered in `agent/agents/registry.py` using `AgentDefinition`.
-The current routable agents are:
+Agents are registered in `agent/agents/registry.py` using `AgentDefinition`
+(`agent/agents/base.py`). Three agents are registered:
 
-| Agent | Role | Tool Policy | Budget |
-|---|---|---|---|
-| `triage` | Reads TheHive case context, assesses severity/category, and returns a triage report with a prioritized investigation plan. | `aci-thehive`, `aci-taskqueue`, `avfs` | 20 steps, 40 tool calls |
-| `investigation` | Runs deeper SIEM-backed investigation, writes evidence/findings to AVFS, and produces a final report pointer. | `aci-thehive`, `aci-wazuh`, `aci-taskqueue`, `avfs` | 100 steps, 100 tool calls |
+| Agent | Role | Tool Policy | Budget | Orchestrator-routable |
+|---|---|---|---|---|
+| `triage` | Reads SOAR case context, checks nearby SIEM evidence and memory, assesses severity/category, and returns a triage report with a prioritized investigation plan. | `aci-thehive`, `aci-wazuh`, `aci-taskqueue`, `aci-memory`, `avfs` | 12 steps, 18 tool calls | yes |
+| `investigation` | Performs deeper SIEM-backed investigation, enriches artifacts, uses the findings board and memory, and produces a grounded final report. | `aci-thehive`, `aci-wazuh`, `aci-taskqueue`, `aci-board`, `aci-memory`, `avfs` | 40 steps, 60 tool calls | yes |
+| `seeder` | Internal-only. Parses a completed triage report and populates the investigation task queue (see [Seeder Agent](#seeder-agent)). Never appears in orchestrator routing. | `aci-taskqueue` | 20 steps, 25 tool calls | no |
 
 `triage` is marked as `produces_handoff`; `investigation` is marked as
 `consumes_handoff`. The orchestrator uses those flags to pass structured
 `Handoff` data through `AgentRun.metadata` instead of relying on prompt-string
-parsing.
+parsing. `seeder` is invoked directly by the investigation agent's `seed`
+node, not by the orchestrator.
+
+## Prompt Composition
+
+Prompt composition is intentionally layered:
+
+- platform-agnostic agent identity, capabilities, and reasoning method live in
+  `agent/prompts/`;
+- runtime context assembly lives in `agent.runtime.config.prompts` and
+  `agent.runtime.config.prompt_sections`;
+- provider capability contracts are rendered separately from core reasoning
+  instructions;
+- MCP-specific tool semantics come from MCP server prompts, not from the core
+  agent prompt;
+- orchestrator-specific prompt behavior lives under
+  `agent.runtime.orchestrator/`.
+
+The run-context composer keeps these responsibilities separate:
+
+- run metadata and budgets;
+- tool availability;
+- provider capability contracts;
+- orchestrator handoff/session context;
+- restart/resume inherited context;
+- MCP guidance;
+- preserved analyst conversation.
+
+This boundary keeps the agent prompt portable while allowing provider-specific
+guidance to evolve independently.
+
+### Role altitude ladder
+
+The assembled prompt is organized as an altitude ladder of headed sections, carried
+entirely inside the standard LangChain message types (no provider-specific "developer"
+role) so it runs identically on the self-hosted OpenAI-compatible endpoint:
+
+- The `SystemMessage` (`compose_system_prompt`) opens with a `# SYSTEM` section
+  (immutable identity / safety / tool behavior — the `platform` layer) followed by a
+  `# DEVELOPER` section (per-agent workflow and methodology — the remaining layers).
+- Each node's `HumanMessage` carries a `# USER` section (the current task) followed by
+  a `# CONTEXT` section (live board/queue state and evidence).
+
+The section headers are plain text, so the four-part structure is provider-agnostic:
+it degrades to ordinary prompt text on any `ChatModel` while giving a stronger model a
+clear identity/method/task/state separation.
 
 ## Agent Graph
 
-The graph is built in `agent/runtime/graph.py` with these nodes:
+The graph is built from the package under `agent/runtime/graph/`. The package
+re-exports historical names through `agent.runtime.graph` (a dynamic re-export in
+`__init__.py`), but implementation is split across narrower modules, each owning one
+concern:
+
+| Module | Owns |
+|---|---|
+| `builder` | Assembles the `StateGraph`: registers nodes and the conditional routing between them. |
+| `state` | The `AgentState` typed dict threaded through every node. |
+| `nodes_loop` | The per-task tool loop nodes: `seed`, `claim`, `think`, `use_tools`, plus post-tool enrichment (correlation, kill-chain, TI). |
+| `interpretation/` | The `interpret` node, split into `ledger` (durable per-task memory), `pivots` (candidate scoring/selection), `decisions` (next-action logic), `prompt` (model-call rendering), and `node` (the node + glue). |
+| `nodes_flow/` | The post-task nodes, split into `assess` (self-review + synthesis), `pivot` (board + lead follow-ups), and `completion` (`finish`, verdict contract, reassessment, publication), over a shared helper module. |
+| `observation` | Deterministic normalization of a tool-result batch into observation state (signals, snapshots, pivot candidates). |
+| `toolio` | Tool execution plumbing, result capping, and task-queue calls. |
+| `validation` | Report/board validation, escalation facts, and board compromise-indicator surfacing. |
+| `synthesis` / `publication` | Investigation-summary building and durable final-output writing. |
+| `reflection` / `findings_model` / `lead_model` | Model-driven per-task review, findings verification, and lead validation. |
+| `parsing` / `sanitize` / `timeutil` / `board` / `leads` | Shared leaf helpers: markdown/regex parsing, history sanitization, time/pivot utilities, board context, lead queueing. |
+
+The active top-level graph stages are:
 
 | Node | Responsibility |
 |---|---|
-| `seed` | Ensure the agent has initial queue work. Triage creates one triage task. Investigation creates a handoff or fallback task only when its queue has no pending work. |
+| `seed` | Ensure the agent has initial queue work. Triage creates one triage task. Investigation calls the `seeder` agent for a normal triage handoff, or creates a resume/fallback task directly, only when its queue has no pending work (see [Seeder Agent](#seeder-agent)). |
 | `claim` | Stop if cancellation was requested; otherwise atomically claim the highest-priority pending task from `aci-taskqueue`. |
-| `intent` | Call the model without tools, stream a free-form public reasoning narrative in Markdown, and persist it before any tool-capable model call. |
-| `think` | Build or continue the model conversation for the current task, compact context when the prompt approaches 80% of the model provider's configured context length (Settings → Model provider), and call the model with allowed MCP tools. |
-| `use_tools` | Execute model-requested tools, cap oversized tool results before feeding them back to the model, pre-create AVFS parent directories for writes, and update `memory.md` indexes after successful AVFS writes. |
-| `assess` | Complete the claimed task with a summary. Triage has a fallback recovery prompt when the model stops without returning report text. Investigation has a **seed guard**: if the "Populate investigation queue" seed task finishes without any `create_task` calls, `assess` re-injects a correction message and routes back to `think` instead of forwarding to `pivot`, giving the model another chance to populate the queue. |
-| `finish` | Write the final investigation report stub through the AVFS workspace writer, compute `completed` vs `incomplete_budget`, or preserve `cancelled`. |
-| `reassess_verdict` | **Investigation only.** Runs after `finish`. Extracts the triage verdict from the handoff and compares it against the investigation synthesis verdict. If they agree, tags `state["verdict"]` with `triage_verdict` at zero cost. If they conflict, fires one focused model call — given the full investigation narrative plus both verdicts — to resolve which is correct, then overwrites `state["verdict"]` with the resolved result. The resolved verdict carries `triage_verdict` (the original triage call) and `reassessment_reason` (one-sentence explanation). If no model is available or the call fails, synthesis verdict is preserved and tagged. |
+| `think` | Build or continue the model conversation for the current task, compact context when the prompt approaches 80% of the model provider's configured context length (Settings → Model provider), and call the model with allowed MCP tools. There is no separate pre-tool "intent" stage in this graph — that streamed public-reasoning mechanism is orchestrator-only (see [Orchestrator And Session Publication](#orchestrator-and-session-publication)). |
+| `use_tools` | Execute model-requested tools, cap oversized tool results before feeding them back to the model, expand AVFS `~` paths, deterministically extract artifacts (including decoded hex/base64/URL-encoded payloads) from event-shaped JSON, auto-correlate confirmed entities, build the kill-chain view, and trigger TI enrichment. |
+| `interpret` | Mandatory post-tool reasoning checkpoint (`agent/runtime/graph/interpretation/`). Runs after every tool batch: normalizes the batch into an observation, updates the durable per-task ledger (confirmed findings, hypothesis, query-trial memory, pivots), surfaces board compromise indicators the model must disposition, and decides continue-vs-assess against the task's success criteria. Routes back to `think` to continue the task or forward to `assess` when the objective is answered. |
+| `assess` | Complete the claimed task with a summary. For `investigation`, runs the [per-task self-review](#per-task-self-review) (`agent/runtime/graph/reflection.py`) before allowing completion — a single model-driven review that can route back to `think` with one consolidated `needs_more_work` correction instead of a fixed cascade of separate guards. |
+| `pivot` | Investigation-only evidence-to-follow-up phase: pushes confirmed `## Findings` into the Findings Board (gated by the self-review's grounding/novelty verdicts), checks confirmed compromise artifacts on the board for an unposted escalation, validates `## New Leads` (model-assisted, deduplicated against the existing queue), and queues approved follow-up tasks. |
+| `finish` | Finalize the run and compute `completed` vs `incomplete_budget`, or preserve `cancelled`. |
+| `verdict_contract` | Generates or repairs the canonical fenced-JSON diagnosis verdict block from the final report. |
+| `reassess_verdict` | **Investigation only.** Compares triage and investigation verdicts and resolves conflicts with a focused model call only when needed. |
+| `publish_finish` | Writes durable final outputs such as `final.md` and posts the report to the SOAR case. |
 
 ```mermaid
 flowchart TD
     Start(["AgentRun created or resumed"]) --> Run["run_agent loads AgentDefinition"]
     Run --> MCP["Build MCP client from tool_policy"]
-    MCP --> Prompt["Compose platform + agent prompt layers"]
+    MCP --> Prompt["Compose layered system prompt"]
     Prompt --> Seed["seed"]
 
     Seed --> Claim["claim"]
@@ -69,13 +261,10 @@ flowchart TD
     Cancelled -- no --> HasTask{"claimed task?"}
 
     HasTask -- no --> Finish
-    HasTask -- yes --> Intent["intent: generate public reasoning summary"]
-    Intent --> IntentStream["stream intent_delta events"]
-    IntentStream --> IntentDone["persist completed intent"]
-    IntentDone --> Think["think"]
+    HasTask -- yes --> Think["think"]
 
     Think --> Compact{"context >= 80% limit?"}
-    Compact -- yes --> Summarize["compact older turns"]
+    Compact -- yes --> Summarize["compact old non-evidence context"]
     Compact -- no --> Model["call model with allowed tools"]
     Summarize --> Model
 
@@ -83,27 +272,24 @@ flowchart TD
     ToolCalls -- yes --> UseTools["use_tools"]
     UseTools --> Call["emit call event"]
     Call --> Execute["execute MCP tool"]
-    Execute --> AVFSWrite{"AVFS write?"}
-    AVFSWrite -- yes --> Memory["update nearest and parent memory.md indexes"]
-    AVFSWrite -- no --> ToolResult["append ToolMessage"]
-    Memory --> ToolResult
-    ToolResult --> Intent
+    Execute --> Enrich["extract artifacts, auto-correlate,\nbuild kill-chain, TI enrich"]
+    Enrich --> Interpret["interpret: update ledger,\ndecide next action"]
+    Interpret --> InterpretRoute{"objective answered?"}
+    InterpretRoute -- no, continue --> Think
+    InterpretRoute -- yes --> Assess["assess: per-task self-review"]
 
-    ToolCalls -- no --> Assess["assess task"]
-    Assess --> SeedGuard{"seed guard\n(inv only): queue\nempty after seed?"}
-    SeedGuard -- yes → re-inject correction --> Think
-    SeedGuard -- no --> Budget{"budget exhausted?"}
+    ToolCalls -- no --> Assess
+    Assess --> NeedsWork{"needs_more_work?"}
+    NeedsWork -- yes, budget remains --> Think
+    NeedsWork -- no --> Pivot["pivot\n(investigation only)"]
+    Pivot --> Budget{"budget exhausted?"}
     Budget -- no --> Claim
     Budget -- yes --> Finish
 
-    Finish --> Reassess["reassess_verdict\n(investigation only)"]
-    Reassess --> Status{"final status"}
-    Status --> Completed["completed"]
-    Status --> Incomplete["incomplete_budget"]
-    Status --> Stopped["cancelled"]
-    Completed --> End(["persist AgentRun result"])
-    Incomplete --> End
-    Stopped --> End
+    Finish --> VerdictContract["verdict_contract"]
+    VerdictContract --> Reassess["reassess_verdict\n(investigation only)"]
+    Reassess --> Publish["publish_finish"]
+    Publish --> End(["persist AgentRun result"])
 ```
 
 ## Queue Semantics
@@ -140,19 +326,66 @@ Investigation finalization reads these task summaries into the structured run
 result, so the orchestrator can distinguish completed work, incomplete work, and
 tasks that completed without a substantive conclusion.
 
-### Seed Guard
+### Per-Task Self-Review
 
-Investigation runs start with a "Populate investigation queue" seed task that instructs
-the model to call `create_task` for every item in the triage plan. If the model completes
-that task without any `create_task` calls (an empty response, an early stop, or a model
-that writes a narrative instead of queuing work), `assess` detects the empty queue,
-withholds task completion, re-injects a correction `HumanMessage`, and returns
-`status="seed_guard"` — which routes the graph back to `think` rather than to `pivot`.
+Older revisions enforced task quality with a fixed cascade of separate guard
+nodes (a triage-SIEM-query guard, an investigation-SIEM-query guard, a
+broad-query guard, a depth guard, a summary-format guard, and an
+incomplete-pivot guard), each hand-coding one failure mode as a Python
+`if`-branch with its own retry counter. Per the design philosophy's
+"prefer prompts and reusable workflow over edge-case branching", this was
+replaced with a single **per-task self-review** (`agent/runtime/graph/reflection.py:
+review_task_model`): one model call that judges the task holistically and
+returns a `TaskReview` (`conclude` or `keep_working`, plus per-`## Findings`
+bullet grounding/novelty verdicts).
 
-The seed guard fires only for the named seed task and only for the `investigation` agent.
-It respects the step/tool-call budget: if budget is already exhausted when the seed guard
-triggers, the run is routed to `finish` instead of looping back. This prevents an infinite
-correction loop while still allowing the model a second attempt under normal conditions.
+The review is given deterministic *signals* to ground its judgment, computed in
+code rather than guessed by the model:
+
+- `evidence_queries` — count of genuine evidence-retrieval tool calls this task;
+- `hit_count` / `hit_ceiling` — whether the most recent search result is at or
+  near the unusable result ceiling;
+- `unpivoted_iocs` — confirmed network indicators with no corresponding
+  `## New Leads` pivot;
+- `unqueried_clusters` — `get_event_volume` post-peak activity windows that
+  were profiled but never followed up with a raw query;
+- `unreported_compromise_artifacts` — confirmed compromise indicators already
+  on the Findings Board (e.g. a decoded reverse-shell command) that are not
+  yet reflected in this task's `## Findings`.
+
+`assess` re-injects the review's feedback as one consolidated correction and
+sets `status="needs_more_work"`, which `_route_assess` (`graph/builder.py`)
+routes back to `think` if budget remains. `reflection_retries` bounds the
+loop (default 2 retries); a **convergence guard**
+(`reflection_evidence_at_last_nudge`) suppresses a further nudge if the prior
+correction produced no new evidence query, so a task cannot churn forever on
+orientation-only turns. The review is fail-open: if the model is unavailable
+or the call fails, the task falls back to the deterministic non-empty-summary
+check below and completes rather than stalling the run.
+
+### Seeder Agent
+
+A normal triage-handoff seed (i.e. not a resume) populates the investigation
+queue through the dedicated `seeder` agent (`agent/runtime/engine/seeder_runner.py:
+run_seeder`) instead of asking the investigation model to call `create_task`
+directly. Seeding is two-phase:
+
+1. **Deterministic extraction.** Plan items are parsed straight out of the
+   triage report's `## Investigation Plan` and written with direct
+   `create_task` calls — no model involvement. This guarantees exactly one
+   task per plan item regardless of model behavior, which is what the old
+   "seed guard" used to have to re-prompt for.
+2. **Model pass for gaps.** A bounded second pass lets the model add tasks the
+   plan may have omitted (e.g. an explicit C2-destination pivot or
+   initial-access-vector task) and verify completeness via `list_tasks`.
+   Every `create_task` call in this pass — direct or model-proposed — is
+   checked against a **deterministic dedup backstop**
+   (`agent/runtime/graph/leads.py: duplicate_existing_task`, the same matcher
+   the pivot node's lead validator uses) before it is executed, so the model
+   cannot queue two near-identical tasks in the same seeding pass.
+
+`seeder` is `orchestrator_routable=False`: it never appears in orchestrator
+routing and is only ever invoked from `seed`.
 
 ## Live Model Streaming
 
@@ -174,16 +407,22 @@ Tool-call chunks are preserved by LangChain chunk addition. Chunks without text
 still contribute to the accumulated final message but do not create visible
 stream events.
 
-## Public Reasoning Before Tools
+## Public Reasoning Before Tools (Orchestrator)
 
-Every tool-capable cycle is two-phase:
+This mechanism lives in `agent/runtime/analysis/intent.py`
+(`generate_public_intent`) and is consumed only by the orchestrator's own
+turn loop (`agent/runtime/orchestrator/driver.py`) — **not** by the `triage`
+or `investigation` LangGraph nodes, which call the tool-bound model directly
+from `think` with no separate pre-tool intent phase.
 
-1. `intent` calls an unbound text model and requests a state-grounded public
-   progress summary.
+Each orchestrator turn that may call a tool is two-phase:
+
+1. `generate_public_intent` calls an unbound text model and requests a
+   state-grounded public progress summary.
 2. Each provider delta is emitted as transient `intent_delta`.
 3. The accumulated statement is persisted as a durable `intent` event.
-4. `think` calls the tool-bound model.
-5. `use_tools` emits `call` and only then invokes the MCP tool.
+4. The orchestrator calls the tool-bound model and, if it requests tools,
+   emits `call` and then invokes them.
 
 The event ordering contract is:
 
@@ -202,10 +441,9 @@ headings, but follows no fixed schema.
 This provides the operational information normally sought from visible
 "thinking aloud" without exposing private chain-of-thought. Prompts prohibit
 token-level reasoning, exhaustive step-by-step internal deliberation, predicted
-results, and unsupported claims. The contract is independent of domain, task
-type, capability set, and execution environment. The next action may invoke a
-capability, produce output, request information, wait, stop, or otherwise advance
-or conclude the objective. If generation is empty, unsupported, or fails, no
+results, and unsupported claims. The next action may invoke a capability,
+produce output, request information, wait, stop, or otherwise advance or
+conclude the objective. If generation is empty, unsupported, or fails, no
 synthetic intent is emitted and execution continues to the action model.
 
 Cancellation is checked after intent generation and before execution. An analyst
@@ -213,14 +451,33 @@ can therefore stop a run after seeing its intended action without allowing the
 announced tool to run.
 
 The dashboard maintains separate stream state for final orchestrator answers and
-public reasoning narratives. Triage and investigation narratives render inside
-their corresponding agent trace. Markdown is rendered as deltas arrive in real
+public reasoning narratives. Markdown is rendered as deltas arrive in real
 time and is also rendered from the durable event after reload. Completed
 narratives are durable; partial deltas are intentionally not replayed.
 
-Guaranteed intent adds one text-only model request per tool-capable action cycle.
-This increases latency and model usage in exchange for strict visibility before
-side effects.
+Guaranteed intent adds one text-only model request per orchestrator
+tool-capable turn. This increases latency and model usage in exchange for
+strict visibility before side effects.
+
+## Orchestrator And Session Publication
+
+The orchestrator is a separate package runtime under
+`agent/runtime/orchestrator/` with dedicated `messages`, `session`, `tools`,
+`prompts`, and `driver` modules. It is responsible for analyst conversation
+state, specialist routing, and durable analyst-visible transcript updates.
+
+Specialist completion is normalized through one publication path:
+
+- orchestrator-triggered specialist completion updates the shared
+  `OrchestratorSession`;
+- direct resume and restart paths republish through
+  `agent.dashboard.runner.session_state.publish_specialist_result_to_session`;
+- shared session mutation logic lives in
+  `agent.runtime.orchestrator.specialist_sync`.
+
+This keeps analyst-visible session state, verdict propagation, and resumed
+specialist reports aligned regardless of whether the specialist finished through
+the orchestrator tool loop or a direct continuation endpoint.
 
 ## MCP And Tool Policy
 
@@ -233,38 +490,115 @@ runtime injects `ACI_CASE_ID`, `ACI_RUN_ID`, and `ACI_AGENT_NAME` into configure
 stdio MCP environments so queue-scoped servers can enforce platform-owned
 identity.
 
+### Standardized provider capability contract
+
+Agents should reason about provider access through stable capability roles, not
+by assuming one vendor's tool names. Built-in providers therefore declare a
+capability map from a standardized role to one or more concrete MCP tools.
+
+- Every `siem` provider must expose:
+  `search_events`, `fetch_event`, `inspect_schema`, `profile_field_values`
+- Every `soar` provider must expose:
+  `read_case`, `list_case_alerts`, `read_alert`, `publish_case_report`
+- Utility and filesystem providers can also advertise standardized roles such
+  as queue writes, board writes, memory lookup, and workspace read/write.
+- Providers also declare whether MCP instructions are required before their
+  tools may be exposed for a run.
+
+This keeps agent prompts vendor-neutral while still letting each MCP server
+publish exact tool names, query syntax, and platform-specific usage rules in its
+own MCP prompt guidance.
+
 The graph applies one extra policy rule: `triage` does not expose `create_task`
 to the model. Triage returns a report and proposed plan; the orchestrator decides
 whether to start investigation, and the investigation agent converts the handoff
 into its own queue work.
 
+### SIEM Query Robustness (Wazuh)
+
+`aci-mcp-servers/aci-wazuh/aci_wazuh/client.py` (`WazuhClient`) adds
+deterministic guards around model-constructed query DSL, surfaced back to the
+model as a `hint`/`note` on the tool result rather than failing silently:
+
+- **Malformed-query hints.** `_query_error_hint` maps a known Elasticsearch
+  parse failure (e.g. a `should` clause nested incorrectly) to one actionable
+  correction instead of a raw stack trace.
+- **Timestamp-in-keyword stripping.** `_strip_temporal_tokens` removes
+  ISO-8601 tokens a model mistakenly placed inside `search_keyword` terms
+  (timestamps belong in `time_range`); leaving them in forces the
+  any-term fallback to match almost the whole index.
+- **`should`-without-`must` detection.** `_has_noop_should` recursively
+  scans a `bool` query for a `should` clause with no `must` and no
+  `minimum_should_match`. Under Elasticsearch/OpenSearch defaults this shape
+  is **scoring-only** — the query silently matches everything else in scope
+  (commonly just the time-range `filter`) instead of being narrowed by the
+  `should` terms. This is the most common way a query that *looks* narrow
+  returns the whole window; `search()` attaches a `note` explaining the fix
+  whenever it fires.
+
+**Agent-name is not a guaranteed-unique identity.** A Wazuh `agent.name`
+display label can be shared by multiple distinct monitored hosts (verified
+live: 13 distinct `agent.id`/`agent.ip` values shared one `agent.name` in a
+production dataset). Investigation and platform prompt guidance teach
+verifying cardinality via `profile_field("agent.id", ...)` before treating
+events scoped only by `agent.name` as one host's activity — the same
+"confirm a field/value exists before filtering" methodology extended to
+"confirm a grouping key is actually unique before merging by it."
+
 ## Findings Board
 
-`aci-board` stores per-run Findings Board entries with three kinds:
+`aci-board` stores per-run Findings Board entries. The original three
+structural kinds (model-populated) have been joined by four deterministic,
+backend-populated kinds added by the `use_tools` enrichment pipeline:
 
 | Kind | Meaning | Population |
 |---|---|---|
-| `artifact` | A normalized entity observed in a retrieved native event. | Deterministic backend extraction after tool execution. |
-| `fact` | A confirmed, evidence-backed finding. | Structural parsing of `## Confirmed Facts` and explicit fact updates. |
+| `artifact` | A normalized entity observed in a retrieved native event, including a payload decoded from hex/base64/URL-encoding. | Deterministic extraction (`agent/runtime/analysis/artifacts.py`) after every successful investigation tool result. |
+| `fact` | A confirmed, evidence-backed finding. | Structural parsing of `## Findings`, gated by the [per-task self-review](#per-task-self-review)'s grounded/novel verdicts — only bullets the review confirms are new and event-cited become facts. |
 | `hypothesis` | An explanation or lead requiring confirmation or refutation. | Structural parsing of `## Hypotheses`, triage handoff hypotheses, and generated leads. |
+| `correlation` | A confirmed entity's co-occurring neighborhood (other entities, fields, sample event IDs). | Deterministic, automatic — `_auto_correlate_entities` fires `correlate_entity` for newly confirmed high-value entities without a model call. |
+| `kill_chain` | The MITRE ATT&CK tactic/technique coverage observed so far, plus detected gaps. | Deterministic, automatic — `_build_kill_chain` (`agent/runtime/analysis/kill_chain.py`) fires `correlate_techniques` and can queue gap-coverage follow-up tasks. |
+| `query_memo` | A record of a SIEM query shape that returned an unusably broad/truncated result. | Deterministic — `agent/runtime/analysis/query_memo.py`, so later tasks see it and avoid reissuing the same broad shape. |
+| `ti_result` | Threat-intelligence enrichment for a confirmed artifact (e.g. VirusTotal verdict). | Deterministic, async, rate-limited (`agent/ti/enricher.py`); optional, only when a TI provider is configured. |
 
-Artifact extraction runs in `agent.runtime.artifacts` directly after successful
-investigation tool results. It does not ask the model to recognize entities and
-does not invoke a board MCP tool. Only allow-listed event fields are accepted.
-Nested Elasticsearch/Wazuh shapes are flattened, values are validated and
-normalized, and entries retain the native event ID as their source. The initial
-types include event IDs, IPs, MD5/SHA1/SHA256 hashes, domains, hosts, users,
-processes, and file paths.
+Artifact extraction does not ask the model to recognize entities and does not
+invoke a board MCP tool. Only allow-listed event fields are accepted. Nested
+Elasticsearch/Wazuh shapes are flattened, values are validated and normalized,
+and entries retain the native event ID as their source. Recognized types
+include event IDs, IPs, MD5/SHA1/SHA256 hashes, domains, hosts, users,
+processes, file paths, and **decoded commands** — long hex/base64/URL-encoded
+tokens are decoded and re-scanned for compromise-indicator patterns (e.g. a
+reverse-shell one-liner hidden in a base64 URL parameter), independent of
+whether the agent itself thought to decode the value.
 
 Before each non-seed investigation task, the graph injects the full Findings
 Board into model context:
 
-- artifacts are proposed as pivots;
+- artifacts are proposed as pivots, and decoded-command artifacts are
+  retrieved evidence the agent must surface, not re-derive;
 - facts are treated as established unless newer evidence contradicts them;
 - hypotheses must be tested, refined, confirmed, refuted, or left explicitly
   unresolved.
 
-The final investigation summary includes all three categories before task
+**Board-driven compromise detection.** The `interpret` must-disposition block,
+escalation (an immediate case comment when active compromise is confirmed), and
+the per-task self-review's `unreported_compromise_artifacts` signal all read
+compromise-relevant evidence directly off the board (`agent/runtime/graph/
+validation.py: _board_compromise_facts`), not only from the agent's own
+narrative. Two deterministic triggers surface an entry: a narrative reverse-shell /
+C2 indicator, **or** any command the decode layer recovered from an encoded field
+(marked `[decoded]`/`[hex-decoded]`). The decode marker is technique-agnostic on
+purpose — a `mysql ... select * from wp_users` credential dump or an offline
+password-cracker invocation is surfaced the same as a `/dev/tcp/...` reverse shell;
+the code only asserts "an attacker hid a command here, account for it," and the
+model classifies the kill-chain phase in context (it has the full board). Decoded
+commands are ranked ahead of narrative matches so the deterministic ground truth is
+never crowded out of the interpret block's cap. This closes a gap where the decode
+layer had already extracted a confirmed indicator but the agent's literal-string
+search for it came back empty and it recorded a false negative — the board's own
+decoded artifact is now authoritative regardless of what the agent wrote.
+
+The final investigation summary includes the structural categories before task
 summaries. This lets the orchestrator understand both accumulated knowledge and
 the state of unresolved reasoning across the run.
 
@@ -310,17 +644,27 @@ messages before they re-enter history. If vLLM still reports an unexpected
 message-header parse failure, `think` retries once with more aggressive history
 sanitization.
 
-## Future Automatic Workflows
+## Workflows And Webhooks
 
-Automatic `new_case` and `new_alert` workflows are not implemented by the
-streaming-intent change. The existing trigger registry and transport-agnostic
-`dispatch_run` entry point remain extension seams for future work.
+Automatic workflows exist, but are globally disabled by default and gated by
+runtime settings plus per-trigger enablement.
 
-Because intent generation lives in the shared graph rather than dashboard code,
-future headless triage and investigation runs will inherit the same pre-tool
-intent ordering. A future workflow implementation must add event correlation,
-deduplication, alert-to-case resolution, and triage-to-investigation policy
-without routing headless events through the interactive orchestrator.
+Supported bindings:
+
+- `new_case` -> `triage`
+- `new_alert` -> `triage`
+
+Configured triggers expose:
+
+```text
+POST /api/agent/webhooks/<trigger_id>/
+```
+
+The compatibility endpoint remains:
+
+```text
+POST /api/agent/webhooks/thehive/
+```
 
 ## Configuration Reference
 
@@ -328,11 +672,11 @@ without routing headless events through the interactive orchestrator.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `LLM_BASE_URL` | Required | OpenAI-compatible LLM API endpoint |
-| `LLM_API_KEY` | Required | API authentication key |
-| `LLM_MODEL_NAME` | Required | Model identifier (e.g., `gpt-4`, `llama2`) |
-| `LLM_TIMEOUT` | 0 (disabled) | Request timeout in seconds |
 | `SECRET_KEY` | Required | Django secret key (auto-generated) |
+| `WORKFLOWS_ENABLED` | `false` | Fallback global workflow enable switch when DB runtime config is unset |
+
+Model provider settings are primarily DB-backed through `ModelProviderConfig`
+via Dashboard -> Settings. `.env` is now mainly bootstrap and fallback config.
 
 ### SIEM Integration (Wazuh)
 
@@ -365,6 +709,7 @@ without routing headless events through the interactive orchestrator.
 |----------|---------|-------------|
 | `TASKQUEUE_DB_PATH` | `taskqueue.db` | Task queue SQLite database path |
 | `BOARD_DB_PATH` | `board.db` | Findings board SQLite database path |
+| `TI_CACHE_DB_PATH` | `ti_cache.db` | Threat-intelligence cache SQLite database path |
 
 ## API Reference
 
@@ -421,6 +766,10 @@ POST /api/agent/runs/<run_id>/resume/
 Authorization: Bearer <token>
 ```
 
+When the resumed run belongs to an interactive orchestrator session, completion
+is republished into analyst-visible session state through the same specialist
+publication path used by orchestrator-triggered completions and restarts.
+
 ### Task Queue
 
 ```
@@ -446,6 +795,8 @@ GET /api/agent/cases/<case_id>/reports/latest/
 | `grep_semantic failed: {ok: false, error: ...}` | AVFS container not running or `AVFS_AUTH_TOKEN` is the literal `change-me-avfs-token` |
 | `add_case_comment` 404 from TheHive | Tool was removed; old sessions may have fired this. New runs use `post_case_report` only |
 | `parsing_exception: Unknown key for START_OBJECT in [time_range]` from Wazuh | Model double-wrapped the search request. The client auto-unwraps this |
+| Search result has a `note` about `should` being "SCORING-ONLY" | The query's `should` clause has no `must`/`minimum_should_match`, so it did not actually filter — see [SIEM Query Robustness](#siem-query-robustness-wazuh) |
+| Investigation results from one `agent.name` look inconsistent across runs | `agent.name` may not be unique in this index — check `agent.id` cardinality before trusting a name-scoped query as one host |
 | Django migration errors on startup | Run `python manage.py migrate` |
 | Empty investigation report | Local LLM may be too small or out of context; use a 13B+ model |
 
@@ -453,17 +804,13 @@ GET /api/agent/cases/<case_id>/reports/latest/
 
 ### Debug scripts
 
-Debug and diagnostic scripts are in `.claude/debug/`:
+Local inspection scripts are in `scripts/dev/`:
 
 ```bash
-PYTHONPATH=. python .claude/debug/check_run.py
+python scripts/dev/inspect_events.py --session <id> --latest 30
+python scripts/dev/poll.py --session <session_id>
+python scripts/dev/submit.py --question "Triage case ~247152824" --poll
 ```
-
-Common scripts:
-- `check_run.py` — Inspect a specific run's tasks
-- `check_session.py` — Inspect a session's events
-- `check_board.py` — Inspect the findings board
-- `dump_session.py` — Export all events for a session
 
 ### Making changes
 

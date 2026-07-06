@@ -7,6 +7,12 @@ _REGISTRY: dict[str, MCPProvider] = {}
 
 
 def register(provider: MCPProvider) -> MCPProvider:
+    missing = provider.missing_required_capabilities()
+    if missing:
+        names = ", ".join(missing)
+        raise ValueError(
+            f"Provider {provider.key!r} ({provider.kind}) is missing required standardized capabilities: {names}"
+        )
     _REGISTRY[provider.key] = provider
     return provider
 

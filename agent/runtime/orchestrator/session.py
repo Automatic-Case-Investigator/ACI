@@ -41,6 +41,7 @@ class OrchestratorSession:
     last_triage_case_id: Optional[str] = None
     last_triage_report: Optional[str] = None
     last_triage_run_id: Optional[str] = None
+    last_triage_status: Optional[str] = None
     last_triage_verdict: Optional[dict] = None
     last_investigation_report: Optional[str] = None
     last_investigation_status: Optional[str] = None
@@ -60,6 +61,7 @@ class OrchestratorSession:
             "last_triage_case_id": self.last_triage_case_id,
             "last_triage_report": self.last_triage_report,
             "last_triage_run_id": self.last_triage_run_id,
+            "last_triage_status": self.last_triage_status,
             "last_triage_verdict": self.last_triage_verdict,
             "last_investigation_report": self.last_investigation_report,
             "last_investigation_status": self.last_investigation_status,
@@ -79,6 +81,7 @@ class OrchestratorSession:
         self.last_triage_case_id = data.get("last_triage_case_id", self.last_triage_case_id)
         self.last_triage_report = data.get("last_triage_report", self.last_triage_report)
         self.last_triage_run_id = data.get("last_triage_run_id", self.last_triage_run_id)
+        self.last_triage_status = data.get("last_triage_status", self.last_triage_status)
         self.last_triage_verdict = data.get("last_triage_verdict", self.last_triage_verdict)
         self.last_investigation_report = data.get("last_investigation_report", self.last_investigation_report)
         self.last_investigation_status = data.get("last_investigation_status", self.last_investigation_status)

@@ -38,4 +38,13 @@ register(MCPProvider(
     kind=KIND_SOAR,
     setting_defaults=_defaults,
     build_config=_build,
+    capabilities={
+        "read_case": ("get_case",),
+        "list_case_alerts": ("list_case_alerts",),
+        "read_alert": ("get_alert",),
+        "publish_case_report": ("post_case_report",),
+        "find_related_cases": ("get_similar_cases",),
+        "update_case_fields": ("update_case",),
+        "post_case_note": ("post_case_comment",),
+    },
 ))

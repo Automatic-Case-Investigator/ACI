@@ -9,11 +9,12 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from ..infra.logbus import emit, src_label, summarize_result
 
 from .board import _entry_line
-from .parsing import _CONFIRMED_FACTS_RE, _FINDINGS_RE, _HYPOTHESES_RE, _fact_dedup_key, _is_none_bullet, _is_provenance_only, _looks_like_lead, _normalize_fact_key, _section_body, _strip_markers
+from .parsing import _FINDINGS_RE, _HYPOTHESES_RE, _fact_dedup_key, _is_none_bullet, _is_provenance_only, _looks_like_lead, _normalize_fact_key, _section_body, _strip_markers
 from .sanitize import _normalize, _sanitize_message
 from .state import AgentState
 from .toolio import _MAX_SYNTHESIS_FINDINGS_CHARS, _SEED_TASK_TITLE, _call, _is_error_tool_result
 from .validation import _derive_report_guardrails
+from ..analysis.kill_chain import KILL_CHAIN_ORDER, _CORE_PHASES
 
 
 
@@ -76,6 +77,7 @@ async def _build_investigation_summary(state: AgentState, tmap: dict, model=None
     facts: list[dict] = []
     hypotheses: list[dict] = []
     ti_enrichments: list[dict] = []
+    kill_chain_entries: list[dict] = []
     if get_board_fn:
         raw = await _call(get_board_fn, {})
         if not _is_error_tool_result(raw):
@@ -86,6 +88,7 @@ async def _build_investigation_summary(state: AgentState, tmap: dict, model=None
                 facts = [e for e in entries if e.get("kind") == "fact"]
                 hypotheses = [e for e in entries if e.get("kind") == "hypothesis"]
                 ti_enrichments = [e for e in entries if e.get("kind") == "ti_result"]
+                kill_chain_entries = [e for e in entries if e.get("kind") == "kill_chain"]
             except Exception:
                 pass
 
@@ -225,8 +228,10 @@ async def _build_investigation_summary(state: AgentState, tmap: dict, model=None
     # Synthesize a SOC analyst report on top of the grounded data. The model sees
     # the COMPLETE board + task summaries (never truncated); the structured findings
     # are kept as an appendix so nothing is lost if the synthesis is terse.
+    kill_chain_content = kill_chain_entries[-1].get("content") if kill_chain_entries else ""
     narrative = await _synthesize_analyst_report(
-        model, state, key_findings, facts, hypotheses, completed, report_guardrails
+        model, state, key_findings, facts, hypotheses, completed, report_guardrails,
+        phase_scaffold=_phase_scaffold(kill_chain_content),
     )
     if narrative:
         return f"{narrative}\n\n---\n\n# Appendix — Structured Findings\n\n{structured}"
@@ -256,15 +261,12 @@ def _clip_findings_for_synthesis(findings: str) -> str:
 
 def _task_summary_for_synthesis(summary: str) -> str:
     text = (summary or "").strip()
-    cf_match = _CONFIRMED_FACTS_RE.search(text)
     findings_match = _FINDINGS_RE.search(text)
     hyp_match = _HYPOTHESES_RE.search(text)
-    if cf_match and findings_match and hyp_match:
+    if findings_match and hyp_match:
         return (
-            "## Confirmed Facts\n"
-            f"{_section_body(text, cf_match).strip() or '- None confirmed.'}\n\n"
-            "## Findings\n\n"
-            f"{_clip_findings_for_synthesis(_section_body(text, findings_match)) or '(no findings narrative)'}\n\n"
+            "## Findings\n"
+            f"{_clip_findings_for_synthesis(_section_body(text, findings_match)) or '- None confirmed.'}\n\n"
             "## Hypotheses\n"
             f"{_section_body(text, hyp_match).strip() or '- No open hypotheses.'}"
         )
@@ -277,10 +279,29 @@ def _task_summary_for_synthesis(summary: str) -> str:
     )
 
 
+def _phase_scaffold(kill_chain_content: str) -> str:
+    """A kill-chain-ordered phase skeleton for the Phase-by-Phase section, derived
+    deterministically from the kill-chain board line. Each ATT&CK phase the correlation
+    tagged is marked EVIDENCE PRESENT; each core phase it did not is marked a gap. The
+    model writes the prose under each and may confirm a phase from the facts even when
+    MITRE tagging missed it (e.g. a `su` privilege escalation with no technique tag)."""
+    content = (kill_chain_content or "").strip()
+    if not content:
+        return "(kill-chain not computed — derive the phase coverage from the confirmed facts below)"
+    lines: list[str] = []
+    for phase in KILL_CHAIN_ORDER:
+        if phase in content:
+            lines.append(f"- {phase}: EVIDENCE PRESENT (kill-chain correlation tagged this tactic)")
+        elif phase in _CORE_PHASES:
+            lines.append(f"- {phase}: no MITRE-tagged evidence (core phase — confirm from the facts or mark a gap)")
+    return "\n".join(lines)
+
+
 async def _synthesize_analyst_report(
     model, state: AgentState, key_findings: list[str],
     facts: list[dict], hypotheses: list[dict], completed: list[dict],
     report_guardrails: str = "",
+    phase_scaffold: str = "",
 ) -> str:
     """One grounded model call → an analyst-grade narrative. '' on any failure."""
     if model is None:
@@ -294,41 +315,59 @@ async def _synthesize_analyst_report(
     ) or "- (none)"
     findings_txt = "\n".join(key_findings) or "- (none)"
     guardrails_txt = report_guardrails or "- No deterministic severity/correlation guardrails derived."
+    scaffold_txt = phase_scaffold or "(derive the phase coverage from the confirmed facts below)"
     prompt = (
         f"Case: {state['case_id']}\nAnalyst question: {state['question']}\n\n"
         f"## Key findings already derived\n{findings_txt}\n\n"
         f"## Deterministic analysis guardrails\n{guardrails_txt}\n\n"
+        f"## Kill-chain phase coverage (scaffold for Phase-by-Phase Findings)\n{scaffold_txt}\n\n"
         f"## Confirmed facts (raw-evidence backed)\n{facts_txt}\n\n"
         f"## Hypotheses (with status)\n{hyps_txt}\n\n"
         f"## Completed investigation tasks\n{tasks_txt}\n\n"
-        "Write the final report in markdown with EXACTLY these sections:\n\n"
-        "## Verdict — one line: compromise confirmed / suspected / false positive; "
-        "severity (low/medium/high/critical); active or contained.\n\n"
-        "## Executive Summary — 2-4 sentences a manager can act on. "
-        "IMPORTANT: every causal claim here must be consistent with Open Gaps — "
-        "do not assert a confirmed event chain in this section if the same chain is "
-        "listed as unconfirmed or missing in Open Gaps.\n\n"
-        "## Timeline — chronological bullets with timestamps and event IDs. "
-        "If confirmed activity spans two or more clusters separated by more than "
-        "4 hours with no connecting artifact or session, flag that gap explicitly "
-        "with a '⚠ Temporal gap: X hours — causal link unconfirmed' bullet.\n\n"
-        "## Scope & Impact — format as a markdown table:\n"
-        "| Asset | Type | Role | Attacker access / impact |\n"
-        "|---|---|---|---|\n"
-        "| ... | host/user/account | ... | ... |\n"
-        "Also state impact_state (active/contained/unknown) and scope_state "
-        "(isolated/lateral_spread/unknown) with a one-sentence justification.\n\n"
-        "## Initial Access — required for every case. State the confirmed source IP "
-        "of the first suspicious login or session event, whether it matches a later "
-        "C2/callback address, and whether attribution can be established. "
-        "If the source IP was NOT retrieved during investigation, write: "
-        "'⚠ Initial access vector not established — source IP missing from telemetry.' "
-        "and list it under Open Gaps.\n\n"
-        "## Recommended Actions — prioritized, concrete containment/remediation steps "
-        "(numbered list, highest urgency first).\n\n"
-        "## Open Gaps — what could not be confirmed and why. List every piece of "
-        "evidence that is missing, unavailable, or unanswered. "
-        "Ensure this section does not contradict the Executive Summary.\n\n"
+        "Write the final report in markdown. Follow these authoring rules — they matter "
+        "as much as the content:\n"
+        "1. SEPARATE ALTITUDES. A fact (what the raw evidence proves), an inference (what it "
+        "suggests), and an open question (what is unconfirmed) each have ONE home below. "
+        "Never mix them in the same section.\n"
+        "2. LINK EVIDENCE TO CONCLUSION. Every conclusion names the evidence that supports it "
+        "and states a confidence.\n"
+        "3. ONE REPRESENTATIVE EVENT ID PER CLAIM — not a dump of every ID; the appendix and "
+        "evidence files hold the rest.\n"
+        "4. STATE EACH FACT ONCE, at its home altitude; higher sections reference it, they do "
+        "not restate it.\n\n"
+        "Use EXACTLY these section headers, verbatim, with nothing appended to the header line:\n"
+        "## Verdict\n"
+        "## Executive Summary\n"
+        "## Confirmed Timeline\n"
+        "## Phase-by-Phase Findings\n"
+        "## Open Gaps\n"
+        "## Recommended Actions\n\n"
+        "How to write each section:\n"
+        "- Verdict: one line — compromise confirmed / suspected / false positive; severity "
+        "(low/medium/high/critical); active or contained.\n"
+        "- Executive Summary: 2-4 sentences a manager can act on, PROSE ONLY (no event IDs, no "
+        "raw evidence). End with one line: 'Scope & impact: impact=<active/contained/unknown>, "
+        "scope=<isolated/lateral_spread/unknown>' with a half-sentence justification. Every "
+        "causal claim here must be consistent with Open Gaps.\n"
+        "- Confirmed Timeline: chronological bullets of PROVEN events only, each with a timestamp "
+        "and ONE representative event ID. If confirmed activity spans two or more clusters "
+        "separated by more than 4 hours with no connecting artifact or session, flag it with a "
+        "'⚠ Temporal gap: X hours — causal link unconfirmed' bullet. No interpretation here — "
+        "that goes in Phase-by-Phase.\n"
+        "- Phase-by-Phase Findings: walk the kill-chain phases from the scaffold above, in order. "
+        "Use each phase as a '### <Phase>' sub-header and, for the phases that have evidence or "
+        "are otherwise in scope, write: what the evidence shows, the evidence→conclusion link, and "
+        "a confidence. A phase may be confirmed from the facts even if the scaffold shows no MITRE "
+        "tag. This section is where interpretation and scope live — including Initial Access: state "
+        "the confirmed source IP of the first suspicious login/session, whether it matches a later "
+        "C2/callback address, and whether attribution holds; if the source IP was NOT retrieved, "
+        "write '⚠ Initial access vector not established — source IP missing from telemetry.' and "
+        "list it under Open Gaps.\n"
+        "- Open Gaps: the single home for everything unconfirmed — unproven phases, open "
+        "hypotheses, and missing/unavailable evidence, each with why. Must not contradict the "
+        "Executive Summary or Phase-by-Phase confidences.\n"
+        "- Recommended Actions: prioritized, concrete containment/remediation steps (numbered, "
+        "highest urgency first).\n\n"
         "Do not append the structured JSON diagnosis verdict block; a separate "
         "verdict-contract step will generate the machine-readable verdict. Ground "
         "every narrative claim in the facts above. Follow the deterministic "

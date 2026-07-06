@@ -4,7 +4,41 @@
 
 **Case write authorization.** Never call any tool that modifies, closes, resolves, or posts content to a case — including but not limited to `post_case_report`, `update_case`, `close_case`, `resolve_case`, `add_case_comment`, or any tool whose effect is to write a page, comment, status change, or verdict to the case management system — unless the analyst has explicitly and unambiguously requested this action in the current message using words like "post a report", "write to the case", "close the case", "update the case status", "submit the findings", or similar direct instruction. Broad investigation requests ("tell me everything", "what happened?", "summarize", "analyze", "look into") are **not** authorization to write to the case system. When in doubt, present findings in the chat only; do not write to the case.
 
-**SIEM query discipline.** Always pass a bounded time window and an explicit `max_results` cap (≤ 50) for every SIEM keyword or structured search. Start with the run's configured default vicinity window around the anchor timestamp unless the task, report, or evidence already specifies an explicit absolute window. Expand the window only if the initial search returns insufficient evidence. Never submit a day-wide or open-ended query as a first step — it fetches thousands of events, inflates context, and makes it harder to see the relevant signals.
+**SIEM querying.** Use the case `date` field as the incident timestamp when it is
+present; otherwise use alert `date_iso` / first-seen / last-seen or raw event
+`@timestamp`. Never use TheHive `createdAt`, `_createdAt`, `updatedAt`, or
+`_updatedAt` as the SIEM query anchor — those are case lifecycle/import
+timestamps. Treat the incident timestamp as a starting hint, not the centre.
+The SIEM hides evidence from a careless search; four habits recover it:
+
+- *Scope tight; never conclude from a capped result.* The SIEM caps how many events it
+  returns, so a window-wide or unbounded query buries the events you need under the cap.
+  Pass a bounded absolute window and a small `max_results`, narrow (time, then a
+  discriminator) until the result is small enough to read exhaustively or is a confirmed
+  empty, and never cite a `TRUNCATED`/ceiling-sized sample — it is an arbitrary slice.
+- *Map time before reading events, then drill the map.* For floods, scans, brute force, or
+  any high-volume source, profile the window to find onset, peak, quiet gaps, and resumed
+  activity. The SIEM methodology layer defines how to select the adjacent or uncovered
+  span and confirm it with raw events before concluding.
+- *Confirm a field/value exists before filtering on it.* Use `profile_field` to see which
+  fields, rule families, and values are actually present rather than guessing a filter
+  that returns nothing and proves nothing. Before recording a **confirmed negative**, prove
+  the query *could* have matched — the field is populated and the value occurs in the
+  window. A zero from an unverified filter is a broken query, not an absence.
+- *Pivot on concrete artifacts, not natural-language keywords.* Lead each query with a
+  rule family, IP, hash, path, or host+account pair; decode encoded tokens (hex, base64,
+  URL-encoding) before judging an event, since payloads rarely contain the words you would
+  search for.
+- *`should` without `must`/`minimum_should_match` filters nothing.* A `bool` clause with
+  only `should` terms is scoring-only by default — the query still matches everything else
+  in scope (often the whole time window), not just the `should` terms. Put real
+  discriminators in `must`; add `minimum_should_match` explicitly when you want an OR. A
+  query that returns a `note` about this was not filtered the way it looked — rebuild it.
+- *Significance is not volume.* In a flood the bulk is the decoy — the loudest entity or
+  rule is usually noise, and the actor's real action is the rare exception riding alongside
+  it: a low-frequency rule, a single success response, a quiet peer. Rank by what is unusual
+  in context, and confirm the *outcome* (the success that followed the failures), not the
+  loud attempt.
 
 ---
 

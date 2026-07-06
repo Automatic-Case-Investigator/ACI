@@ -67,6 +67,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             result = client.search(
                 query=arguments["query"],
                 index_pattern=arguments.get("index_pattern"),
+                max_results=int(arguments.get("max_results", 20)),
             )
         elif name == "get_event":
             result = client.get_event(
@@ -80,6 +81,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 time_range=arguments.get("time_range"),
                 top_n=int(arguments.get("top_n", 10)),
                 query=arguments.get("query"),
+                rare=bool(arguments.get("rare", False)),
+                max_doc_count=arguments.get("max_doc_count"),
             )
         elif name == "search_keyword":
             result = client.search_keyword(
@@ -87,6 +90,35 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 index_pattern=arguments.get("index_pattern"),
                 time_range=arguments.get("time_range"),
                 max_results=int(arguments.get("max_results", 20)),
+            )
+        elif name == "correlate_entity":
+            result = client.correlate_entity(
+                field=arguments["field"],
+                value=arguments["value"],
+                start_time=arguments.get("start_time"),
+                end_time=arguments.get("end_time"),
+                link_fields=arguments.get("link_fields"),
+                top_n=int(arguments.get("top_n", 10)),
+                min_cooccurrence=int(arguments.get("min_cooccurrence", 1)),
+                index_pattern=arguments.get("index_pattern"),
+                match_fields=arguments.get("match_fields"),
+            )
+        elif name == "correlate_techniques":
+            result = client.correlate_techniques(
+                start_time=arguments.get("start_time"),
+                end_time=arguments.get("end_time"),
+                query=arguments.get("query"),
+                top_n=int(arguments.get("top_n", 30)),
+                index_pattern=arguments.get("index_pattern"),
+            )
+        elif name == "get_event_volume":
+            result = client.get_event_volume(
+                start_time=arguments["start_time"],
+                end_time=arguments["end_time"],
+                query=arguments.get("query"),
+                interval=arguments.get("interval"),
+                bins=int(arguments.get("bins", 24)),
+                index_pattern=arguments.get("index_pattern"),
             )
         elif name == "list_indices":
             result = {"indices": client.list_indices()}

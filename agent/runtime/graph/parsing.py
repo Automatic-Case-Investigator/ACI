@@ -3,6 +3,13 @@ from __future__ import annotations
 import re
 
 
+# Pivot-scoring ladders — how strongly a candidate pivot is preferred, ranked by the
+# provenance of the evidence that produced it (`source`), the analytic role it plays
+# (`role`), and its stated confidence. Shared by the interpret pivot selector
+# (`interpretation`) and the observation deduper (`observation`) so the two never drift.
+_PIVOT_SOURCE_SCORE = {"case": 1, "alert_aggregate": 2, "board_inference": 2, "raw_event": 4, "decoded_payload": 5}
+_PIVOT_ROLE_SCORE = {"hypothesis": 1, "exemplar": 1, "anchor": 2, "discriminator": 4}
+_PIVOT_CONF_SCORE = {"low": 1, "medium": 2, "high": 3}
 
 
 
@@ -38,10 +45,6 @@ _NEW_LEADS_HEADER_RE = re.compile(
 # deterministically so the pivot node knows a New Leads section exists.
 
 # Accept h2, h3, or bold variants — small models sometimes use ### or **...**
-_CONFIRMED_FACTS_RE = re.compile(
-    r"(?:^|\n)(?:#{2,3}\s*|(?:\*\*))Confirmed Facts(?:\*\*)?\s*\n",
-    re.IGNORECASE,
-)
 _HYPOTHESES_RE = re.compile(
     r"(?:^|\n)(?:#{2,3}\s*|(?:\*\*))Hypotheses(?:\*\*)?\s*\n",
     re.IGNORECASE,
@@ -63,15 +66,34 @@ def _section_body(text: str, match: re.Match) -> str:
     return rest[:next_header.start()] if next_header else rest
 
 
-# The four sections every investigation per-task report must contain. The report
-# is the only place grounded findings (e.g. a reverse shell seen in a tool
-# result) are recorded, so a malformed report silently loses evidence. We
-# validate the shape syntactically and nudge the model to re-emit on failure.
+# The three sections every investigation per-task report must contain. The
+# `## Findings` section is the only place grounded evidence (e.g. a reverse shell
+# seen in a tool result) is recorded, so a malformed report silently loses
+# evidence. We validate the shape syntactically and nudge the model to re-emit on
+# failure.
 _REQUIRED_SUMMARY_SECTIONS: tuple[tuple[str, re.Pattern], ...] = (
-    ("Confirmed Facts", _CONFIRMED_FACTS_RE),
     ("Findings", _FINDINGS_RE),
     ("Hypotheses", _HYPOTHESES_RE),
     ("New Leads", _NEW_LEADS_HEADER_RE),
+)
+
+_TRIAGE_SUMMARY_RE = re.compile(
+    r"(?:^|\n)(?:#{2,3}\s*|(?:\*\*))Triage Summary(?:\*\*)?\s*\n",
+    re.IGNORECASE,
+)
+_KEY_EVIDENCE_RE = re.compile(
+    r"(?:^|\n)(?:#{2,3}\s*|(?:\*\*))Key Evidence(?:\*\*)?\s*\n",
+    re.IGNORECASE,
+)
+_INVESTIGATION_PLAN_RE = re.compile(
+    r"(?:^|\n)(?:#{2,3}\s*|(?:\*\*))Investigation Plan(?:\*\*)?\s*\n",
+    re.IGNORECASE,
+)
+_LIST_ITEM_RE = re.compile(r"^\s*(?:-\s+|\d+\.\s+).+$", re.MULTILINE)
+_REQUIRED_TRIAGE_SECTIONS: tuple[tuple[str, re.Pattern], ...] = (
+    ("Triage Summary", _TRIAGE_SUMMARY_RE),
+    ("Key Evidence", _KEY_EVIDENCE_RE),
+    ("Investigation Plan", _INVESTIGATION_PLAN_RE),
 )
 
 
@@ -98,6 +120,32 @@ def _missing_summary_sections(report: str) -> list[str]:
         body = rest[:next_header.start()] if next_header else rest
         if not _FACT_BULLET_RE.search(body):
             missing.append(name)
+    return missing
+
+
+def _missing_triage_sections(report: str) -> list[str]:
+    """Return required triage sections absent or structurally empty.
+
+    Triage Summary may be paragraph text. Key Evidence and Investigation Plan must
+    contain at least one list item so raw JSON blobs or artifact dumps do not pass
+    as a durable handoff report.
+    """
+    text = report or ""
+    missing: list[str] = []
+    for name, pattern in _REQUIRED_TRIAGE_SECTIONS:
+        match = pattern.search(text)
+        if not match:
+            missing.append(name)
+            continue
+        rest = text[match.end():]
+        next_header = _NEXT_HEADER_RE.search(rest)
+        body = rest[:next_header.start()] if next_header else rest
+        if name == "Triage Summary":
+            if not _section_has_concrete_items(body):
+                missing.append(name)
+        else:
+            if not _LIST_ITEM_RE.search(body):
+                missing.append(name)
     return missing
 
 # Regex to parse a bullet like "- Crontab modified at ... (event ...)."

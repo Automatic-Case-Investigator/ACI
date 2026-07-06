@@ -17,6 +17,41 @@ def memory_dir() -> str:
     return f"{_home()}/memory"
 
 
+def sessions_dir() -> str:
+    """Per-run handoff notes (`<date>_<short_id>.md`) the AVFS prompt tells the agent
+    to read first on start to resume prior work."""
+    return f"{_home()}/sessions"
+
+
+def tasks_dir() -> str:
+    """Active work-in-progress notes the AVFS prompt manages under `tasks/<task_id>/`."""
+    return f"{_home()}/tasks"
+
+
+def knowledge_dir() -> str:
+    """Reusable, long-lived knowledge by topic (`knowledge/<topic>.md`)."""
+    return f"{_home()}/knowledge"
+
+
+def workspace_dirs() -> list[str]:
+    """The standard AVFS home folders advertised by the AVFS server prompt.
+
+    Pre-creating these at run start makes the agent's prompt-directed reads of
+    `~/sessions`, `~/tasks`, `~/memory`, `~/knowledge` return an empty listing
+    instead of an ENOENT error (which previously cost a failing round-trip per task).
+    """
+    return [sessions_dir(), tasks_dir(), memory_dir(), knowledge_dir()]
+
+
+def session_note_path(run_id: str, *, when=None) -> str:
+    """Path for this run's session handoff note: `sessions/<date>_<short_id>.md`."""
+    from datetime import datetime, timezone
+
+    date = (when or datetime.now(timezone.utc)).strftime("%Y-%m-%d")
+    short = (run_id or "run").split("-", 1)[0][:8]
+    return f"{sessions_dir()}/{date}_{short}.md"
+
+
 def case_dir(case_id: str) -> str:
     return f"{_home()}/cases/{case_id}"
 

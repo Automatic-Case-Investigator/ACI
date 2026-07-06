@@ -45,4 +45,8 @@ register(MCPProvider(
     kind=KIND_FILESYSTEM,
     setting_defaults=_defaults,
     build_config=_build,
+    capabilities={
+        "workspace_read_write": ("whoami", "ls", "read", "cat", "mkdir", "write"),
+    },
+    instructions_required=False,
 ))

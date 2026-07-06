@@ -11,6 +11,7 @@ from ...agents.registry import get_agent
 from ...models import AgentRun
 from ..infra.avfs import case_dir, home_dir, memory_dir
 from ..graph import GRAPH, AgentState
+from ..providers.base import format_provider_capability_contracts
 from ..infra.logbus import (
     bind_debug_mode, bind_run, bind_session, clear_run_issues, current_session,
     emit, reset_debug_mode, reset_run, reset_session, src_label,
@@ -100,6 +101,7 @@ async def _run_agent_bound(
                 "avfs_memory_dir": memory_dir(),
                 "avfs_case_dir": case_dir(case_id),
                 "available_tools": _prompt_tool_names(agent_name, tools),
+                "provider_capability_contracts": format_provider_capability_contracts(agent_def.tool_policy),
                 "mcp_prompt_guidance": mcp_prompt_guidance,
                 "orchestrator_conversation": orchestrator_conversation,
                 "restart_context": restart_context,
@@ -124,8 +126,13 @@ async def _run_agent_bound(
             ctx_tokens=0,
             verdict=None,
             pivot_tasks_created=0,
-            summary_format_retries=0,
+            reflection_retries=0,
+            reflection_evidence_at_last_nudge=-1,
+            last_confirmed_findings=[],
             completed_task_titles=[],
+            task_ledger=None,
+            last_observation=None,
+            observation_retries=0,
         )
 
         config = {

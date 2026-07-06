@@ -1,10 +1,13 @@
 """Deterministic artifact extraction from retrieved event payloads."""
 from __future__ import annotations
 
+import base64
+import binascii
 import ipaddress
 import json
 import re
 from dataclasses import dataclass
+from urllib.parse import unquote
 
 
 @dataclass(frozen=True)
@@ -67,6 +70,8 @@ _IP_IN_TEXT_RE = re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b|\b(?:[0-9a-fA-F]{1,4}:
 _MAX_EMBEDDED_PER_COMMAND = 8
 _MAX_COMMAND_LEN = 512
 _HASH_LENGTHS = {"md5": 32, "sha1": 40, "sha256": 64}
+# Trailing audit id suffix on usernames: `root(uid=0)`, `user (auid=1000)`, etc.
+_UID_SUFFIX_RE = re.compile(r"\s*\((?:[a-z]*uid)=\d+\)\s*$", re.IGNORECASE)
 _DOMAIN_RE = re.compile(
     r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$",
     re.IGNORECASE,
@@ -87,6 +92,19 @@ _DIFF_PREFIX_RE = re.compile(r"^[+\-<>]\s?")
 # skip known hash lengths 32/40/64 which are handled separately).
 _HEX_PAYLOAD_RE = re.compile(r"\b([0-9a-fA-F]{16,512})\b")
 _HASH_LENGTHS_SET = frozenset(_HASH_LENGTHS.values())
+# Base64 / urlsafe-base64 tokens that may be encoded payloads. Min 16 chars keeps the
+# false-positive rate down; the command classifier (not the decode) is the real gate.
+_B64_PAYLOAD_RE = re.compile(r"\b([A-Za-z0-9+/_-]{16,1024}={0,2})")
+# Cap decode work per value so a pathological field cannot blow up extraction.
+_MAX_DECODE_TOKENS = 6
+_MIN_PRINTABLE_RATIO = 0.85
+
+
+def _printable_ratio_ok(decoded: str, threshold: float = _MIN_PRINTABLE_RATIO) -> bool:
+    if not decoded:
+        return False
+    printable = sum(1 for c in decoded if c.isprintable() or c in "\t\n\r")
+    return printable / len(decoded) >= threshold
 
 
 def _try_decode_hex(token: str) -> str | None:
@@ -97,10 +115,90 @@ def _try_decode_hex(token: str) -> str | None:
         decoded = bytes.fromhex(token).decode("utf-8", errors="replace")
     except ValueError:
         return None
-    if not decoded:
+    return decoded if _printable_ratio_ok(decoded, 0.80) else None
+
+
+def _try_decode_base64(token: str) -> str | None:
+    """Decode a base64 / urlsafe-base64 token to UTF-8 text if mostly printable.
+
+    Handles missing padding and both standard and urlsafe alphabets. Rejects tokens
+    that don't decode to substantial, mostly-printable text (e.g. random ids).
+    """
+    if len(token) < 16:
         return None
-    printable = sum(1 for c in decoded if c.isprintable() or c in "\t\n\r")
-    return decoded if printable / len(decoded) >= 0.80 else None
+    candidate = token.replace("-", "+").replace("_", "/")
+    candidate += "=" * (-len(candidate) % 4)
+    try:
+        raw = base64.b64decode(candidate, validate=True)
+    except (binascii.Error, ValueError):
+        return None
+    if len(raw) < 4:
+        return None
+    decoded = raw.decode("utf-8", errors="replace")
+    return decoded if _printable_ratio_ok(decoded) else None
+
+
+def _decode_surfaces(text: str) -> list[str]:
+    """Return decoded forms hidden inside a string (hex, base64, URL-encoding).
+
+    Many payloads ride inside a URL query parameter (e.g. a webshell's
+    `?wp_meta=<base64-json-argv>`) or are hex/base64 obfuscated. This peels those
+    encodings so the caller can re-scan the plaintext for command/shell signatures.
+    The value itself is NOT included — only genuinely decoded forms.
+    """
+    surfaces: list[str] = []
+    seen: set[str] = set()
+    candidates = [text]
+    unquoted = unquote(text)
+    if unquoted != text:
+        candidates.append(unquoted)
+
+    def _add(dec: str | None) -> None:
+        if dec and dec not in seen:
+            seen.add(dec)
+            surfaces.append(dec)
+
+    for cand in candidates:
+        for tok in _HEX_PAYLOAD_RE.findall(cand)[:_MAX_DECODE_TOKENS]:
+            _add(_try_decode_hex(tok))
+        for tok in _B64_PAYLOAD_RE.findall(cand)[:_MAX_DECODE_TOKENS]:
+            _add(_try_decode_base64(tok))
+    return surfaces
+
+
+def _looks_like_command(text: str) -> bool:
+    """True when a (possibly decoded) string is a shell/command payload.
+
+    Two signals: an explicit shell/reverse-shell indicator, or a JSON argv array
+    (`["bin","arg",...]`) — the shape webshells use to pass a command vector. The
+    argv check catches credential-dump and password-cracking payloads that carry no
+    reverse-shell keyword.
+    """
+    if not text:
+        return False
+    if _SHELL_INDICATOR_RE.search(text):
+        return True
+    stripped = text.strip()
+    if stripped.startswith("[") and stripped.endswith("]"):
+        try:
+            arr = json.loads(stripped)
+        except (TypeError, ValueError):
+            return False
+        return bool(arr) and isinstance(arr, list) and all(isinstance(x, str) for x in arr)
+    return False
+
+
+def _argv_to_cmdline(text: str) -> str:
+    """Render a JSON argv array as a readable command line; pass other text through."""
+    stripped = text.strip()
+    if stripped.startswith("[") and stripped.endswith("]"):
+        try:
+            arr = json.loads(stripped)
+        except (TypeError, ValueError):
+            return text
+        if isinstance(arr, list) and all(isinstance(x, str) for x in arr):
+            return " ".join(part.strip() for part in arr if part.strip())
+    return text
 
 
 def _flatten(value, prefix: str = ""):
@@ -146,29 +244,71 @@ def _normalize(kind: str, value) -> str | None:
     if kind == "domain":
         candidate = text.rstrip(".").lower()
         return candidate if _DOMAIN_RE.fullmatch(candidate) else None
+    if kind == "user":
+        # Audit events render users as `name(uid=0)` / `root(euid=0)`. Strip the
+        # parenthetical id suffix so the audit form collapses onto the plain account
+        # name — otherwise `root` and `root(uid=0)` are treated as distinct entities
+        # (duplicate board rows, duplicate correlations, ambiguous identity).
+        text = _UID_SUFFIX_RE.sub("", text).strip()
+        if not text:
+            return None
     return text
 
 
 def _event_dicts(payload) -> list[dict]:
-    if isinstance(payload, list):
-        return [item for item in payload if isinstance(item, dict)]
-    if not isinstance(payload, dict):
-        return []
-    for key in ("events", "hits", "results", "documents", "alerts"):
-        items = payload.get(key)
+    event_keys = ("events", "hits", "results", "documents", "alerts", "minority_sample")
+    out: list[dict] = []
+    seen: set[str] = set()
+
+    def add(event: dict) -> None:
+        source = _source_id(event)
+        if source:
+            key = f"id:{source}"
+        else:
+            try:
+                key = "raw:" + json.dumps(event, sort_keys=True, default=str)
+            except TypeError:
+                key = f"obj:{id(event)}"
+        if key in seen:
+            return
+        seen.add(key)
+        out.append(event)
+
+    def add_items(items) -> None:
         if isinstance(items, list):
-            return [item for item in items if isinstance(item, dict)]
-        if key == "hits" and isinstance(items, dict):
-            nested_hits = items.get("hits")
-            if isinstance(nested_hits, list):
-                return [item for item in nested_hits if isinstance(item, dict)]
-    data = payload.get("data")
-    if isinstance(data, (dict, list)):
-        nested = _event_dicts(data)
-        if nested:
-            return nested
-    # A single native event/document is eligible when it has an event identifier.
-    return [payload] if _source_id(payload) else []
+            for item in items:
+                if isinstance(item, dict):
+                    add(item)
+
+    def walk(obj) -> None:
+        if isinstance(obj, list):
+            add_items(obj)
+            return
+        if not isinstance(obj, dict):
+            return
+
+        found_container = False
+        for key in event_keys:
+            items = obj.get(key)
+            if isinstance(items, list):
+                found_container = True
+                add_items(items)
+            elif key == "hits" and isinstance(items, dict):
+                nested_hits = items.get("hits")
+                if isinstance(nested_hits, list):
+                    found_container = True
+                    add_items(nested_hits)
+
+        data = obj.get("data")
+        if isinstance(data, (dict, list)):
+            walk(data)
+
+        # A single native event/document is eligible when it has an event identifier.
+        if not found_container and _source_id(obj):
+            add(obj)
+
+    walk(payload)
+    return out
 
 
 def _artifact_kind(key: str) -> str | None:
@@ -266,22 +406,23 @@ def extract_artifacts(raw: str) -> list[Artifact]:
                 for artifact in _mine_command(value, source):
                     found.setdefault((artifact.kind, artifact.value.lower()), artifact)
                 continue
-            # Syscheck/audit diffs often carry the interesting command line inside a
-            # free-form `full_log`/diff field rather than a structured command key.
-            # Also handle hex-obfuscated payloads: a long hex token whose decoded form
-            # matches shell indicators (e.g. a crontab entry stored as raw hex bytes).
+            # Free-form fields (full_log, syscheck diffs, data.url query params) often
+            # carry the interesting command line — plaintext, in a diff blob, or
+            # obfuscated (hex/base64) inside a URL parameter. Peel any encodings, then
+            # mine every surface that classifies as a command/shell payload.
             if isinstance(value, str):
-                is_shell = _SHELL_INDICATOR_RE.search(value)
-                if not is_shell:
-                    for hex_token in _HEX_PAYLOAD_RE.findall(value):
-                        decoded = _try_decode_hex(hex_token)
-                        if decoded and _SHELL_INDICATOR_RE.search(decoded):
-                            is_shell = True
-                            break
-                if is_shell:
-                    # Clean diff syntax so the command artifact is the actual
-                    # shell line, not `command: 0a1` / `> ...` diff noise.
-                    base = _extract_shell_lines(value) or value
+                command_surfaces: list[tuple[str, bool]] = []  # (surface, is_decoded)
+                if _looks_like_command(value):
+                    command_surfaces.append((value, False))
+                for decoded in _decode_surfaces(value):
+                    if _looks_like_command(decoded):
+                        command_surfaces.append((decoded, True))
+                for surface, is_decoded in command_surfaces:
+                    # Clean diff syntax / render argv to a readable command line so the
+                    # artifact is the actual command, not diff noise or a JSON blob.
+                    base = _extract_shell_lines(surface) or _argv_to_cmdline(surface)
+                    if is_decoded:
+                        base = f"[decoded] {base}"
                     for artifact in _mine_command(base, source):
                         found.setdefault((artifact.kind, artifact.value.lower()), artifact)
             kind = _artifact_kind(key)
@@ -301,7 +442,14 @@ def record_artifacts(
     run_id: str,
     agent_name: str,
 ) -> list[Artifact]:
-    """Persist extracted artifacts directly through the board repository."""
+    """Persist NOVEL extracted artifacts and return only those (run-deduped).
+
+    Returning only artifacts not already on the board is what keeps re-touching a
+    known entity from looking like progress: the downstream consumers — the observation's
+    `new_artifacts` markers (which drive `advanced_objective`), auto-correlation, and TI
+    enrichment — all key off this return, so a batch that surfaces only already-seen
+    IOCs yields no false "new evidence" and no redundant correlation/TI work.
+    """
     artifacts = extract_artifacts(raw)
     if not artifacts:
         return []
@@ -309,15 +457,27 @@ def record_artifacts(
     from aci_board import store
 
     store.init_db()
+    seen = {
+        (e.get("content") or "").strip().lower()
+        for e in store.list_entries(case_id, run_id, agent_name)
+        if e.get("kind") == "artifact"
+    }
+    novel: list[Artifact] = []
     for artifact in artifacts:
+        content = f"{artifact.kind}: {artifact.value}"
+        key = content.strip().lower()
+        if key in seen:
+            continue
+        seen.add(key)
         store.add_entry(
             case_id=case_id,
             run_id=run_id,
             agent_name=agent_name,
             kind="artifact",
-            content=f"{artifact.kind}: {artifact.value}",
+            content=content,
             source=artifact.source,
             confidence="high",
             status="observed",
         )
-    return artifacts
+        novel.append(artifact)
+    return novel

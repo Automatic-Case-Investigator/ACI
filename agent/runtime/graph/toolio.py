@@ -348,6 +348,26 @@ async def _ensure_parent_dir(tmap: dict, path) -> None:
         await _call(mkdir, {"path": parent, "parents": True})
 
 
+async def _ensure_workspace_dirs(tools: list, *, _dbg: str | None = None) -> int:
+    """Pre-create the standard AVFS home folders the AVFS server prompt advertises.
+
+    The AVFS prompt tells the agent to read `~/sessions`, `~/tasks`, `~/memory`,
+    `~/knowledge` (and to read `/sessions` first to resume). On a fresh run those
+    dirs don't exist, so the agent's prompt-directed `ls` returns ENOENT — a failing
+    round-trip repeated per task. Creating them up front makes those reads return an
+    empty listing instead. No-op when AVFS (mkdir) is not configured. Returns the
+    number of dirs requested (0 when AVFS is absent)."""
+    from ..infra.avfs import workspace_dirs
+
+    mkdir = _tmap(tools).get("mkdir")
+    if mkdir is None:
+        return 0
+    dirs = workspace_dirs()
+    for d in dirs:
+        await _call(mkdir, {"path": d, "parents": True}, _dbg=_dbg)
+    return len(dirs)
+
+
 async def _cancel_requested(run_id: str) -> bool:
     try:
         from ...models import AgentRun

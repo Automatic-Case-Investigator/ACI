@@ -52,12 +52,32 @@ _CONDITIONAL_TITLE_RE = re.compile(
 
 # Priority keyword mapping — checked in order; first match wins.
 _PRIORITY_RULES: list[tuple[int, list[str]]] = [
-    (90, ["c2", "callback", "reverse shell", "attacker-controlled", "attacker controlled"]),
-    (85, ["initial access", "source ip", "remote login", "ssh session", "pam session"]),
+    (95, ["webshell", "reverse shell", "privilege escalation", "sudo", "command execution",
+          "decoded", "payload", "encoded", "credential"]),
+    (90, ["initial access", "successful login", "remote login", "ssh session", "pam session"]),
+    (80, ["c2", "callback", "attacker-controlled", "attacker controlled"]),
     (75, ["persistence", "crontab", "cron", "startup", "scheduled task", "authorized_key",
           "syscheck", "fim", "file-integrity", "file integrity"]),
     (60, ["correlate", "session context", "privilege", "scope", "disposition"]),
 ]
+
+_TEMPORAL_VOLUME_KEYWORDS = (
+    "scan",
+    "scanner",
+    "flood",
+    "brute force",
+    "brute-force",
+    "password spraying",
+    "400 error",
+    "404",
+    "4xx",
+    "5xx",
+    "too broad",
+    "truncated",
+    "post-peak",
+    "tail",
+    "volume",
+)
 
 _SRC = src_label("seeder")
 
@@ -99,6 +119,25 @@ def _item_priority(item: str) -> int:
     return 65  # default — context/correlation
 
 
+def _augment_temporal_method(item: str, vicinity_hours: int) -> str:
+    """Add temporal-profiling guidance to noisy investigation tasks."""
+    text = item.lower()
+    if "get_event_volume" in text:
+        return item
+    if not any(keyword in text for keyword in _TEMPORAL_VOLUME_KEYWORDS):
+        return item
+    guidance = (
+        "\n\nTemporal method: Treat the case/alert timestamp as a starting hint, "
+        f"not the timeline center. Call `get_event_volume` over the full configured "
+        f"vicinity/task window (±{vicinity_hours} hours unless this task specifies "
+        "a different absolute range) before sampling raw events. Use the resulting "
+        "pre-anchor, peak, post-peak tail, quiet-gap, and resumed-activity windows "
+        "to choose follow-up `search` calls; do not spend the task only sampling "
+        "the densest bucket."
+    )
+    return item.rstrip() + guidance
+
+
 async def run_seeder(
     handoff: Handoff,
     tools: list,
@@ -121,19 +160,32 @@ async def run_seeder(
         emit(_SRC, "error", "create_task tool not available; skipping seed")
         return
 
+    # Imported lazily: graph/__init__ -> nodes_loop -> engine.seeder_runner.run_seeder
+    # forms a cycle if this is imported at module level.
+    from ..graph.leads import LeadCandidate, _task_ref, duplicate_existing_task
+
     seeder_tools = [t for name, t in tmap.items() if name in _SEEDER_TOOLS]
 
     # ── Phase 1: deterministic task creation from extracted plan items ──────────
     plan_items = _extract_plan_items(handoff.triage_report or "")
     emit(_SRC, "note", f"seeder: starting — {len(plan_items)} plan item(s) extracted")
 
+    # Deterministic dedup backstop for Phase 2 (model-proposed) creates, reusing the
+    # same signature/objective/title-similarity matcher the pivot node's lead
+    # validator already trusts (leads.py). Seeded here with the Phase-1 direct
+    # creates so a Phase-2 task that duplicates a plan item is also caught, then
+    # grown as each Phase-2 create executes — so two create_task calls proposing
+    # the same task within a single seeding pass cannot both land.
+    created_refs: list[dict] = []
+
     direct_creates = 0
     for item in plan_items:
         title = _item_title(item)
         priority = _item_priority(item)
+        description = _augment_temporal_method(item, vicinity_hours)
         result = await _call(create_fn, {
             "title": title,
-            "description": item,
+            "description": description,
             "priority": priority,
         }, _dbg=_SRC)
         direct_creates += 1
@@ -141,6 +193,9 @@ async def run_seeder(
             emit(_SRC, "error", f"seeder: create_task failed for '{title}'", detail=result)
         else:
             emit(_SRC, "note", f"seeder: created '{title}' (P{priority})")
+            created_refs.append(_task_ref({
+                "title": title, "description": description, "status": "pending",
+            }))
 
     # ── Phase 2: model pass for mandatory supplementary tasks ───────────────────
     # The model checks for mandatory tasks not covered by the plan (C2 destination
@@ -182,9 +237,24 @@ async def run_seeder(
             if tool is None:
                 content = f"Error: tool '{name}' is not available to the seeder."
                 emit(_SRC, "error", f"seeder: unknown tool '{name}'")
+            elif name == "create_task" and (dup := duplicate_existing_task(
+                LeadCandidate(
+                    title=str(args.get("title") or ""), pivots="",
+                    evidence=str(args.get("description") or ""), priority=0,
+                ),
+                created_refs,
+            )):
+                content = f"Skipped: {dup} — not created."
+                emit(_SRC, "note", f"seeder: skipped duplicate '{args.get('title', '')}' ({dup})")
             else:
                 content = await _call(tool, args, _dbg=_SRC)
                 tool_calls_made += 1
+                if name == "create_task" and not _is_error_tool_result(content):
+                    created_refs.append(_task_ref({
+                        "title": str(args.get("title") or ""),
+                        "description": str(args.get("description") or ""),
+                        "status": "pending",
+                    }))
             messages.append(ToolMessage(
                 content=str(content),
                 tool_call_id=tc["id"],
@@ -211,7 +281,11 @@ def _build_model_input(
 
     parts.append(
         f"**Default vicinity window:** ±{vicinity_hours} hours. "
-        "Apply this to any item that lacks an explicit absolute time window."
+        "Apply this to any item that lacks an explicit absolute time window. For "
+        "scan/flood/brute-force or other noisy temporal pivots, supplementary tasks "
+        "must say to use `get_event_volume` over the full configured window before "
+        "sampling raw events, then query pre-anchor, post-peak tail, quiet-gap, or "
+        "resumed-activity subwindows as evidence dictates."
     )
     parts.append("")
 
@@ -234,11 +308,16 @@ def _build_model_input(
             "## Your job\n"
             "1. Call `list_tasks` to confirm all tasks above exist.\n"
             "2. If any is missing, recreate it with `create_task`.\n"
-            "3. Check the triage report below for mandatory tasks NOT already queued:\n"
-            "   - If a **reverse-shell / C2 callback address** is mentioned → add a C2 pivot task (priority 90).\n"
-            "   - If **initial-access / login / SSH / remote session** evidence is mentioned "
-            "and no initial-access task exists → add one (priority 85).\n"
-            "4. Do NOT add tasks that duplicate what is already queued."
+            "3. Check the triage report below for high-value evidence paths NOT already queued. "
+            "Prefer tasks that directly prove an adjacent activity stage on the affected asset "
+            "over speculative broad pivots. A good supplementary task names the evidence type, "
+            "entity, representation, and absolute time window it will test.\n"
+            "4. Add a supplementary task only when the current queue lacks a direct-evidence path "
+            "for one of these broad gaps: initial access, execution/payload semantics, privilege "
+            "change, persistence, callback/C2, or blast radius. If a small scoped hit set is "
+            "already mentioned, the task should retrieve and interpret representative raw events "
+            "before broadening to another entity.\n"
+            "5. Do NOT add tasks that duplicate what is already queued."
         )
     else:
         parts.append(

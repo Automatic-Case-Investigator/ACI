@@ -17,6 +17,7 @@ from mcp import types
 import traceback
 
 from .. import config as cfg
+from ..providers.contracts import instructions_required_for_server
 from ..providers.registry import get_provider
 
 log = logging.getLogger(__name__)
@@ -166,6 +167,7 @@ async def load_mcp_prompt_guidance(
     sections: list[str] = []
     missing: list[str] = []
     for server_name in client.connections:
+        server_required = instructions_required_for_server(server_name, default=required)
         try:
             server_sections: list[str] = []
             async with client.session(server_name, auto_initialize=False) as session:
@@ -188,14 +190,13 @@ async def load_mcp_prompt_guidance(
 
             if server_sections:
                 sections.extend(server_sections)
-            else:
+            elif server_required:
                 missing.append(server_name)
         except Exception as exc:
-            if required:
+            if server_required:
+                missing.append(server_name)
                 raise RuntimeError(f"Failed to load MCP instructions for {server_name}: {exc}") from exc
-            
-            missing.append(server_name)
-    if required and missing:
+    if missing:
         names = ", ".join(missing)
         raise RuntimeError(
             "MCP instructions are required before tools may be used, but no "
