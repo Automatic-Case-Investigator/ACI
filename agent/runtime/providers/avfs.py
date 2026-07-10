@@ -1,6 +1,7 @@
 """AVFS filesystem provider (streamable HTTP)."""
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from django.conf import settings
@@ -9,6 +10,7 @@ from .base import KIND_FILESYSTEM, MCPProvider
 from .registry import register
 
 log = logging.getLogger(__name__)
+_AGENT_ID_CACHE: str | None = None
 
 
 def _defaults() -> dict:
@@ -33,11 +35,29 @@ def _build(resolved: dict, run_ctx: dict | None = None) -> dict:
     }
 
 
+def cache_agent_id(agent_id: str) -> str:
+    """Remember a sync-resolved agent id for async contexts that cannot use ORM."""
+    global _AGENT_ID_CACHE
+    _AGENT_ID_CACHE = agent_id
+    return agent_id
+
+
+def _in_async_context() -> bool:
+    try:
+        asyncio.get_running_loop()
+        return True
+    except RuntimeError:
+        return False
+
+
 def resolved_agent_id() -> str:
     """The effective AVFS agent id (DB override over the AVFS_AGENT_ID setting)."""
+    if _in_async_context():
+        return _AGENT_ID_CACHE or settings.AVFS_AGENT_ID
+
     from ..config import resolve_settings
 
-    return resolve_settings("avfs", _defaults()).get("agent_id") or settings.AVFS_AGENT_ID
+    return cache_agent_id(resolve_settings("avfs", _defaults()).get("agent_id") or settings.AVFS_AGENT_ID)
 
 
 register(MCPProvider(

@@ -43,24 +43,33 @@ async def pivot(state: AgentState, config) -> dict:
             if bf.lower() not in _narrative:
                 escalation_facts.append(bf)
         if escalation_facts:
-            comment_fn = tmap.get("post_case_comment")
-            if comment_fn:
-                fact_lines = "\n".join(f"- {f}" for f in escalation_facts)
-                message = (
-                    "⚠ **ACI ESCALATION ALERT** — Active compromise confirmed.\n\n"
-                    f"**Case:** {state['case_id']}\n\n"
-                    f"**Confirmed indicators (raw-evidence backed):**\n{fact_lines}\n\n"
-                    "Immediate analyst review required. Full investigation report to follow."
+            if state.get("source_entity_type") == "alert":
+                emit(
+                    src,
+                    "note",
+                    "auto-escalation: active compromise recorded for standalone alert; "
+                    "no case comment posted without a linked case id",
                 )
-                result = await _call(comment_fn, {
-                    "case_id": state["case_id"],
-                    "message": message,
-                }, _dbg=src)
-                if not _is_error_tool_result(result):
-                    emit(src, "note", "auto-escalation: active compromise alert posted to case")
-                    escalation_posted = True
-                else:
-                    emit(src, "warning", "auto-escalation: post_case_comment failed", detail=result)
+                escalation_posted = True
+            else:
+                comment_fn = tmap.get("post_case_comment")
+                if comment_fn:
+                    fact_lines = "\n".join(f"- {f}" for f in escalation_facts)
+                    message = (
+                        "⚠ **ACI ESCALATION ALERT** — Active compromise confirmed.\n\n"
+                        f"**Case:** {state['case_id']}\n\n"
+                        f"**Confirmed indicators (raw-evidence backed):**\n{fact_lines}\n\n"
+                        "Immediate analyst review required. Full investigation report to follow."
+                    )
+                    result = await _call(comment_fn, {
+                        "case_id": state["case_id"],
+                        "message": message,
+                    }, _dbg=src)
+                    if not _is_error_tool_result(result):
+                        emit(src, "note", "auto-escalation: active compromise alert posted to case")
+                        escalation_posted = True
+                    else:
+                        emit(src, "warning", "auto-escalation: post_case_comment failed", detail=result)
 
     # Push confirmed facts from the "## Findings" section to the board. Findings is
     # now the per-task system of record for grounded evidence; each bullet (with its
@@ -194,6 +203,7 @@ async def pivot(state: AgentState, config) -> dict:
                 "title": title,
                 "description": "",
                 "summary": ct.get("summary", ""),
+                "priority": ct.get("priority", "?"),
                 "status": "completed",
             })
     # Model-based extraction + validation: the model reassembles inconsistently

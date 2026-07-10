@@ -35,6 +35,7 @@ urlpatterns = [
     path("runs/delete-all", runs_views.runs_delete_all, name="runs_delete_all"),
     path("runs/delete-selected", runs_views.runs_delete_selected, name="runs_delete_selected"),
     path("sessions/delete-selected", views.delete_sessions_selected, name="delete_sessions_selected"),
+    path("runs/<uuid:run_id>/detail", runs_views.run_detail, name="run_detail"),
     path("runs/<uuid:run_id>/review", runs_views.run_review, name="run_review"),
     path("runs/<uuid:run_id>/investigate", runs_views.run_investigate, name="run_investigate"),
     path("runs/<uuid:run_id>/restart", runs_views.run_restart, name="run_restart"),

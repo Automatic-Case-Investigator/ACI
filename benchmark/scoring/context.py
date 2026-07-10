@@ -39,6 +39,14 @@ def parse_iso(value: Any) -> datetime | None:
     return dt.astimezone(timezone.utc)
 
 
+def _as_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return str(value)
+
+
 @dataclass
 class Phase:
     """One labelled attack phase (from labels.csv), with optional discriminating
@@ -54,11 +62,21 @@ class Phase:
 
 @dataclass
 class EntryPoint:
+    """An entry point always resolves, at run time, to a live TheHive ALERT — never a
+    Case. Only one alert has ever been promoted to a Case (Fox's recon), and Cases are
+    not recreated automatically on re-import, so a case_id would silently go stale
+    after every teardown/reload. The anchor_* fields below are matching keys the
+    runner uses to find the current live alert with this content signature (rule /
+    agent / timestamp / source ref) — not literal identifiers handed to the agent."""
+
     id: str
     kind: str  # "organic" | "synthetic"
     reasoning_direction: str = ""  # "forward" | "backward" | "bidirectional"
-    case_id: str | None = None
     anchor_event_id: str | None = None
+    anchor_source_ref: str | None = None
+    anchor_timestamp: str | None = None
+    anchor_rule_id: str | None = None
+    anchor_agent_id: str | None = None
 
 
 @dataclass
@@ -87,8 +105,11 @@ class ScenarioSpec:
                 id=e["id"],
                 kind=e.get("kind", "organic"),
                 reasoning_direction=e.get("reasoning_direction", ""),
-                case_id=e.get("case_id"),
                 anchor_event_id=e.get("anchor_event_id"),
+                anchor_source_ref=e.get("anchor_source_ref"),
+                anchor_timestamp=_as_text(e.get("anchor_timestamp")),
+                anchor_rule_id=str(e["anchor_rule_id"]) if e.get("anchor_rule_id") is not None else None,
+                anchor_agent_id=str(e["anchor_agent_id"]) if e.get("anchor_agent_id") is not None else None,
             )
             for e in d.get("entry_points", [])
         ]
@@ -135,9 +156,33 @@ class ParsedReport:
     event_ids: set[str] = field(default_factory=set)
 
     @classmethod
-    def from_text(cls, text: str) -> "ParsedReport":
+    def from_text(cls, text: str, anchor_iso: str | None = None) -> "ParsedReport":
+        """Reduce the report to citable evidence.
+
+        `anchor_iso` is the incident timestamp the benchmark harness hands the agent in
+        its question. A *bare* restatement of it — the anchor value on a line carrying no
+        event id, e.g. the echoed "…activity observed around <ts>." question — is context
+        the harness supplied, not evidence the agent retrieved. Because that value lands
+        inside the anchor phase's window, counting it would credit phase_recall for a
+        phase the agent never actually reached (a hollow pass). So the anchor instant is
+        dropped *only* when it appears with no event id on its line; a genuine citation of
+        the anchor event (timestamp alongside its event id) is kept, as is every other
+        timestamp. Event-id matching is unaffected.
+        """
         text = text or ""
-        timestamps = [dt for dt in (parse_iso(m.group(0)) for m in _ISO_RE.finditer(text)) if dt]
+        anchor_dt = parse_iso(anchor_iso) if anchor_iso else None
+        timestamps: list[datetime] = []
+        for line in text.splitlines():
+            line_has_event_id = any(
+                _looks_like_event_id(m.group(1).strip()) for m in _BACKTICK_RE.finditer(line)
+            )
+            for m in _ISO_RE.finditer(line):
+                dt = parse_iso(m.group(0))
+                if dt is None:
+                    continue
+                if anchor_dt is not None and dt == anchor_dt and not line_has_event_id:
+                    continue
+                timestamps.append(dt)
         event_ids = {tok for m in _BACKTICK_RE.finditer(text)
                      for tok in [m.group(1).strip()] if _looks_like_event_id(tok)}
         return cls(text=text, timestamps=timestamps, event_ids=event_ids)
@@ -165,6 +210,7 @@ class ScoringContext:
     entry_point: str = ""
     verdict: dict = field(default_factory=dict)   # parsed diagnosis verdict block
     events: list = field(default_factory=list)    # AgentEvents (cost, termination)
+    meta: dict = field(default_factory=dict)      # run metadata (status, tokens, run_id)
     judge: Any = None                             # LLMJudge, supplied only if a metric needs it
 
     @classmethod
@@ -176,13 +222,15 @@ class ScoringContext:
         entry_point: str = "",
         verdict: dict | None = None,
         events: list | None = None,
+        meta: dict | None = None,
         judge: Any = None,
     ) -> "ScoringContext":
         return cls(
             scenario=scenario,
-            report=ParsedReport.from_text(report_text),
+            report=ParsedReport.from_text(report_text, anchor_iso=(meta or {}).get("anchor_timestamp")),
             entry_point=entry_point,
             verdict=verdict or {},
             events=events or [],
+            meta=meta or {},
             judge=judge,
         )

@@ -11,9 +11,9 @@ ToolCall = Callable[[str, dict], Awaitable[str]]
 
 
 def avfs_home() -> str:
-    from agent.runtime.providers.avfs import resolved_agent_id
+    from agent.runtime.infra.avfs import home_dir
 
-    return f"/home/{resolved_agent_id()}"
+    return home_dir()
 
 
 def index_stop_for(path: str) -> str:

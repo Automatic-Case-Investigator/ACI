@@ -80,7 +80,7 @@ def publish_specialist_result_to_session(session_id: str, run_id: str, *, reason
         session_id,
         unless_cancelled=True,
         result=answer,
-        case_id=sess.case_id or "",
+        case_id=sess.src_entity_id or "",
         **status_update,
     )
     logbus.emit(

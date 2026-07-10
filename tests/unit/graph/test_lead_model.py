@@ -17,7 +17,7 @@ import sys
 import tempfile
 import unittest
 
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 sys.path.insert(0, project_root)
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
 os.environ["SECRET_KEY"] = "test"
@@ -89,6 +89,58 @@ class LeadModelTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("crontab diff", cand.title)
         self.assertTrue(cand.pivots)
         self.assertTrue(cand.evidence)
+
+    async def test_reviewer_gets_queue_priorities_and_assigns_final_priority(self):
+        response = json.dumps([{
+            "title": "Check lower-value scope around 10.0.2.5",
+            "pivots": "ip=10.0.2.5",
+            "evidence": "callback destination already confirmed",
+            "priority": 45,
+            "approved": True,
+            "category": "approved",
+            "reason": "valid but ranks below queued containment work",
+        }])
+        model = StubModel(response)
+        result = await validate_leads_model(
+            model,
+            leads_section="- Check lower-value scope around 10.0.2.5\n  priority: 80",
+            final_answer="## Findings\n- Callback destination 10.0.2.5 was confirmed.",
+            existing_tasks=[{
+                "title": "Contain active reverse shell on kali",
+                "description": "Pivots: host=kali callback=10.0.2.5",
+                "priority": 95,
+                "status": "pending",
+            }],
+            current_task={"title": "Confirm callback", "description": "ip=10.0.2.5"},
+            remaining_run_budget=3,
+            agent_name="investigation",
+        )
+        self.assertIn("[pending P95] Contain active reverse shell on kali", model.last_prompt)
+        self.assertIn("Priority assignment happens AFTER reading the current queue", model.last_prompt)
+        self.assertEqual(len(result.approved), 1)
+        self.assertEqual(result.approved[0].candidate.priority, 45)
+
+    async def test_low_priority_valid_lead_is_not_rejected_for_priority(self):
+        response = json.dumps([{
+            "title": "Record administrative cleanup follow-up for known callback",
+            "pivots": "ip=10.0.2.5",
+            "evidence": "callback destination already confirmed",
+            "priority": 35,
+            "approved": True,
+            "category": "approved",
+            "reason": "low priority but evidence-backed",
+        }])
+        result = await validate_leads_model(
+            StubModel(response),
+            leads_section="- Record administrative cleanup follow-up for known callback\n  priority: 35",
+            final_answer="## Findings\n- Callback destination 10.0.2.5 was confirmed.",
+            existing_tasks=[],
+            current_task=None,
+            remaining_run_budget=3,
+            agent_name="investigation",
+        )
+        self.assertEqual(len(result.approved), 1)
+        self.assertEqual(result.approved[0].candidate.priority, 35)
 
     async def test_no_model_fails_closed(self):
         result = await validate_leads_model(

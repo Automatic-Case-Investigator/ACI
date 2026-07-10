@@ -17,6 +17,7 @@ and to verify the queue is complete via `list_tasks`.
 import json
 import logging
 import re
+from datetime import datetime, timezone
 
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 
@@ -50,6 +51,11 @@ _CONDITIONAL_TITLE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Explicit per-item priority stated in the triage report, e.g. "- Priority: 85"
+# (the triage `## Investigation Plan` format mandates a Priority line per item).
+# Anchored on the word "priority" so a bare pivot number (rule.id=31151) can't match.
+_EXPLICIT_PRIORITY_RE = re.compile(r"\bpriorit(?:y|ies)\b\s*[:=]?\s*\(?\s*(\d{1,3})\b", re.IGNORECASE)
+
 # Priority keyword mapping — checked in order; first match wins.
 _PRIORITY_RULES: list[tuple[int, list[str]]] = [
     (95, ["webshell", "reverse shell", "privilege escalation", "sudo", "command execution",
@@ -81,6 +87,81 @@ _TEMPORAL_VOLUME_KEYWORDS = (
 
 _SRC = src_label("seeder")
 
+# Timeline decomposition (Phase 1.5): cap how many candidates we surface, and their band.
+_MAX_TIMELINE_SEGMENTS = 6
+_TIMELINE_COVERAGE_PRIORITY = 70  # transition/scoping band — below confirmed-forward leads
+
+# Absolute ISO-8601 timestamps the triage handoff cites, used to bound the incident span.
+_ISO_TS_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})")
+
+
+def _parse_iso_dt(text: str) -> datetime | None:
+    try:
+        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _incident_window(*texts: str) -> tuple[str, str] | None:
+    """Bound the incident span [earliest, latest] from ISO timestamps cited across the
+    triage handoff. Returns None when fewer than two distinct instants appear — there is
+    nothing to decompose."""
+    parsed = {d for t in texts for m in _ISO_TS_RE.finditer(t or "")
+              if (d := _parse_iso_dt(m.group(0))) is not None}
+    if len(parsed) < 2:
+        return None
+    def _iso(d: datetime) -> str:
+        return d.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return _iso(min(parsed)), _iso(max(parsed))
+
+
+async def _timeline_segment_specs(tmap: dict, window: tuple[str, str]) -> list[dict]:
+    """Profile the incident window into its distinct activity bursts (deterministic).
+
+    Code localizes *where in time* activity clusters; the model (per burst-task) does the
+    semantic work of naming which phase each cluster is. Only returns segments when the
+    profile found genuine temporal STRUCTURE (>=2 distinct bursts) — a single burst that
+    fills the window is not a decomposition. Fail-open: any error yields no segments.
+    """
+    vol_fn = tmap.get("get_event_volume")
+    if vol_fn is None:
+        return []
+    start, end = window
+    try:
+        raw = await _call(vol_fn, {"start_time": start, "end_time": end, "bins": 48}, _dbg=_SRC)
+        data = json.loads(raw) if isinstance(raw, str) else raw
+    except Exception:
+        return []
+    if not isinstance(data, dict) or data.get("error"):
+        return []
+    bursts = [b for b in (data.get("bursts") or []) if b.get("start") and b.get("end")]
+    if len(bursts) < 2:
+        return []
+    return [{"start": b["start"], "end": b["end"]} for b in bursts[:_MAX_TIMELINE_SEGMENTS]]
+
+
+def _timeline_coverage_description(segments: list[dict]) -> str:
+    """Build one recall-preserving coverage task from all detected timeline candidates."""
+    lines = [
+        "A deterministic volume profile found multiple distinct activity candidates. "
+        "Do not treat this map as a conclusion, and do not silently drop any candidate. "
+        "For each candidate below, assign one disposition: covered by a cited finding, "
+        "converted into a concrete New Lead, or ruled unrelated/benign with evidence.",
+        "",
+        "Timeline coverage candidates:",
+    ]
+    for idx, seg in enumerate(segments, 1):
+        lines.append(f"{idx}. {seg['start']} to {seg['end']}")
+    lines.extend([
+        "",
+        "Consolidate redundant side windows when they share the same objective, but preserve "
+        "the candidate list and state the disposition for every window. Done when: every "
+        "candidate above has a disposition with a supporting event/probe result, or an "
+        "evidence-backed lead remains queued for the unresolved part.",
+    ])
+    return "\n".join(lines)
+
 
 def _extract_plan_items(report: str) -> list[str]:
     """Return each numbered item body from ## Investigation Plan / ## New Leads."""
@@ -111,7 +192,19 @@ def _item_title(item: str) -> str:
 
 
 def _item_priority(item: str) -> int:
-    """Infer task priority from keywords present in the plan item text."""
+    """Return the task priority for a plan item.
+
+    Prefer the priority the triage report explicitly stated for the item — the
+    `## Investigation Plan` format mandates a `Priority: N` line per item, and the
+    seeder must preserve that analyst-facing ranking rather than re-deriving its
+    own. Keyword inference is only a fallback for items that state no priority
+    (e.g. a malformed plan, or a `## New Leads` item that omitted it).
+    """
+    m = _EXPLICIT_PRIORITY_RE.search(item or "")
+    if m:
+        value = int(m.group(1))
+        if 0 <= value <= 100:
+            return value
     text = item.lower()
     for priority, keywords in _PRIORITY_RULES:
         if any(kw in text for kw in keywords):
@@ -197,12 +290,37 @@ async def run_seeder(
                 "title": title, "description": description, "status": "pending",
             }))
 
+    # ── Phase 1.5: deterministic timeline decomposition ─────────────────────────
+    # The agent reliably covers the burst adjacent to its anchor but walks the rest of
+    # the timeline only by chance, so mid-chain phases are missed at random. Split the
+    # incident's time span into its distinct activity bursts and seed one task per burst,
+    # making temporal coverage systematic rather than opportunistic. Code localizes the
+    # bursts (deterministic); the model names each burst's phase (semantic). Fail-open —
+    # no window or no multi-burst structure simply seeds nothing here.
+    window = _incident_window(handoff.triage_report or "", handoff.analyst_request or "")
+    segments = await _timeline_segment_specs(tmap, window) if window else []
+    if segments:
+        title = "Account for timeline coverage candidates across the incident window"
+        description = _timeline_coverage_description(segments)
+        result = await _call(create_fn, {
+            "title": title, "description": description, "priority": _TIMELINE_COVERAGE_PRIORITY,
+        }, _dbg=_SRC)
+        if _is_error_tool_result(result):
+            emit(_SRC, "error", "seeder: timeline coverage create_task failed", detail=result)
+        else:
+            emit(_SRC, "note",
+                 f"seeder: timeline coverage map with {len(segments)} candidate(s) "
+                 f"(P{_TIMELINE_COVERAGE_PRIORITY})")
+            created_refs.append(_task_ref({
+                "title": title, "description": description, "status": "pending",
+            }))
+
     # ── Phase 2: model pass for mandatory supplementary tasks ───────────────────
     # The model checks for mandatory tasks not covered by the plan (C2 destination
     # pivots, initial-access vector) and verifies completeness via list_tasks.
     # If the plan section was missing entirely, the model creates all tasks.
     system_prompt = compose_system_prompt(seeder_def.prompt_layers, {})
-    human_content = _build_model_input(handoff, plan_items, direct_creates, vicinity_hours)
+    human_content = _build_model_input(handoff, plan_items, direct_creates, vicinity_hours, segments)
 
     messages = [
         SystemMessage(content=system_prompt),
@@ -271,12 +389,19 @@ def _build_model_input(
     plan_items: list[str],
     direct_creates: int,
     vicinity_hours: int,
+    timeline_segments: list[dict] | None = None,
 ) -> str:
     """Build the Phase 2 model prompt describing what was already created."""
     parts: list[str] = []
 
     if handoff.analyst_request:
         parts.append(f"**Analyst request:** {handoff.analyst_request}")
+        parts.append("")
+    if handoff.source_entity_id or handoff.source_entity_type:
+        parts.append(
+            f"**Source entity:** {handoff.source_entity_type or 'unknown'} "
+            f"`{handoff.source_entity_id or 'unknown'}`"
+        )
         parts.append("")
 
     parts.append(
@@ -296,13 +421,26 @@ def _build_model_input(
         parts.append("```")
         parts.append("")
 
-    if direct_creates > 0:
+    if timeline_segments:
+        parts.append("## Timeline coverage map already queued")
         parts.append(
-            f"## Already created ({direct_creates} task(s) — do NOT duplicate these)"
+            "A single coverage task already accounts for these candidates. Do not create "
+            "one duplicate task per window; create supplementary tasks only for distinct "
+            "evidence-backed objectives not covered by that map."
+        )
+        for i, seg in enumerate(timeline_segments, 1):
+            parts.append(f"{i}. {seg['start']} to {seg['end']}")
+        parts.append("")
+
+    if direct_creates > 0 or timeline_segments:
+        parts.append(
+            f"## Already created ({direct_creates + (1 if timeline_segments else 0)} task(s) — do NOT duplicate these)"
         )
         parts.append("")
         for i, item in enumerate(plan_items, 1):
             parts.append(f"{i}. {_item_title(item)}")
+        if timeline_segments:
+            parts.append(f"{len(plan_items) + 1}. Account for timeline coverage candidates across the incident window")
         parts.append("")
         parts.append(
             "## Your job\n"
@@ -312,11 +450,14 @@ def _build_model_input(
             "Prefer tasks that directly prove an adjacent activity stage on the affected asset "
             "over speculative broad pivots. A good supplementary task names the evidence type, "
             "entity, representation, and absolute time window it will test.\n"
-            "4. Add a supplementary task only when the current queue lacks a direct-evidence path "
-            "for one of these broad gaps: initial access, execution/payload semantics, privilege "
-            "change, persistence, callback/C2, or blast radius. If a small scoped hit set is "
-            "already mentioned, the task should retrieve and interpret representative raw events "
-            "before broadening to another entity.\n"
+            "4. Add a supplementary task only when the report itself cites an indicator the queue "
+            "does not yet pivot on (a named entity, an encoded/obfuscated artifact, an adjacent "
+            "event class). Ground every task in evidence the report actually states — do not add a "
+            "task to fill a phase the report never mentions (initial access, callback/C2, "
+            "exfiltration, etc.); the platform already queues a deterministic establish-or-rule-out "
+            "task for each missing phase, so a fabricated one only adds noise. If a small scoped "
+            "hit set is already mentioned, the task should retrieve and interpret representative "
+            "raw events before broadening to another entity.\n"
             "5. Do NOT add tasks that duplicate what is already queued."
         )
     else:

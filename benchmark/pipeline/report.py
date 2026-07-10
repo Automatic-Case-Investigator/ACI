@@ -20,18 +20,32 @@ def _results_from_card(card: dict) -> list[MetricResult]:
 
 
 def aggregate_cards(cards: list[dict]) -> dict:
-    """Return {scenario: {entry_point: {metric: rollup}}}."""
+    """Return {scenario: {entry_point: {metric: rollup}}}.
+
+    Invalid trials (the requested agent failed / fell back — `trial_valid=False`) are
+    excluded from the roll-up so an infra failure does not depress the recall average;
+    they are counted separately as `excluded_trials` for transparency.
+    """
     groups: dict[tuple[str, str], list[list[MetricResult]]] = defaultdict(list)
+    excluded: dict[tuple[str, str], int] = defaultdict(int)
     for card in cards:
         key = (card.get("scenario", ""), card.get("entry_point", ""))
+        if card.get("trial_valid", True) is False:
+            excluded[key] += 1
+            continue
         groups[key].append(_results_from_card(card))
 
     out: dict[str, dict] = defaultdict(dict)
     for (scenario, entry_point), trials in groups.items():
         out[scenario][entry_point] = {
             "trials": len(trials),
+            "excluded_trials": excluded.get((scenario, entry_point), 0),
             "metrics": scoring.aggregate(trials),
         }
+    # Entry points with ONLY invalid trials still surface (0 valid) for visibility.
+    for (scenario, entry_point), n in excluded.items():
+        if entry_point not in out.get(scenario, {}):
+            out[scenario][entry_point] = {"trials": 0, "excluded_trials": n, "metrics": {}}
     return dict(out)
 
 

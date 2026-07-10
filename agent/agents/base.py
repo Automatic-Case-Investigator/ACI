@@ -46,6 +46,8 @@ class Handoff:
     analyst_request: str = ""
     triage_report: str = ""
     source_run_id: str = ""
+    source_entity_id: str = ""
+    source_entity_type: str = ""
     artifacts: dict = field(default_factory=dict)
     prior_investigation_report: str = ""  # set for resume runs; used instead of triage_report
 
@@ -55,6 +57,8 @@ class Handoff:
             "analyst_request": self.analyst_request,
             "triage_report": self.triage_report,
             "source_run_id": self.source_run_id,
+            "source_entity_id": self.source_entity_id,
+            "source_entity_type": self.source_entity_type,
             "artifacts": self.artifacts,
             "prior_investigation_report": self.prior_investigation_report,
         }
@@ -68,6 +72,8 @@ class Handoff:
             analyst_request=data.get("analyst_request", ""),
             triage_report=data.get("triage_report", ""),
             source_run_id=data.get("source_run_id", ""),
+            source_entity_id=data.get("source_entity_id", ""),
+            source_entity_type=data.get("source_entity_type", ""),
             artifacts=data.get("artifacts") or {},
             prior_investigation_report=data.get("prior_investigation_report", ""),
         )
@@ -112,4 +118,3 @@ class Handoff:
         parts.append("")
         parts.append(self.prior_investigation_report or "(no prior report provided)")
         return "\n".join(parts)
-

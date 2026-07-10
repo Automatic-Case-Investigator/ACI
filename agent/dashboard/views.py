@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from django.core.paginator import Paginator
+from django.urls import reverse
 from django.shortcuts import redirect, render
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
@@ -21,6 +22,7 @@ from .run_actions import (
     delete_run,
     humanize_age,
     is_inferring,
+    is_orchestrator_session,
     is_orphaned_interactive_child,
 )
 from .runner import start_session, send_message
@@ -60,6 +62,7 @@ def _active_run_rows(runs) -> list[dict]:
             "question": r.question,
             "case_id": r.case_id,
             "age": humanize_age(int((now - r.created_at).total_seconds())),
+            "open_url": reverse("dashboard:session", args=[r.id]) if is_orchestrator_session(r) else reverse("dashboard:run_detail", args=[r.id]),
         }
         for r in runs
     ]

@@ -20,7 +20,7 @@ from django.urls import reverse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-from agent.models import AgentRun
+from agent.models import AgentEvent, AgentRun
 
 from .run_actions import (
     ACTIVE_STATES,
@@ -153,9 +153,19 @@ def _run_rows(seg: str, query: str = "", verdict: str = "") -> list[dict]:
         escalation = (r.metadata or {}).get("escalation") or {}
         action = escalation.get("action") or ""
         can_review = is_reviewable_workflow(r)
+        is_live = is_orchestrator_session(r)
+        if is_live:
+            type_label = "Live"
+        elif r.trigger == "benchmark":
+            type_label = "Benchmark"
+        elif r.trigger in _WORKFLOW_TRIGGERS:
+            type_label = "Workflow"
+        else:
+            type_label = r.trigger.title() if r.trigger else "Run"
         rows.append({
             "id": str(r.id),
-            "is_live": is_orchestrator_session(r),
+            "is_live": is_live,
+            "type_label": type_label,
             "agent_name": r.agent_name,
             "case_id": r.case_id,
             "question": r.question,
@@ -166,7 +176,8 @@ def _run_rows(seg: str, query: str = "", verdict: str = "") -> list[dict]:
             "escalation_label": _ESCALATION_LABEL.get(action, action),
             "execution_error": escalation.get("execution_error") or "",
             "age": _humanize_age(int((now - r.created_at).total_seconds())),
-            "open_url": reverse("dashboard:session", args=[r.id]) if is_orchestrator_session(r) else None,
+            "open_url": reverse("dashboard:session", args=[r.id]) if is_live else reverse("dashboard:run_detail", args=[r.id]),
+            "open_tip": "Open chatbox" if is_live else "Open run",
             "can_review": can_review,
             "review_url": reverse("dashboard:run_review", args=[r.id]) if can_review else None,
             "can_restart": can_restart_from_prior_run(r),
@@ -210,6 +221,16 @@ def runs_view(request):
         "query": f["query"],
         "verdict": f["verdict"],
         "subtitle": "Runs",
+    })
+
+
+def run_detail(request, run_id):
+    run = get_object_or_404(AgentRun, id=str(run_id))
+    events = list(AgentEvent.objects.filter(session_id=str(run.id)).order_by("id"))
+    return render(request, "dashboard/run_detail.html", {
+        "run": run,
+        "events": events,
+        "subtitle": "Run",
     })
 
 

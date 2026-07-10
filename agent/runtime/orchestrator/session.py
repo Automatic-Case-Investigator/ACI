@@ -36,9 +36,11 @@ from .messages import _deserialize_messages, _normalize_visible_transcript, _ser
 @dataclass
 class OrchestratorSession:
     """Shared state between the orchestrator and the dashboard for one analyst session."""
-    case_id: Optional[str] = None
+    src_entity_id: Optional[str] = None
+    source_entity_type: Optional[str] = None
     investigation_run_id: Optional[str] = None
-    last_triage_case_id: Optional[str] = None
+    last_triage_src_entity_id: Optional[str] = None
+    last_triage_source_entity_type: Optional[str] = None
     last_triage_report: Optional[str] = None
     last_triage_run_id: Optional[str] = None
     last_triage_status: Optional[str] = None
@@ -56,9 +58,11 @@ class OrchestratorSession:
     def to_state(self) -> dict:
         """Serialize session fields that must survive across dashboard requests."""
         return {
-            "case_id": self.case_id,
+            "src_entity_id": self.src_entity_id,
+            "source_entity_type": self.source_entity_type,
             "investigation_run_id": self.investigation_run_id,
-            "last_triage_case_id": self.last_triage_case_id,
+            "last_triage_src_entity_id": self.last_triage_src_entity_id,
+            "last_triage_source_entity_type": self.last_triage_source_entity_type,
             "last_triage_report": self.last_triage_report,
             "last_triage_run_id": self.last_triage_run_id,
             "last_triage_status": self.last_triage_status,
@@ -76,9 +80,24 @@ class OrchestratorSession:
         """Restore dashboard-persisted state into the live session object."""
         if not data:
             return
-        self.case_id = data.get("case_id", self.case_id)
+        # `entity_id`/`case_id` (and their `last_triage_*` forms) are earlier key names
+        # for this field; read them as fallbacks so sessions persisted before the
+        # src_entity_id rename still restore.
+        self.src_entity_id = data.get(
+            "src_entity_id", data.get("entity_id", data.get("case_id", self.src_entity_id))
+        )
+        self.source_entity_type = data.get(
+            "source_entity_type", data.get("entity_type", self.source_entity_type)
+        )
         self.investigation_run_id = data.get("investigation_run_id", self.investigation_run_id)
-        self.last_triage_case_id = data.get("last_triage_case_id", self.last_triage_case_id)
+        self.last_triage_src_entity_id = data.get(
+            "last_triage_src_entity_id",
+            data.get("last_triage_entity_id", data.get("last_triage_case_id", self.last_triage_src_entity_id)),
+        )
+        self.last_triage_source_entity_type = data.get(
+            "last_triage_source_entity_type",
+            data.get("last_triage_entity_type", self.last_triage_source_entity_type),
+        )
         self.last_triage_report = data.get("last_triage_report", self.last_triage_report)
         self.last_triage_run_id = data.get("last_triage_run_id", self.last_triage_run_id)
         self.last_triage_status = data.get("last_triage_status", self.last_triage_status)
@@ -97,4 +116,3 @@ class OrchestratorSession:
         self.visible_transcript = _normalize_visible_transcript(data.get("visible_transcript"))
         if not self.visible_transcript and self.messages:
             self.visible_transcript = _visible_transcript_from_messages(self.messages)
-

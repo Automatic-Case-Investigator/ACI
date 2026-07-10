@@ -42,13 +42,15 @@ def _orchestrator_system_prompt(
     return compose_system_prompt(
         ["platform", "orchestrator"],
         {
-            "case_id": session.case_id or "none set yet — extract from the message or ask the analyst",
+            "src_entity_id": session.src_entity_id or "none set yet — extract from the message or ask the analyst",
+            "source_entity_type": session.source_entity_type or "unknown",
             "agent_name": "orchestrator",
             "available_tools": tool_names or [],
             "provider_capability_contracts": format_provider_capability_contracts(_ORCHESTRATOR_TOOL_POLICY),
             "mcp_prompt_guidance": mcp_prompt_guidance,
             "last_triage_report_available": bool((session.last_triage_report or "").strip()),
-            "last_triage_case_id": session.last_triage_case_id or "",
+            "last_triage_src_entity_id": session.last_triage_src_entity_id or "",
+            "last_triage_source_entity_type": session.last_triage_source_entity_type or "",
             "investigation_run_id": session.investigation_run_id or "",
             "orchestrator_visible_transcript": session.visible_transcript,
         },
@@ -70,4 +72,3 @@ def _embedded_convo_char_budget() -> int:
     except Exception:
         limit = 131072
     return int(limit * 0.30 * 4)
-

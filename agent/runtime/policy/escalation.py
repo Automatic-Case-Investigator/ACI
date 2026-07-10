@@ -37,6 +37,14 @@ def execute_escalation(run: AgentRun) -> None:
         return
     if decision.get("executed_at"):
         return
+    if (run.metadata or {}).get("source_entity_type") == "alert":
+        emit(
+            "workflow",
+            "note",
+            f"alert {run.case_id}: escalation decision recorded; no case side-effect without linked case id",
+        )
+        _mark_executed(run, skipped_reason="standalone_alert_no_case")
+        return
 
     from aci_thehive.client import TheHiveClient
     from ..config import resolve_settings
@@ -85,11 +93,13 @@ def execute_escalation(run: AgentRun) -> None:
         _mark_error(run, str(exc))
 
 
-def _mark_executed(run: AgentRun) -> None:
+def _mark_executed(run: AgentRun, *, skipped_reason: str | None = None) -> None:
     meta = dict(run.metadata or {})
     escalation = {**meta.get("escalation", {})}
     escalation.pop("execution_error", None)
     escalation["executed_at"] = datetime.now(timezone.utc).isoformat()
+    if skipped_reason:
+        escalation["side_effect_skipped"] = skipped_reason
     meta["escalation"] = escalation
     AgentRun.objects.filter(id=run.id).update(metadata=meta)
 

@@ -1,10 +1,34 @@
 from __future__ import annotations
 
+from contextvars import ContextVar
+
+
+_AVFS_AGENT_ID: ContextVar[str | None] = ContextVar("avfs_agent_id", default=None)
+
+
+def bind_agent_id(agent_id: str):
+    """Bind the resolved AVFS agent id for the current async run context."""
+    try:
+        from ..providers.avfs import cache_agent_id
+
+        cache_agent_id(agent_id)
+    except ModuleNotFoundError as exc:
+        if exc.name != "django":
+            raise
+    return _AVFS_AGENT_ID.set(agent_id)
+
+
+def reset_agent_id(token) -> None:
+    _AVFS_AGENT_ID.reset(token)
+
 
 def _home() -> str:
-    from ..providers.avfs import resolved_agent_id
+    agent_id = _AVFS_AGENT_ID.get()
+    if not agent_id:
+        from ..providers.avfs import resolved_agent_id
 
-    return f"/home/{resolved_agent_id()}"
+        agent_id = resolved_agent_id()
+    return f"/home/{agent_id}"
 
 
 def home_dir() -> str:

@@ -84,10 +84,12 @@
                 <input type="checkbox" name="ids" value="{{ r.id }}" form="runs-bulk" data-bulk-item aria-label="Select run {{ r.agent_name }}">
               </td>
               <td>
-                {% if r.is_live %}
+                {% if r.type_label == "Live" %}
                 <span class="pill pill-on">Live</span>
+                {% elif r.type_label == "Benchmark" %}
+                <span class="pill pill-on">Benchmark</span>
                 {% else %}
-                <span class="pill">Workflow</span>
+                <span class="pill">{{ r.type_label }}</span>
                 {% endif %}
               </td>
               <td>
@@ -109,9 +111,7 @@
               </td>
               <td class="muted">{{ r.age }}</td>
               <td class="row-actions">
-                {% if r.is_live %}
-                <a class="icon-btn" href="{{ r.open_url }}" data-no-boost data-tip="Open chatbox" aria-label="Open chatbox"><c-lucideicon.eye width="16" height="16" /></a>
-                {% endif %}
+                <a class="icon-btn" href="{{ r.open_url }}" data-no-boost data-tip="{{ r.open_tip }}" aria-label="{{ r.open_tip }}"><c-lucideicon.eye width="16" height="16" /></a>
                 {% if r.can_review %}
                 <a class="icon-btn" href="{{ r.review_url }}" data-tip="Review triage" aria-label="Review triage"><c-lucideicon.clipboard-check width="16" height="16" /></a>
                 {% endif %}

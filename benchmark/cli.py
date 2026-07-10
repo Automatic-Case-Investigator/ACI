@@ -17,6 +17,10 @@ _CONFIG = _ROOT / "config"
 _DATA = _ROOT / "data"
 
 
+def _progress_enabled(args):
+    return False if args.no_progress else True
+
+
 def _load_yaml(path: Path) -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8"))
 
@@ -55,7 +59,7 @@ def _cmd_load_wazuh(args):
     from .pipeline import load_wazuh
 
     url = args.output_url or _wazuh_output_url()
-    print(load_wazuh.run(args.scenario, _DATA / "preprocessed", url))
+    print(load_wazuh.run(args.scenario, _DATA / "preprocessed", url, progress=_progress_enabled(args)))
 
 
 def _cmd_load_thehive(args):
@@ -67,6 +71,8 @@ def _cmd_load_thehive(args):
             _DATA / "preprocessed",
             min_level=args.min_level,
             manifest_dir=_DATA / "manifests",
+            progress=_progress_enabled(args),
+            workers=args.concurrency or 32,
         )
     )
 
@@ -79,9 +85,27 @@ def _cmd_run(args):
     cfg = _run_cfg()
     spec = ScenarioSpec.from_yaml(scenario_spec_path(args.scenario))
     entry_ids = [args.entry_point] if args.entry_point else [e.id for e in spec.entry_points]
+    trials = args.trials or cfg["trials"]
+    agent_name = cfg.get("agent", "investigation")
+    concurrency = max(1, args.concurrency or cfg.get("run_concurrency") or 1)
+    logger = None if args.quiet else runner.stderr_logger
+    if logger:
+        logger(
+            f"run scenario={args.scenario} entry_points={entry_ids} trials={trials} "
+            f"agent={agent_name} concurrency={concurrency}"
+        )
+    results = runner.run_many(
+        args.scenario,
+        entry_ids,
+        trials,
+        _DATA / "runs",
+        agent_name=agent_name,
+        log=logger,
+        timeout_secs=cfg.get("poll_timeout_secs"),
+        concurrency=concurrency,
+    )
     for ep in entry_ids:
-        ids = runner.run(args.scenario, ep, args.trials or cfg["trials"], _DATA / "runs", agent_name=cfg.get("agent", "investigation"))
-        print(f"{ep}: {len(ids)} runs")
+        print(f"{ep}: {len(results.get(ep, []))} runs")
 
 
 def _cmd_score(args):
@@ -107,6 +131,59 @@ def _cmd_all(args):
     _cmd_report(args)
 
 
+def _thehive_tags_for_scenario(scenario: str) -> list[tuple[str, Path]]:
+    """Every (run tag, manifest path) recorded in data/manifests/ for this scenario
+    (there may be several, if load-thehive was run more than once while iterating).
+    Returning the manifest path lets teardown use its stored alert ids and skip the
+    slow paged tag-discovery query."""
+    import json
+
+    manifest_dir = _DATA / "manifests"
+    out: list[tuple[str, Path]] = []
+    for path in sorted(manifest_dir.glob("thehive_manifest.*.json")):
+        m = json.loads(path.read_text(encoding="utf-8"))
+        if m.get("scenario") == scenario and m.get("tag"):
+            out.append((m["tag"], path))
+    return out
+
+
+def _thehive_manifest_for_run(run_id: str) -> Path:
+    manifest_dir = _DATA / "manifests"
+    normalized = run_id.removeprefix("ait-import-run:")
+    return manifest_dir / f"thehive_manifest.{normalized}.json"
+
+
+def _cmd_teardown(args):
+    target = args.target or "all"
+
+    if target in ("wazuh", "all"):
+        from .pipeline import load_wazuh
+
+        url = args.output_url or _wazuh_output_url()
+        result = load_wazuh.teardown(url, args.scenario, progress=_progress_enabled(args))
+        print("wazuh:", result)
+
+    if target in ("thehive", "all"):
+        from .pipeline import load_thehive
+
+        # (tag, manifest_path) pairs — from --run-id, or every manifest for the scenario.
+        if args.run_id:
+            targets = [(args.run_id, _thehive_manifest_for_run(args.run_id))]
+        else:
+            targets = _thehive_tags_for_scenario(args.scenario)
+        if not targets:
+            print(f"thehive: no manifests found for scenario {args.scenario!r} "
+                  f"under {_DATA / 'manifests'}; pass --run-id to tear down a specific tag")
+        for tag, manifest in targets:
+            deleted = load_thehive.teardown(
+                tag,
+                manifest_path=manifest,
+                progress=_progress_enabled(args),
+                workers=args.concurrency or 32,
+            )
+            print(f"thehive: deleted {deleted} alerts for tag {tag!r}")
+
+
 _COMMANDS = {
     "acquire": _cmd_acquire,
     "preprocess": _cmd_preprocess,
@@ -116,6 +193,7 @@ _COMMANDS = {
     "score": _cmd_score,
     "report": _cmd_report,
     "all": _cmd_all,
+    "teardown": _cmd_teardown,
 }
 
 
@@ -129,6 +207,17 @@ def build_parser() -> argparse.ArgumentParser:
         s.add_argument("--trials", type=int, default=None)
         s.add_argument("--min-level", type=int, default=7)
         s.add_argument("--output-url", default=None)
+        s.add_argument("--target", choices=["wazuh", "thehive", "all"], default=None,
+                        help="teardown only: which system to tear down (default: all)")
+        s.add_argument("--run-id", default=None,
+                        help="teardown only: a specific TheHive run tag/id "
+                             "(default: every manifest recorded for --scenario)")
+        s.add_argument("--no-progress", action="store_true",
+                        help="disable interactive benchmark progress bars")
+        s.add_argument("--concurrency", type=int, default=None,
+                        help="worker count for concurrent runs or TheHive import/teardown")
+        s.add_argument("--quiet", action="store_true",
+                        help="suppress benchmark status logging")
     return p
 
 

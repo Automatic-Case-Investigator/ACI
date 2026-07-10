@@ -79,6 +79,12 @@ investigation thread with a rule.id filter.**
   document IDs.** Passing them to `get_event` will always return "No event found".
   If you have a TheHive alert ID, use the SOAR tool (`get_alert`) to retrieve it —
   do not pass it to any Wazuh tool.
+- If the identifier is not a Wazuh document `_id` and not a TheHive case/alert id
+  either, it may be a SIEM-side reference with no direct lookup (e.g. a detection
+  rule id, or a short id from a SIEM-side alert/webhook). Do not guess at
+  `get_event` for it. Instead, use it as a filter or keyword in `search`,
+  `search_keyword`, or `profile_field` (e.g. `rule.id:<id>`) to locate the
+  underlying activity.
 - Do not guess, shorten, or fabricate event ids.
 - Do not assume a SOAR alert source reference is a Wazuh document id unless raw data
   confirms it.
@@ -94,6 +100,13 @@ investigation thread with a rule.id filter.**
   alert (the one named in the originating alert/case) rather than merging all of
   them — otherwise unrelated hosts' telemetry (e.g. background traffic from an
   unrelated machine) gets misattributed to the host actually under investigation.
+- **`agent.name` (the Wazuh agent's registration name) is NOT `predecoder.hostname`
+  / the log's own hostname — the two routinely differ.** One agent registered as, say,
+  `wazuh-client` can forward logs whose `predecoder.hostname` is `intranet-server`. So a
+  host pivot can be right in intent but wrong in field: if `agent.name=<host>` returns
+  nothing, the events may live under `predecoder.hostname=<host>` (or an entity field
+  such as `data.srcuser`/`data.srcip`) instead. Try the other host representation before
+  concluding the host has no activity — a zero under one identity field is not absence.
 
 ## Evidence handling
 

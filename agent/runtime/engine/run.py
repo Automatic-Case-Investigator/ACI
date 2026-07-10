@@ -9,7 +9,8 @@ from django.conf import settings
 
 from ...agents.registry import get_agent
 from ...models import AgentRun
-from ..infra.avfs import case_dir, home_dir, memory_dir
+from ..infra.avfs import bind_agent_id as bind_avfs_agent_id
+from ..infra.avfs import case_dir, home_dir, memory_dir, reset_agent_id as reset_avfs_agent_id
 from ..graph import GRAPH, AgentState
 from ..providers.base import format_provider_capability_contracts
 from ..infra.logbus import (
@@ -65,20 +66,28 @@ async def _run_agent_bound(
     # Apply analyst-editable budget / tool-policy overrides from the settings UI.
     from asgiref.sync import sync_to_async
     from ..config.overrides import resolve_agent_definition
+    from ..providers.avfs import resolved_agent_id
     agent_def = await sync_to_async(resolve_agent_definition, thread_sensitive=True)(agent_def)
-
-    run = await AgentRun.objects.aget(id=run_id)
-    run.status = AgentRun.STATUS_RUNNING
-    await run.asave(update_fields=["status", "updated_at"])
-
-    # A structured handoff (e.g. triage → investigation) travels in metadata so the
-    # graph's seed step can build the queue from explicit fields, not string-matching.
-    handoff = (run.metadata or {}).get("handoff")
-    restart_context = (run.metadata or {}).get("restart_context")
-    # Prior analyst conversation embedded by the orchestrator (interactive runs only).
-    orchestrator_conversation = (run.metadata or {}).get("orchestrator_context")
+    avfs_agent_id = await sync_to_async(resolved_agent_id, thread_sensitive=True)()
+    avfs_token = bind_avfs_agent_id(avfs_agent_id)
+    run = None
 
     try:
+        run = await AgentRun.objects.aget(id=run_id)
+        run.status = AgentRun.STATUS_RUNNING
+        await run.asave(update_fields=["status", "updated_at"])
+
+        # A structured handoff (e.g. triage → investigation) travels in metadata so the
+        # graph's seed step can build the queue from explicit fields, not string-matching.
+        handoff = (run.metadata or {}).get("handoff")
+        restart_context = (run.metadata or {}).get("restart_context")
+        source_entity_id = (run.metadata or {}).get("source_entity_id") or case_id
+        source_entity_type = (run.metadata or {}).get("source_entity_type") or ""
+        if not source_entity_type and isinstance(handoff, dict):
+            source_entity_type = handoff.get("source_entity_type") or ""
+        # Prior analyst conversation embedded by the orchestrator (interactive runs only).
+        orchestrator_conversation = (run.metadata or {}).get("orchestrator_context")
+
         mcp = await build_mcp_client(
             agent_def.tool_policy,
             run_ctx={"case_id": case_id, "run_id": run_id, "agent_name": agent_name},
@@ -90,6 +99,8 @@ async def _run_agent_bound(
             agent_def.prompt_layers,
             {
                 "case_id": case_id,
+                "source_entity_id": source_entity_id,
+                "source_entity_type": source_entity_type or "unknown",
                 "run_id": run_id,
                 "agent_name": agent_name,
                 "budget": {
@@ -111,6 +122,8 @@ async def _run_agent_bound(
         initial_state = AgentState(
             run_id=run_id,
             case_id=case_id,
+            source_entity_id=source_entity_id,
+            source_entity_type=source_entity_type or "unknown",
             agent_name=agent_name,
             question=question,
             handoff=handoff,
@@ -133,6 +146,7 @@ async def _run_agent_bound(
             task_ledger=None,
             last_observation=None,
             observation_retries=0,
+            tool_result_cache={},
         )
 
         config = {
@@ -160,11 +174,14 @@ async def _run_agent_bound(
         log.exception("Agent run %s failed", run_id)
         emit(src_label(agent_name), "error", f"agent run failed: {exc}", detail=str(exc))
         try:
-            run.status = AgentRun.STATUS_FAILED
-            run.error = str(exc)
-            await run.asave(update_fields=["status", "error", "updated_at"])
+            if run is not None:
+                run.status = AgentRun.STATUS_FAILED
+                run.error = str(exc)
+                await run.asave(update_fields=["status", "error", "updated_at"])
         except Exception:
             pass
+    finally:
+        reset_avfs_agent_id(avfs_token)
 
 
 def run_agent_sync(

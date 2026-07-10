@@ -78,6 +78,8 @@ async def dispatch_trigger(
         metadata={
             "trigger_event": trigger.event_type,
             "trigger_payload": trigger.payload,
+            "source_entity_id": trigger.case_id,
+            "source_entity_type": "alert" if trigger.event_type == EVENT_NEW_ALERT else "case",
             **(metadata_extra or {}),
         },
     )

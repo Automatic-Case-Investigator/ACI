@@ -6,12 +6,13 @@ import logging
 import re
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Annotated, Optional
 
 log = logging.getLogger(__name__)
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import StructuredTool
+from pydantic import Field
 
 from ...agents.base import AgentDefinition, Handoff
 from ...agents.registry import get_agent, list_agents
@@ -33,10 +34,10 @@ from .session import OrchestratorSession
 from .specialist_sync import apply_specialist_run_to_session, propagate_verdict_to_current_session
 
 
-def _has_completed_triage_handoff(session: OrchestratorSession, case_id: str) -> bool:
-    """True only when the session holds a completed triage report for this case."""
+def _has_completed_triage_handoff(session: OrchestratorSession, src_entity_id: str) -> bool:
+    """True only when the session holds a completed triage report for this entity."""
     return (
-        session.last_triage_case_id == case_id
+        session.last_triage_src_entity_id == src_entity_id
         and session.last_triage_status == AgentRun.STATUS_COMPLETED
         and bool((session.last_triage_report or "").strip())
     )
@@ -79,18 +80,44 @@ def _make_tools(session: OrchestratorSession) -> list[StructuredTool]:
     return tools
 
 
+_SrcEntityId = Annotated[str, Field(description=(
+    "The primary case/alert/event identifier from the analyst's request (e.g. "
+    "'~449101824'). This may be a SOAR case id, a standalone SOAR alert id, or a "
+    "SIEM-side alert/event reference — pass through whatever identifier was given "
+    "as-is; do not classify or reformat it (beyond preserving any existing '~' "
+    "prefix). The target agent determines which kind of identifier it is and "
+    "resolves it accordingly."
+))]
+
+
 def _make_agent_tool(session: OrchestratorSession, agent_def: AgentDefinition) -> StructuredTool:
     name = agent_def.name
 
+    def _resolved_source_entity_type(src_entity_id: str, question: str) -> str:
+        if session.src_entity_id == src_entity_id and session.source_entity_type:
+            return session.source_entity_type
+        text = (question or "").lower()
+        if "alert" in text:
+            return "alert"
+        if "case" in text:
+            return "case"
+        return "unknown"
+
     async def _execute(
-        case_id: str,
+        src_entity_id: str,
         question: str,
         triage_report: Optional[str],
         prior_investigation_report: Optional[str] = None,
     ) -> str:
-        # Normalise bare numeric IDs — TheHive requires the ~ prefix.
-        case_id = case_id if case_id.startswith("~") else f"~{case_id}"
-        session.case_id = case_id
+        # Normalise bare numeric ids only. Opaque TheHive alert ids are valid
+        # as-is, and alert-anchored benchmark sessions may have no case yet.
+        src_entity_id = src_entity_id.strip() if isinstance(src_entity_id, str) else ""
+        if src_entity_id and src_entity_id.isdigit():
+            src_entity_id = f"~{src_entity_id}"
+        session.src_entity_id = src_entity_id
+        source_entity_type = _resolved_source_entity_type(src_entity_id, question)
+        if source_entity_type != "unknown":
+            session.source_entity_type = source_entity_type
 
         # Render the prior analyst conversation so the subagent shares the analyst's
         # established intent/scope. session.messages holds the previous turns (the
@@ -117,20 +144,22 @@ def _make_agent_tool(session: OrchestratorSession, agent_def: AgentDefinition) -
             resume_report = prior_investigation_report or (
                 session.last_investigation_report
                 if session.last_investigation_status == "incomplete_budget"
-                   and session.last_triage_case_id == case_id
+                   and session.last_triage_src_entity_id == src_entity_id
                 else None
             )
             if resume_report:
                 handoff = Handoff(
                     analyst_request=question,
                     source_run_id=session.last_triage_run_id or "",
+                    source_entity_id=src_entity_id,
+                    source_entity_type=source_entity_type,
                     prior_investigation_report=resume_report,
                 )
                 emit("orch", "note", "investigation: resume mode — seeding from prior run's open gaps")
             else:
                 stored_report = (
                     session.last_triage_report
-                    if _has_completed_triage_handoff(session, case_id) else None
+                    if _has_completed_triage_handoff(session, src_entity_id) else None
                 )
                 report = stored_report or triage_report
                 if report:
@@ -138,15 +167,21 @@ def _make_agent_tool(session: OrchestratorSession, agent_def: AgentDefinition) -
                         analyst_request=question,
                         triage_report=report,
                         source_run_id=session.last_triage_run_id or "",
+                        source_entity_id=src_entity_id,
+                        source_entity_type=source_entity_type,
                     )
 
-        emit("orch", "route", f"{name}(case={case_id})", detail=f"handoff={'yes' if handoff else 'no'}")
+        emit("orch", "route", f"{name}(entity={src_entity_id})", detail=f"handoff={'yes' if handoff else 'no'}")
         run = await dispatch_run(
-            name, case_id, question,
+            name, src_entity_id, question,
             session_id=current_session(),
             trigger=AgentRun.TRIGGER_INTERACTIVE,
             handoff=handoff,
             orchestrator_context=convo_text or None,
+            metadata={
+                "source_entity_id": src_entity_id,
+                "source_entity_type": source_entity_type,
+            },
         )
 
         # produces_handoff agents (triage) leave a report the orchestrator captures
@@ -168,15 +203,15 @@ def _make_agent_tool(session: OrchestratorSession, agent_def: AgentDefinition) -
     # so the tool schema matches what each agent actually accepts.
     if agent_def.consumes_handoff:
         async def _run(
-            case_id: str,
+            src_entity_id: _SrcEntityId,
             question: str,
             triage_report: Optional[str] = None,
             prior_investigation_report: Optional[str] = None,
         ) -> str:
-            return await _execute(case_id, question, triage_report, prior_investigation_report)
+            return await _execute(src_entity_id, question, triage_report, prior_investigation_report)
     else:
-        async def _run(case_id: str, question: str) -> str:
-            return await _execute(case_id, question, None)
+        async def _run(src_entity_id: _SrcEntityId, question: str) -> str:
+            return await _execute(src_entity_id, question, None)
 
     _run.__doc__ = agent_def.description
     return StructuredTool.from_function(

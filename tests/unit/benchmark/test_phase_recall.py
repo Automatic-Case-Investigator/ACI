@@ -70,6 +70,75 @@ class PhaseRecallTest(unittest.TestCase):
         self.assertEqual(r.detail["reached"], 0)
 
 
+class AnchorEchoTest(unittest.TestCase):
+    """The harness injects an incident timestamp into the agent's question; a bare
+    restatement of it must NOT credit phase_recall for the phase whose window contains
+    it. Regression: fox privesc/2 concluded FP with zero retrieved evidence yet scored
+    the privilege_escalation phase 'reached' purely from echoing 2022-01-18T13:14:31Z.
+    """
+
+    ANCHOR = "2022-01-18T13:14:31Z"  # falls inside the privilege_escalation window
+
+    def _score(self, report_text: str):
+        ctx = ScoringContext.build(
+            _SCENARIO, report_text, entry_point="privilege_escalation",
+            meta={"anchor_timestamp": self.ANCHOR},
+        )
+        (result,) = scoring.run_all(ctx, ["phase_recall"])
+        return result
+
+    def test_bare_anchor_echo_does_not_credit_phase(self):
+        # The echoed question line: anchor timestamp, no event id → hollow, not reached.
+        report = ("**Question:** Triage and investigate alert ~1. The alert corresponds "
+                  "to activity observed around 2022-01-18T13:14:31Z.")
+        self.assertFalse(self._score(report).value["privilege_escalation"])
+
+    def test_anchor_cited_with_event_id_still_credits_phase(self):
+        # A genuine retrieval: the anchor instant alongside a real event id → reached.
+        report = "- `2022-01-18T13:14:31Z` — `eYzntgXUZwhw5Nh_-HUS`: su/UID change to phopkins."
+        self.assertTrue(self._score(report).value["privilege_escalation"])
+
+    def test_distinct_in_window_event_still_credits_despite_echo(self):
+        # Echoed anchor (no id) PLUS a distinct in-window event (with id) → reached via the real one.
+        report = ("**Question:** …activity observed around 2022-01-18T13:14:31Z.\n"
+                  "- `2022-01-18T13:14:49Z` — `3kp8gZqt29xgUPf7VD3i`: sudo cat /etc/shadow.")
+        self.assertTrue(self._score(report).value["privilege_escalation"])
+
+    def test_no_anchor_meta_preserves_legacy_behavior(self):
+        # Without an injected anchor, a bare in-window timestamp still counts (unchanged).
+        report = "- 2022-01-18T13:14:31Z — activity noted."
+        ctx = ScoringContext.build(_SCENARIO, report, entry_point="privilege_escalation")
+        (result,) = scoring.run_all(ctx, ["phase_recall"])
+        self.assertTrue(result.value["privilege_escalation"])
+
+
+class InvalidTrialExclusionTest(unittest.TestCase):
+    """A trial where the requested agent failed (trial_valid=False) must be excluded
+    from the recall roll-up — regression: an infra Connection error fell back to the
+    triage report and was scored as a real recall-0 trial (privesc/3)."""
+
+    def _card(self, *, trial, valid, webshell_hit):
+        r = _phase_result(
+            "Confirmed via `2022-01-18T12:38:29Z` (`w2X30PYVatKFcWqVUjiG`)." if webshell_hit else "nothing."
+        )
+        return {
+            "scenario": "toy", "entry_point": "recon", "trial": trial,
+            "status": "completed" if valid else "failed", "trial_valid": valid,
+            "results": [{"name": r.name, "kind": r.kind, "value": r.value, "detail": r.detail}],
+        }
+
+    def test_invalid_trial_excluded_from_rollup(self):
+        from benchmark.pipeline.report import aggregate_cards
+        cards = [
+            self._card(trial=1, valid=True, webshell_hit=True),   # real hit
+            self._card(trial=2, valid=False, webshell_hit=False),  # infra failure → must not count
+        ]
+        agg = aggregate_cards(cards)["toy"]["recon"]
+        self.assertEqual(agg["trials"], 1)            # only the valid trial
+        self.assertEqual(agg["excluded_trials"], 1)
+        self.assertEqual(agg["metrics"]["phase_recall"]["per_key"]["webshell"], 1.0)  # not diluted to 0.5
+
+
 class FoxSpecTest(unittest.TestCase):
     def test_fox_scenario_loads(self):
         path = os.path.join(_ROOT, "benchmark", "config", "scenarios", "fox.yaml")

@@ -18,8 +18,10 @@ import datetime as _dt
 import json
 import os
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+from ..progress import Progress, Spinner
 from ._vendor import ait_thehive as _th
 
 
@@ -52,6 +54,8 @@ def run(
     url: str | None = None,
     api_key: str | None = None,
     verify_tls: bool = True,
+    progress: bool | None = None,
+    workers: int = 32,
 ) -> dict:
     preprocessed_dir = Path(preprocessed_dir)
     dump = preprocessed_dir / f"{scenario}_wazuh.json"
@@ -69,32 +73,109 @@ def run(
 
     created = existed = errors = 0
     ids: list[str] = []
-    for a in alerts:
-        status, info = hive.create_alert(a)
-        if status in ("created", "exists"):
-            created += status == "created"
-            existed += status == "exists"
-            if info:
-                ids.append(info)
-        else:
-            errors += 1
+    records: list[dict] = []
+    bar = Progress(f"load-thehive {scenario}", len(alerts), enabled=progress)
+    try:
+        if alerts:
+            max_workers = max(1, min(workers, len(alerts)))
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                futures = {pool.submit(hive.create_alert, alert): alert for alert in alerts}
+                for fut in as_completed(futures):
+                    alert = futures[fut]
+                    status, info = fut.result()
+                    if status in ("created", "exists"):
+                        created += status == "created"
+                        existed += status == "exists"
+                        if info:
+                            ids.append(info)
+                            records.append({
+                                "id": info,
+                                "sourceRef": alert.get("sourceRef", ""),
+                                "date": alert.get("date"),
+                                "title": alert.get("title", ""),
+                                "tags": alert.get("tags") or [],
+                            })
+                    else:
+                        errors += 1
+                    bar.advance(extra=f"created={created} exists={existed} errors={errors}")
+    finally:
+        bar.close(extra=f"created={created} exists={existed} errors={errors}")
 
     manifest_dir = Path(manifest_dir) if manifest_dir else preprocessed_dir.parent / "manifests"
     manifest_dir.mkdir(parents=True, exist_ok=True)
     manifest = manifest_dir / f"thehive_manifest.{run_id}.json"
     manifest.write_text(json.dumps({
         "run_id": run_id, "tag": run_tag, "scenario": scenario,
-        "created": created, "existed": existed, "errors": errors, "alert_ids": ids,
+        "created": created, "existed": existed, "errors": errors,
+        "alert_ids": ids, "alerts": records,
     }, indent=2), encoding="utf-8")
     return {"run_id": run_id, "tag": run_tag, "selected": len(alerts),
             "created": created, "existed": existed, "errors": errors, "manifest": str(manifest)}
 
 
+def _ids_by_tag_with_progress(hive, tag: str, progress: Progress) -> list[str]:
+    ids: list[str] = []
+    page = 0
+    while True:
+        progress.update(len(ids), extra=f"querying tag page={page} found={len(ids)}", force=True)
+        with Spinner(progress, f"querying tag page={page} found={len(ids)}"):
+            if hasattr(hive, "_query"):
+                res = hive._query([
+                    {"_name": "listAlert"},
+                    {"_name": "filter", "_field": "tags", "_value": tag},
+                    {"_name": "page", "from": page, "to": page + 500, "extraData": []},
+                ])
+            else:
+                res = [{"_id": i} for i in hive.ids_by_tag(tag)]
+        if not res:
+            break
+        ids.extend(a["_id"] for a in res)
+        ids = list(dict.fromkeys(ids))
+        progress.update(len(ids), extra=f"found={len(ids)} page={page}", force=True)
+        if len(res) < 500 or not hasattr(hive, "_query"):
+            break
+        page += 500
+    return ids
+
+
 def teardown(tag: str, *, url: str | None = None, api_key: str | None = None,
-             verify_tls: bool = True) -> int:
+             verify_tls: bool = True, progress: bool | None = None,
+             manifest_path: str | Path | None = None, workers: int = 32) -> int:
     if not (url and api_key):
         url, api_key, verify_tls = _resolve_connection()
     hive = _th.TheHive(url, api_key, verify=verify_tls)
     full_tag = tag if tag.startswith(_th.RUN_TAG_PREFIX) else _th.RUN_TAG_PREFIX + tag
-    ids = hive.ids_by_tag(full_tag)
-    return sum(1 for i in ids if hive.delete_alert(i))
+
+    # Prefer the manifest's stored alert ids — they are recorded at load time, so the slow
+    # paged tag-discovery query is skipped entirely. Only fall back to discovery when no
+    # (usable) manifest is available.
+    ids: list[str] = []
+    manifest_note = ""
+    if manifest_path:
+        manifest = Path(manifest_path)
+        if manifest.exists():
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+            ids = list(dict.fromkeys(data.get("alert_ids") or []))
+            manifest_note = f"manifest ids={len(ids)}"
+        else:
+            manifest_note = f"manifest missing: {manifest}"
+    discover = Progress(f"discover-thehive {tag}", enabled=progress)
+    if manifest_note:
+        discover.update(len(ids), extra=manifest_note, force=True)
+    if not ids:
+        ids = _ids_by_tag_with_progress(hive, full_tag, discover)
+    discover.close(extra=f"found={len(ids)}")
+
+    # Delete in parallel: each delete is an independent DELETE request, and requests.Session
+    # is safe across threads, so a small pool cuts wall-clock time by ~`workers`x.
+    deleted = 0
+    bar = Progress(f"teardown-thehive {tag}", len(ids), enabled=progress)
+    try:
+        if ids:
+            with ThreadPoolExecutor(max_workers=max(1, min(workers, len(ids)))) as pool:
+                for ok in pool.map(hive.delete_alert, ids):
+                    deleted += bool(ok)
+                    bar.advance(extra=f"deleted={deleted}")
+    finally:
+        bar.close(extra=f"deleted={deleted}")
+    return deleted

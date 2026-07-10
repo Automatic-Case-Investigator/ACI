@@ -69,7 +69,7 @@ def score_trial(trial_dir: Path, spec: ScenarioSpec, metrics: str | list[str] = 
     verdict = _read(trial_dir / "verdict.json", {}) or {}
     meta = _read(trial_dir / "meta.json", {}) or {}
     ctx = ScoringContext.build(
-        spec, report_text, entry_point=meta.get("entry_point", ""), verdict=verdict
+        spec, report_text, entry_point=meta.get("entry_point", ""), verdict=verdict, meta=meta
     )
     results = [asdict(r) for r in scoring.run_all(ctx, metrics)]
     card = {
@@ -77,6 +77,10 @@ def score_trial(trial_dir: Path, spec: ScenarioSpec, metrics: str | list[str] = 
         "entry_point": meta.get("entry_point", ""),
         "trial": meta.get("trial"),
         "status": meta.get("status"),
+        # Whether the REQUESTED agent produced this trial (default True for legacy meta
+        # that predates the flag). Aggregation excludes invalid trials so an infra
+        # failure that fell back to triage does not pollute the recall roll-up.
+        "trial_valid": meta.get("trial_valid", True),
         "results": results,
     }
     card["rows"] = metric_rows(card)

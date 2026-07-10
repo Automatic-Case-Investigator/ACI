@@ -37,6 +37,8 @@ Usage
   python thehive_import.py teardown --all
 """
 
+from __future__ import annotations
+
 import argparse
 import datetime as dt
 import json
@@ -90,13 +92,24 @@ def is_anomaly(source: dict) -> bool:
 
 
 def collapse_key(source: dict):
-    """Return a dedup key for correlation rules, or None if not collapsible."""
+    """Return a dedup key for correlation rules, or None if not collapsible.
+
+    BENCHMARK FIX: the key includes the target agent, not just (rule, source ip). A
+    scanning source can hit MULTIPLE hosts in a multi-host scenario (confirmed for Fox:
+    172.17.130.196 fires rule 31151 against both agent 23 and agent 27); collapsing on
+    (rule, srcip) alone keeps only the file-order-first occurrence and silently drops
+    every other target host's alert for that (rule, srcip) pair — including the one a
+    scenario's entry point may anchor on. "Collapse repeated hits from the same source
+    against the SAME target" is the correct dedup semantic; collapsing across different
+    targets erases evidence rather than just reducing noise.
+    """
     rid = source["rule"]["id"]
     if rid not in CORRELATION_RULES:
         return None
     data = source.get("data") or {}
     src = data.get("srcip") or data.get("src_ip") or source.get("agent", {}).get("ip", "")
-    return (rid, src)
+    agent_id = source.get("agent", {}).get("id", "")
+    return (rid, src, agent_id)
 
 
 # Alert content format mirrors ls111-cybersec/wazuh-thehive-integration-ep13
@@ -600,7 +613,7 @@ def main():
     common.add_argument("--url")
     common.add_argument("--api-key")
     common.add_argument("--insecure", action="store_true", help="skip TLS verification")
-    common.add_argument("--concurrency", type=int, default=10)
+    common.add_argument("--concurrency", type=int, default=32)
 
     pi = sub.add_parser("import", parents=[common])
     pi.add_argument("--scenario", default="fox")

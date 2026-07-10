@@ -1,5 +1,7 @@
 import uuid
 from django.db import models
+from django.db.models.signals import post_delete
+from django.dispatch import receiver
 
 
 
@@ -85,4 +87,36 @@ class AgentEvent(models.Model):
 
     def __str__(self):
         return f"[{self.source}/{self.kind}] {self.summary[:60]}"
+
+
+@receiver(post_delete, sender=AgentRun)
+def _cascade_delete_session_children(sender, instance, **kwargs):
+    """Delete a session's child specialist runs (and its events) whenever the session
+    row is removed — by ANY path (dashboard, admin, shell, a bulk queryset delete).
+
+    A child triage/investigation run is tied to its session only by the soft JSON
+    reference `metadata["session_id"]`, not a database foreign key, so the DB enforces
+    no cascade on its own. Without this, deleting an orchestrator session by a path that
+    bypasses `dashboard.run_actions.delete_run` strands the children as orphans (the
+    observed June accumulation). Making the cascade a model-level invariant closes that
+    gap regardless of the caller.
+
+    Only orchestrator *session* rows own children, so this no-ops for the children
+    themselves (avoiding needless work and any re-entrancy). Fail-safe: the JSON lookup
+    is guarded so a delete can never be aborted by an unsupported-backend error.
+    """
+    if instance.agent_name != "orchestrator":
+        return
+    sid = str(instance.id)
+    try:
+        AgentRun.objects.filter(metadata__session_id=sid).delete()
+    except Exception:
+        # Backend without JSON-key lookup support: fall back to a Python-side scan.
+        stale = [
+            r.id for r in AgentRun.objects.exclude(agent_name="orchestrator")
+            if str((r.metadata or {}).get("session_id")) == sid
+        ]
+        if stale:
+            AgentRun.objects.filter(id__in=stale).delete()
+    AgentEvent.objects.filter(session_id=sid).delete()
 

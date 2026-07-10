@@ -12,6 +12,8 @@ class AgentState(TypedDict):
     """Canonical mutable state consumed and returned by graph nodes."""
     run_id: str
     case_id: str
+    source_entity_id: str
+    source_entity_type: str
     agent_name: str
     question: str
     handoff: Optional[dict]
@@ -39,3 +41,4 @@ class AgentState(TypedDict):
     last_observation: Optional[dict]  # normalized summary of the most recent tool-observation batch
     observation_retries: int  # consecutive observation cycles with no meaningful new evidence
     refine_streak: int  # consecutive interpret cycles that chose refine_query without advancing
+    tool_result_cache: Optional[dict]  # run-local exact-argument cache for deterministic read tools

@@ -79,10 +79,13 @@ _TRIAGE_CASE_INQUIRY_RE = re.compile(
 )
 # Extracts the first TheHive case ID (~digits or bare digits) from a string.
 _CASE_ID_RE = re.compile(r"(~\d+|\b\d{7,}\b)")
+_ALERT_ID_RE = re.compile(r"\balert\s+([A-Za-z0-9][A-Za-z0-9_.:\-~]{2,})", re.IGNORECASE)
+_CASE_WORD_RE = re.compile(r"\bcase\b", re.IGNORECASE)
+_ALERT_WORD_RE = re.compile(r"\balert\b", re.IGNORECASE)
 
 
-def _extract_triage_case_id(question: str, session_case_id: str | None) -> str | None:
-    """Return a case ID if the question is a triage request, else None.
+def _extract_triage_src_entity_id(question: str, session_src_entity_id: str | None) -> str | None:
+    """Return an entity ID if the question is a triage request, else None.
 
     Does not match opt-outs ("triage only" is fine, "don't triage" is not).
     """
@@ -93,14 +96,47 @@ def _extract_triage_case_id(question: str, session_case_id: str | None) -> str |
     is_triage = _TRIAGE_EXPLICIT_RE.search(q) or _TRIAGE_CASE_INQUIRY_RE.search(q)
     if not is_triage:
         return None
-    # Extract case ID from question or fall back to session context.
+    # Extract the entity ID from the question or fall back to session context.
     m = _CASE_ID_RE.search(q)
     if m:
         raw = m.group(1)
         return raw if raw.startswith("~") else f"~{raw}"
-    if session_case_id:
-        return session_case_id
+    if session_src_entity_id:
+        return session_src_entity_id
     return None
+
+
+def _extract_triage_alert_id(question: str) -> str | None:
+    if not question:
+        return None
+    q = question.strip()
+    if not _TRIAGE_EXPLICIT_RE.search(q):
+        return None
+    m = _ALERT_ID_RE.search(q)
+    return m.group(1).rstrip(".!,;:") if m else None
+
+
+def _source_entity_type_from_question(question: str | None) -> str:
+    """Classify analyst wording when it explicitly says case vs alert."""
+    q = (question or "").strip()
+    if not q:
+        return "unknown"
+    if _ALERT_WORD_RE.search(q):
+        return "alert"
+    if _CASE_WORD_RE.search(q):
+        return "case"
+    return "unknown"
+
+
+def _triage_routing_target(question: str, session_src_entity_id: str | None) -> tuple[str | None, str]:
+    """Return the triage target id and source type, with explicit alert wording first."""
+    alert_id = _extract_triage_alert_id(question)
+    if alert_id:
+        return alert_id, "alert"
+    entity_id = _extract_triage_src_entity_id(question, session_src_entity_id)
+    if entity_id:
+        return entity_id, _source_entity_type_from_question(question)
+    return None, "unknown"
 
 
 def _analyst_requested_investigation(question: str | None) -> bool:
@@ -200,18 +236,33 @@ async def _run_orchestrator_impl(session: OrchestratorSession, question: str, ma
     # Inject a hard routing directive when the question is a triage request and
     # triage has not already run this session.  This overrides the intent model's
     # tendency to answer case-inquiry questions with inline raw-tool calls.
-    triage_case_id = _extract_triage_case_id(question, session.case_id)
-    if triage_case_id and not session.last_triage_report and "triage" in tmap:
+    triage_src_entity_id, triage_source_type = _triage_routing_target(question, session.src_entity_id)
+    if triage_src_entity_id and triage_source_type != "alert" and not session.last_triage_report and "triage" in tmap:
+        session.src_entity_id = triage_src_entity_id
+        session.source_entity_type = triage_source_type
         directive = (
             f"[Routing directive — follow exactly] "
-            f"The analyst's message is a triage request for case {triage_case_id}. "
+            f"The analyst's message is a triage request for {triage_src_entity_id}. "
             f"Your FIRST and ONLY correct action is to call the `triage` tool with "
-            f"case_id='{triage_case_id}'. Do NOT call get_case, list_case_alerts, "
+            f"src_entity_id='{triage_src_entity_id}'. Do NOT call get_case, list_case_alerts, "
             f"search_keyword, profile_field, top_field_values, get_event, get_alert, "
             f"or any other data-source tool before `triage` completes."
         )
         messages.append(HumanMessage(content=directive))
-        emit("orch", "note", f"routing directive: triage({triage_case_id})")
+        emit("orch", "note", f"routing directive: triage({triage_src_entity_id})")
+    if triage_src_entity_id and triage_source_type == "alert" and not session.last_triage_report and "triage" in tmap:
+        session.src_entity_id = triage_src_entity_id
+        session.source_entity_type = "alert"
+        directive = (
+            f"[Routing directive - follow exactly] "
+            f"The analyst's message is a triage request for alert {triage_src_entity_id}. "
+            f"Your FIRST and ONLY correct action is to call the `triage` tool with "
+            f"src_entity_id='{triage_src_entity_id}'. Do NOT call get_case, list_case_alerts, "
+            f"search_keyword, profile_field, top_field_values, get_event, get_alert, "
+            f"or any other data-source tool before `triage` completes."
+        )
+        messages.append(HumanMessage(content=directive))
+        emit("orch", "note", f"routing directive: triage(alert={triage_src_entity_id})")
 
     # Inject a hard routing directive when the analyst confirms investigation after triage.
     # Fires when: (1) a triage report is stored, (2) no investigation has started,
@@ -229,19 +280,19 @@ async def _run_orchestrator_impl(session: OrchestratorSession, question: str, ma
         )
     )
     if is_investigation_consent:
-        inv_case_id = session.last_triage_case_id or session.case_id or ""
+        inv_src_entity_id = session.last_triage_src_entity_id or session.src_entity_id or ""
         directive = (
             f"[Routing directive — follow exactly] "
-            f"The analyst has confirmed investigation for case {inv_case_id}. "
+            f"The analyst has confirmed investigation for {inv_src_entity_id}. "
             f"Your FIRST and ONLY correct action is to call the `investigation` tool with "
-            f"case_id='{inv_case_id}', question='Investigate case {inv_case_id}', "
+            f"src_entity_id='{inv_src_entity_id}', question='Investigate {inv_src_entity_id}', "
             f"and the stored triage report as `triage_report`. "
             f"Do NOT call get_case, list_case_alerts, search, search_keyword, get_alert, "
             f"get_event, or any other data-source tool directly — those are for the "
             f"investigation sub-agent to use, not for you."
         )
         messages.append(HumanMessage(content=directive))
-        emit("orch", "note", f"routing directive: investigation({inv_case_id})")
+        emit("orch", "note", f"routing directive: investigation({inv_src_entity_id})")
 
     # Resume directive: fires when a prior investigation ran out of budget and the
     # analyst sends a consent-like message ("continue", "yes", "go ahead", etc.).
@@ -255,19 +306,19 @@ async def _run_orchestrator_impl(session: OrchestratorSession, question: str, ma
         and not is_investigation_consent  # don't fire both directives
     )
     if is_investigation_resume:
-        resume_case_id = session.case_id or ""
+        resume_src_entity_id = session.src_entity_id or ""
         directive = (
             f"[Routing directive — follow exactly] "
-            f"The prior investigation for case {resume_case_id} ran out of budget. "
+            f"The prior investigation for {resume_src_entity_id} ran out of budget. "
             f"The analyst wants to continue from where it left off. "
             f"Your FIRST and ONLY correct action is to call the `investigation` tool with "
-            f"case_id='{resume_case_id}', question='Continue investigation of case {resume_case_id}', "
+            f"src_entity_id='{resume_src_entity_id}', question='Continue investigation of {resume_src_entity_id}', "
             f"and the stored prior investigation report as `prior_investigation_report`. "
             f"Do NOT call any data-source tools directly — those are for the "
             f"investigation sub-agent to use, not for you."
         )
         messages.append(HumanMessage(content=directive))
-        emit("orch", "note", f"routing directive: investigation resume({resume_case_id})")
+        emit("orch", "note", f"routing directive: investigation resume({resume_src_entity_id})")
 
     for _ in range(max_rounds):
         if _should_compact(session.ctx_tokens):
@@ -368,12 +419,18 @@ async def _run_orchestrator_impl(session: OrchestratorSession, question: str, ma
         for tc in tool_calls:
             args = tc.get("args", {})
             # Track the case the analyst is working on so follow-up questions
-            # don't lose context. Any tool that mentions a case_id (TheHive
-            # lookups, sub-agent calls) updates the session.
-            if not session.case_id and isinstance(args.get("case_id"), str) and args["case_id"]:
-                raw_cid = args["case_id"]
-                # TheHive case IDs require the ~ prefix; normalise bare numerics.
-                session.case_id = raw_cid if raw_cid.startswith("~") else f"~{raw_cid}"
+            # don't lose context. Any tool that mentions a case_id/src_entity_id
+            # (TheHive lookups, sub-agent calls) updates the session.
+            raw_cid_val = args.get("case_id") or args.get("src_entity_id")
+            if not session.src_entity_id and isinstance(raw_cid_val, str) and raw_cid_val:
+                raw_cid = raw_cid_val
+                # TheHive case IDs require the ~ prefix; normalise only bare
+                # numeric case IDs. Opaque alert IDs are valid as-is.
+                session.src_entity_id = f"~{raw_cid}" if raw_cid.isdigit() else raw_cid
+            if tc["name"] in {"triage", "investigation"} and isinstance(raw_cid_val, str) and raw_cid_val:
+                inferred_type = _source_entity_type_from_question(question)
+                if inferred_type != "unknown":
+                    session.source_entity_type = inferred_type
             tool = tmap.get(tc["name"])
             if tool is None:
                 available = ", ".join(sorted(tmap))
@@ -419,7 +476,7 @@ async def _run_orchestrator_impl(session: OrchestratorSession, question: str, ma
             if invest_tool is not None:
                 emit("orch", "note", "auto-triggering investigation per analyst request")
                 invest_args = {
-                    "case_id": session.case_id or "",
+                    "src_entity_id": session.src_entity_id or "",
                     "question": question,
                     "triage_report": session.last_triage_report,
                 }
@@ -534,4 +591,3 @@ async def _run_orchestrator_impl(session: OrchestratorSession, question: str, ma
     answer = (final.content or "").strip() or "(no answer)"
     _append_visible(session.visible_transcript, "assistant", answer)
     return answer
-

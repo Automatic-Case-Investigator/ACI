@@ -134,7 +134,7 @@
           <tbody id="active-runs" data-page-size="8" data-page-param="rp">
             {% for r in active_runs %}
             <tr style="--i: {{ forloop.counter0 }}">
-              <td class="mono">{{ r.short_id }}</td>
+              <td class="mono"><a class="link-inline" href="{{ r.open_url }}" data-no-boost>{{ r.short_id }}</a></td>
               <td class="cell-q">
                 <span class="strong">{{ r.agent_name }}</span>
                 <span class="muted tiny">{{ r.question|truncatechars:70 }}</span>

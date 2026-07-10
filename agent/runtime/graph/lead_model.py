@@ -27,9 +27,10 @@ _VALID_CATEGORIES = {"approved", "invalid", "duplicate", "low_relevance"}
 _LEAD_SYSTEM = (
     "You are a SOC investigation lead reviewer. You read an analyst's '## New Leads' "
     "section and turn the leads the analyst proposed into a clean, validated, "
-    "deduplicated list. The analyst (not you) decides what to investigate next by "
-    "applying the artifact-pivot guide to what they confirmed; your job is to "
-    "VALIDATE and DEDUPLICATE the leads they proposed — not to invent new "
+    "deduplicated, queue-ranked list. The analyst (not you) decides what to "
+    "investigate next by applying the artifact-pivot guide to what they confirmed; "
+    "your job is to VALIDATE, DEDUPLICATE, and ASSIGN FINAL PRIORITY to the leads "
+    "they proposed after reading the current task queue — not to invent new "
     "investigative directions of your own.\n"
     "The analyst's formatting is inconsistent — leads may span multiple lines, use "
     "sub-bullets, capitalize field names differently, or be written as prose. "
@@ -57,7 +58,7 @@ def _build_prompt(
     # If a completed task did not reach a solid conclusion, it should not
     # automatically block a follow-up investigation.
     existing = "\n".join(
-        f"- [{t.get('status', '?')}] {t.get('title', '')}"
+        f"- [{t.get('status', '?')} P{t.get('priority', '?')}] {t.get('title', '')}"
         + (
             f" | Outcome: {t.get('summary') or t.get('conclusion')}"
             if (t.get("summary") or t.get("conclusion"))
@@ -88,7 +89,7 @@ def _build_prompt(
         '  "title": str,            // concise imperative lead title\n'
         '  "pivots": str,           // concrete pivots: host/user/ip/path/time window/rule ids\n'
         '  "evidence": str,         // the evidence anchor that motivates the lead\n'
-        '  "priority": int,         // 0-100\n'
+        '  "priority": int,         // final queue-relative priority, 0-100\n'
         '  "approved": bool,\n'
         '  "category": "approved"|"invalid"|"duplicate"|"low_relevance",\n'
         '  "reason": str            // one short clause justifying the decision\n'
@@ -128,6 +129,17 @@ def _build_prompt(
         "when the new lead is actually a different question/angle.\n"
         "- Sharing a host/IP/path/time-window is NOT enough—a different investigative "
         "angle (upstream cause vs downstream impact) is a NEW lead.\n"
+        "- Priority assignment happens AFTER reading the current queue above. Treat any "
+        "priority written in the New Leads section as a proposal, not the final value. "
+        "Set the final numeric priority by comparing the lead's expected investigation "
+        "value against already-pending, claimed, and completed work: raise leads that "
+        "resolve verdict-critical uncertainty, active compromise, containment decisions, "
+        "or a currently uncovered chain transition; lower leads that are redundant with "
+        "higher-priority queued work, mostly scope/background, or unlikely to change the "
+        "next investigative decision. Priority controls scheduling, not recall: do not "
+        "reject a valid evidence-backed lead merely because it should be low priority. "
+        "Preserve ordering coherence: a new lead should not outrank an already-queued "
+        "task unless it is more urgent or more likely to change the verdict/response.\n"
         "- Otherwise set approved=true. When uncertain whether previous work "
         "definitively resolved the question, approve the lead.\n"
         "- Always fill title/pivots/evidence with the reassembled content even when "

@@ -17,12 +17,15 @@ host_map:
   "18": {ip: 172.17.131.81, role: "dnsteal (separate host, prior day)"}
 
 # What the SIEM would REALISTICALLY hand the agent vs. what we inject to probe a
-# specific reasoning direction. Only `recon` exists organically as a TheHive case;
-# it is the only phase whose rule (31151, level 10) clears the import severity floor.
+# specific reasoning direction. `recon` is anchored to the imported alert descriptor
+# instead of a transient TheHive case id, so benchmark runs remain valid after case
+# teardown/re-import cycles.
 entry_points:
   - id: recon
     kind: organic
-    case_id: "~449101824"
+    anchor_timestamp: 2022-01-18T12:19:10Z
+    anchor_rule_id: "31151"
+    anchor_agent_id: "27"
     reasoning_direction: forward       # start at recon noise, chain forward to impact
   - id: privilege_escalation
     kind: synthetic                    # rule 5501 (level 3) never promotes on its own

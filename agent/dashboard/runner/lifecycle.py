@@ -19,9 +19,15 @@ from ._base import _ACTIVE_SPECIALIST_STATES, _RESTARTABLE_AGENTS, _active_sessi
 
 # ── public API ─────────────────────────────────────────────────────────────────
 
-def start_session(question: str, case_id: str = "", *, orch_state: dict | None = None) -> str:
+def start_session(
+    question: str,
+    case_id: str = "",
+    *,
+    orch_state: dict | None = None,
+    metadata: dict | None = None,
+) -> str:
     """Create a new analyst session and enqueue the opening question."""
-    metadata = {}
+    metadata = dict(metadata or {})
     if orch_state:
         metadata["orch_session"] = orch_state
     run = AgentRun.objects.create(
@@ -56,12 +62,14 @@ def start_investigation_from_triage(source_run: AgentRun) -> str:
         )
     case_id = source_run.case_id or ""
     question = (
-        f"Investigate case {case_id} using the approved triage report from workflow "
+        f"Investigate {case_id} using the approved triage report from workflow "
         f"{str(source_run.id)[:8]}."
     ).strip()
     orch_state = {
-        "case_id": case_id,
-        "last_triage_case_id": case_id,
+        "src_entity_id": case_id,
+        "source_entity_type": (source_run.metadata or {}).get("source_entity_type", "unknown"),
+        "last_triage_src_entity_id": case_id,
+        "last_triage_source_entity_type": (source_run.metadata or {}).get("source_entity_type", "unknown"),
         "last_triage_report": source_run.result or "",
         "last_triage_run_id": str(source_run.id),
         "last_triage_status": source_run.status,
@@ -247,7 +255,7 @@ def _session_loop(session_id: str, q: queue.Queue) -> None:
                 unless_cancelled=True,
                 status=final_status,
                 result=answer,
-                case_id=sess.case_id or "",
+                case_id=sess.src_entity_id or "",
             )
             _save_session_state(session_id, sess)
     finally:
@@ -263,18 +271,21 @@ async def _run_review_investigation(
     question: str,
 ) -> str:
     """Deterministically continue a held workflow triage report into investigation."""
-    case_id = sess.last_triage_case_id or sess.case_id or ""
+    case_id = sess.last_triage_src_entity_id or sess.src_entity_id or ""
     triage_report = (sess.last_triage_report or "").strip()
     if not case_id or not triage_report or sess.last_triage_status != AgentRun.STATUS_COMPLETED:
         msg = "Cannot start investigation: the approved workflow triage report was not available."
         logbus.emit("orch", "error", msg)
         return msg
 
-    sess.case_id = case_id
+    sess.src_entity_id = case_id
+    source_entity_type = sess.last_triage_source_entity_type or sess.source_entity_type or ""
     handoff = Handoff(
         analyst_request=question,
         triage_report=triage_report,
         source_run_id=sess.last_triage_run_id or "",
+        source_entity_id=case_id,
+        source_entity_type=source_entity_type,
     )
     logbus.emit(
         "orch",
@@ -298,6 +309,10 @@ async def _run_review_investigation(
         session_id=session_id,
         trigger=AgentRun.TRIGGER_INTERACTIVE,
         handoff=handoff,
+        metadata={
+            "source_entity_id": case_id,
+            "source_entity_type": source_entity_type or "unknown",
+        },
     )
     sess.investigation_run_id = str(run.id)
     sess.last_investigation_report = run.result or ""
@@ -311,4 +326,3 @@ async def _run_review_investigation(
         )
     logbus.emit("orch", "result", f"investigation: status={run.status}", detail=answer)
     return answer
-

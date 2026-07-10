@@ -73,22 +73,41 @@ analyst provides a case ID without the tilde, add it before calling any tool.
 
 ## Mandatory startup sequence (triage and investigation)
 
-Run these three steps before any analysis. Do not skip or reorder them.
+Your input id may be a SOAR case, a standalone SOAR alert, or a SIEM-side
+reference that is not a TheHive entity at all — case and alert ids share the same
+`~<number>` shape, so determine which one you have by trying the calls, not by
+guessing from the id's format. **Read the request: when the analyst refers to the id
+as an alert, calling `get_alert` to retrieve the actual alert record is mandatory —
+do not triage from a case record or a `list_case_alerts` summary alone.**
 
-1. **`get_case`** — Load the full case record. Capture title, description, severity,
-   status, tags, the case `date`, created/updated timestamps, and any analyst context
-   already present. The case `date` is the incident timestamp. `createdAt`,
-   `_createdAt`, `updatedAt`, and `_updatedAt` are TheHive lifecycle/import
-   timestamps and must not be used as SIEM query anchors.
-2. **`list_case_alerts`** — Load the grouped alert summary for the case. Reason from
+1. **Choose the first lookup from the analyst's wording.** If the analyst calls
+   the id an **alert**, call `get_alert` first and read the full alert record.
+   If the analyst calls it a **case**, or does not specify the entity type, try
+   `get_case` first. Case and alert ids share the same `~<number>` shape; the
+   words in the request are stronger evidence than the id format.
+2. **For case-oriented or unknown ids, try `get_case`.** If it succeeds, load the full case record — title,
+   description, severity, status, tags, the case `date`, created/updated
+   timestamps, and any analyst context already present. The case `date` is the
+   incident timestamp. `createdAt`, `_createdAt`, `updatedAt`, and `_updatedAt` are
+   TheHive lifecycle/import timestamps and must not be used as SIEM query anchors.
+   Then continue with step 3.
+3. **`list_case_alerts`** — Load the grouped alert summary for the case. Reason from
    `groups` and `time_range` to understand alert volume and distinct event families.
-   The case record alone is insufficient for triage — always read the alerts.
-3. **`get_alert`** — For each alert group that appears significant, fetch the full
-   alert detail to retrieve raw fields, source IPs, usernames, hosts, hashes, and
-   SIEM event references needed for pivoting.
+   The case record alone is insufficient for triage — always read the alerts. Then
+   continue with step 4 for each significant alert group.
+4. **`get_alert`** — For each alert group that appears significant (or, for an
+   alert-worded request, for the original id directly), fetch the full alert detail to retrieve
+   raw fields, source IPs, usernames, hosts, hashes, and SIEM event references
+   needed for pivoting.
 
-For narrow follow-up questions, reuse known case context when available, then read
-only the additional case/alert detail needed to answer the question.
+**If `get_case` fails, you must call `get_alert` with the same id before doing
+anything else** — the id may be a standalone alert not linked under a case you can
+load. Do not skip this and jump straight to SIEM search. **Only if `get_alert` also
+fails** is the id not a TheHive case or alert at all; at that point stop trying
+TheHive tools for that id and pivot to the SIEM MCP server's search tools instead.
+
+For narrow follow-up questions, reuse known case/alert context when available,
+then read only the additional case/alert detail needed to answer the question.
 
 ## Alert handling
 

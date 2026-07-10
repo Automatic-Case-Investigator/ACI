@@ -14,7 +14,10 @@ def apply_specialist_run_to_session(session, run: AgentRun, *, reason: str = "up
     explicit session update, or `None` if the run type is unsupported.
     """
     if run.case_id:
-        session.case_id = run.case_id
+        session.src_entity_id = run.case_id
+    source_entity_type = (run.metadata or {}).get("source_entity_type")
+    if source_entity_type:
+        session.source_entity_type = source_entity_type
 
     prefix = {
         "resume": "Resumed",
@@ -33,7 +36,8 @@ def apply_specialist_run_to_session(session, run: AgentRun, *, reason: str = "up
         )
 
     if run.agent_name == "triage":
-        session.last_triage_case_id = run.case_id or session.last_triage_case_id
+        session.last_triage_src_entity_id = run.case_id or session.last_triage_src_entity_id
+        session.last_triage_source_entity_type = source_entity_type or session.source_entity_type
         session.last_triage_run_id = str(run.id)
         session.last_triage_status = run.status
         if isinstance(run.verdict, dict):

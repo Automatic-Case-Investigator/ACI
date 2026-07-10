@@ -38,10 +38,24 @@ _SIEM_TIME_WINDOW_TOOLS = frozenset({
     "search", "search_keyword", "profile_field", "get_event_volume",
     "correlate_entity", "correlate_techniques",
 })
+_CACHEABLE_READ_TOOLS = frozenset({
+    "get_case",
+    "get_alert",
+    "list_case_alerts",
+    "get_event",
+    "get_event_volume",
+    "profile_field",
+    "search",
+    "search_keyword",
+})
 _TASK_WINDOW_RE = re.compile(
     r"Time window:\s*`?([0-9T:.\-+Z]+)`?\s+to\s+`?([0-9T:.\-+Z]+)`?",
     re.IGNORECASE,
 )
+
+
+def _tool_cache_key(name: str, args: dict) -> str:
+    return json.dumps({"tool": name, "args": args}, sort_keys=True, default=str)
 
 
 # ── Queue context rendering + task/tool time-window derivation and guard ──
@@ -62,7 +76,7 @@ def _format_queue_context(tasks: list[dict]) -> str:
         lines.append(f"- ... {len(tasks) - _QUEUE_CONTEXT_MAX_TASKS} more task(s) omitted")
     lines.append(
         "Only propose New Leads that are evidence-backed, not already covered above, "
-        "and include title, pivots, evidence, and priority."
+        "and include title, pivots, evidence, and a queue-relative numeric priority."
     )
     lines.append("---")
     return "\n".join(lines)
@@ -227,13 +241,20 @@ async def seed(state: AgentState, config) -> dict:
                 f"Analyst question: {state['question']}\n\n"
                 "Complete a bounded triage handoff and write a report. "
                 "Use the tool names provided by the SOAR, SIEM, and memory MCP server guidance.\n"
-                "1. Load the case record.\n"
-                "2. Load the linked alert summary.\n"
-                "3. Check known FP/TP patterns for this case's detection rule IDs.\n"
+                "1. Read the analyst question above, then resolve what kind of identifier "
+                "you have — SOAR case, standalone SOAR alert, or SIEM alert reference — "
+                "following the Phase 0 procedure in your instructions. Do not guess from "
+                "the id's shape; let the analyst's own wording (case / alert / event) "
+                "tell you what to retrieve.\n"
+                "2. Load the resolved case/alert record and its linked alert summary "
+                "(or, for a SIEM-only reference, the search results that anchor it). "
+                "If the question names an alert, retrieve the actual alert record and read "
+                "its raw fields before triaging — a summary alone is not enough.\n"
+                "3. Check known FP/TP patterns for this incident's detection rule IDs.\n"
                 "4. Check baselines for common behaviors.\n"
                 "5. Check analyst corrections for these rule IDs.\n"
-                "6. Load other alerts / events close to the case `date` / alert timestamp. "
-                "After reading the case and linked alert summary, derive an absolute time "
+                "6. Load other alerts / events close to the incident `date` / alert timestamp. "
+                "After resolving the identifier and reading the available case/alert summary, derive an absolute time "
                 f"window around the case `date` field or alert timestamp using the configured default vicinity "
                 f"window of ±{vicinity_hours} hours unless the task or evidence already gives "
                 "an explicit absolute range, "
@@ -262,7 +283,7 @@ async def seed(state: AgentState, config) -> dict:
                 "case_id": state["case_id"],
                 "run_id": state["run_id"],
                 "agent_name": "triage",
-                "title": f"Triage case {state['case_id']}",
+                "title": f"Triage {state['case_id']}",
                 "description": description,
                 "priority": 100,
             }, _dbg=src)
@@ -313,7 +334,7 @@ async def seed(state: AgentState, config) -> dict:
                         "When finished, post a report to the case system."
                     )
                     result = await _call(create, {
-                        "title": f"Investigate case {state['case_id']}",
+                        "title": f"Investigate {state['case_id']}",
                         "description": description,
                         "priority": 100,
                     }, _dbg=src)
@@ -706,6 +727,7 @@ async def use_tools(state: AgentState, config) -> dict:
     last = messages[-1]
     new_calls = 0
     tool_runs: list[dict] = []
+    tool_result_cache = dict(state.get("tool_result_cache") or {})
 
     src = src_label(state["agent_name"])
     _emit_node_entry(src, "use_tools", state)
@@ -749,10 +771,19 @@ async def use_tools(state: AgentState, config) -> dict:
             # agent doesn't waste steps on an ENOENT failure → mkdir → retry cycle.
             if tc["name"] == "write":
                 await _ensure_parent_dir(tmap, call_args.get("path"))
-            # Log the FULL raw result to disk; feed only the capped copy to the model.
-            raw = await _call(tool, call_args)
+            cache_key = _tool_cache_key(tc["name"], call_args)
+            cacheable = tc["name"] in _CACHEABLE_READ_TOOLS
+            cached = cacheable and cache_key in tool_result_cache
+            if cached:
+                raw = tool_result_cache[cache_key]
+                emit(src, "note", f"{tc['name']}: reused exact-argument cached result")
+            else:
+                # Log the FULL raw result to disk; feed only the capped copy to the model.
+                raw = await _call(tool, call_args)
+                if cacheable:
+                    tool_result_cache[cache_key] = raw
             artifacts = []
-            if state["agent_name"] == "investigation" and not _is_error_tool_result(raw):
+            if state["agent_name"] == "investigation" and not cached and not _is_error_tool_result(raw):
                 try:
                     artifacts = record_artifacts(
                         raw,
@@ -786,7 +817,8 @@ async def use_tools(state: AgentState, config) -> dict:
                         created_by=state["agent_name"],
                     )
             content = _cap_tool_result(raw)
-            new_calls += 1
+            if not cached:
+                new_calls += 1
             if _is_error_tool_result(raw):
                 emit(src, "error", f"{tc['name']} failed: {summarize_result(tc['name'], raw)}", detail=raw)
             emit(src, "result", f"{tc['name']}: {summarize_result(tc['name'], raw)}", detail=raw)
@@ -807,6 +839,7 @@ async def use_tools(state: AgentState, config) -> dict:
         "messages": messages,
         "tool_calls_made": state["tool_calls_made"] + new_calls,
         "last_observation": observation,
+        "tool_result_cache": tool_result_cache,
     }
 
 

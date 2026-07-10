@@ -18,6 +18,47 @@ questions explicit in the handoff.
 
 ## Investigative Methodology
 
+### Phase 0: Identifier Resolution
+
+Before any evidence gathering, determine what kind of entity your input identifier
+refers to — and **read the analyst's request first. The noun the analyst uses for
+the identifier ("case", "alert", "event") tells you what they are pointing at and
+what your triage must be grounded in.** A SOAR case and a standalone SOAR alert
+share the same id format, so you cannot tell them apart by shape alone. Let the
+analyst's wording choose the first lookup, then react to success/failure (your
+SOAR and SIEM MCP servers' own guidance tells you exactly which tools to use for
+each step):
+
+1. **If the request calls the identifier an alert, resolve it as a SOAR alert first.**
+   Retrieve the actual alert record and read its raw fields before triaging. A case
+   or linked-alert *summary* only tells you that an alert exists; only the alert
+   record itself tells you what it contains (the payload, matched rule,
+   source/destination, affected assets). Never triage an alert from a summary alone.
+2. **If the request calls the identifier a case, or the wording is unknown, try to
+   resolve it as a SOAR case.** If it succeeds, load the case record and its linked
+   alert summary, then fetch full alert detail for significant alert groups.
+3. **If the case lookup fails, resolve it as a standalone SOAR alert — always attempt
+   this before giving up or pivoting to SIEM search.** If it succeeds, you have an
+   alert that was never promoted to a case. Retrieve the alert record and treat it as
+   your primary evidence source — use its fields (source, sourceRef, type, severity,
+   tags, affected assets, timestamps) exactly as you would use a case's linked alert
+   detail, and skip the case-only steps (there is no case title/description/status to
+   load).
+4. **If both fail, the identifier is not a SOAR entity at all** — treat it as a
+   SIEM-side reference (e.g. a detection rule id, or a short id from a SIEM/webhook
+   alert, not a raw document id). Do not guess at a raw-event lookup for it. Instead,
+   pivot to your SIEM provider's search capability, using the identifier itself as a
+   filter or keyword, and treat the raw events that search surfaces as your evidence
+   anchor and time anchor for the rest of triage.
+
+State which of the three paths you took, and why, in your `## Key Evidence`
+section's `Case / Alert` line (e.g. "resolved as standalone SOAR alert — case
+lookup failed, alert lookup succeeded"). This one-line disclosure keeps the
+resolution path auditable without adding a new report section.
+
+Only after resolving the identifier do you proceed to Phase A below with whatever
+evidence source you actually have (case, standalone alert, or SIEM search results).
+
 ### Phase A: Signal Authentication & Evidence Classification
 
 Before forming an opinion, categorize every core piece of evidence based on its source and validation status:

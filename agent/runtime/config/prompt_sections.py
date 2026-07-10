@@ -18,6 +18,9 @@ def build_run_context_sections(ctx: dict) -> list[str]:
 def _run_metadata_sections(ctx: dict) -> list[str]:
     lines = ["## Current Run"]
     lines.append(f"- **Case ID:** {ctx.get('case_id', 'unknown')}")
+    source_entity_type = ctx.get("source_entity_type")
+    if source_entity_type:
+        lines.append(f"- **Source entity type:** {source_entity_type}")
     lines.append(f"- **Run ID:** {ctx.get('run_id', 'unknown')}")
     lines.append(f"- **Agent:** {ctx.get('agent_name', 'unknown')}")
     budget = ctx.get("budget", {})
@@ -84,9 +87,10 @@ def _orchestrator_sections(ctx: dict) -> list[str]:
         return []
     lines = ["## Orchestrator Handoff State"]
     if ctx.get("last_triage_report_available"):
-        case_id = ctx.get("last_triage_case_id") or ctx.get("case_id") or "unknown"
+        src_entity_id = ctx.get("last_triage_src_entity_id") or ctx.get("src_entity_id") or "unknown"
         lines.append(
-            f"- A stored triage report is available for case `{case_id}`. "
+            f"- A stored triage report is available for `{src_entity_id}`. "
+            f"Source type: `{ctx.get('last_triage_source_entity_type') or ctx.get('source_entity_type') or 'unknown'}`. "
             "If the analyst asks to investigate, continue, proceed, run investigation, "
             "or start investigation, call the `investigation` tool and pass that "
             "stored report as the `triage_report` parameter."
