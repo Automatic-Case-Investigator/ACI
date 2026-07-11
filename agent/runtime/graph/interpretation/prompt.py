@@ -186,11 +186,20 @@ def _interpret_system_prompt() -> str:
         "the fact.\n"
         "5. Do not overfit to one exact artifact unless the latest evidence truly verifies it as the right discriminator.\n"
         "6. If the latest batch only re-confirms the same stage, say what adjacent stage or broader behavior should be examined next.\n"
-        "7. Triage has a lower completion bar than investigation: enough scoped evidence "
-        "to summarize, calibrate confidence, and hand off explicit gaps is sufficient. "
-        "Do not demand exhaustive closure from triage; noisy, capped, contradictory, or "
-        "empty scoped evidence can justify completion when the unresolved question is "
-        "preserved as an investigation-plan item.\n"
+        "7. Triage is BOUNDED but must be GROUNDED. Triage does not need exhaustive closure "
+        "of the whole chain — but it may only conclude once it has actually grounded the "
+        "alert in RETRIEVED evidence: it has loaded the alert record and read its raw fields, "
+        "profiled the discriminating fields, read the specific raw events that confirm or "
+        "refute the alert's claim, and correlated the key entities (host, user, source IP, "
+        "rule family) the case warrants — OR it has capably established a confirmed negative "
+        "(searched where the evidence would appear, with the right discriminator and window, "
+        "and it is not there). Consulting memory/context (patterns, feedback, baselines) or "
+        "running a single empty or over-broad query is NOT grounding and does NOT justify "
+        "completion — it is orientation, and orientation is where triage starts, not where it "
+        "stops. Once the alert IS grounded, do not keep drilling: a noisy, capped, or "
+        "contradictory result at that point is itself a 'needs investigation' cue — record the "
+        "residual uncertainty as an investigation-plan item and hand off. Do NOT vote to "
+        "complete until this grounding standard is met.\n"
         "8. Investigation has the higher bar: each task should converge on direct evidence, "
         "a capable confirmed negative, or a concrete follow-up lead. Recover from failures "
         "by changing representation, entity, or window; do not repeat the same failed query "
@@ -264,37 +273,15 @@ def _prompt_steering(ledger: dict, observation: dict) -> str:
     prior suggestion FAILED so the model stops echoing it; on a flooded result with an
     isolated discriminator, point it at the returned sample and candidate deviations."""
     blocks: list[str] = []
-    if "WINDOW_STAGNANT" in (observation.get("signals") or []):
-        stagnation = observation.get("window_stagnation") or {}
-        span = stagnation.get("covered_span") if isinstance(stagnation, dict) else {}
-        span_text = (
-            f" The repeated covered span is {span.get('from')} to {span.get('to')}."
-            if isinstance(span, dict) and span.get("from") and span.get("to")
-            else ""
-        )
+    if "NO_PROGRESS" in (observation.get("signals") or []):
         blocks.append(
-            "TEMPORAL COVERAGE WARNING: recent evidence queries are re-reading substantially "
-            "the same time slice without advancing the task."
-            f"{span_text} Your suggested next direction must move the temporal frame to an "
-            "adjacent or task-relevant uncovered window from the burst map or evidence edge, "
-            "and explain why that window tests the objective. Do not just widen around the "
-            "same center."
-        )
-    if "FOCUS_STAGNANT" in (observation.get("signals") or []):
-        stagnation = observation.get("focus_stagnation") or {}
-        repeated = stagnation.get("repeated_focuses") if isinstance(stagnation, dict) else []
-        focus_text = ", ".join(
-            str(item.get("focus"))
-            for item in repeated[:3]
-            if isinstance(item, dict) and item.get("focus")
-        )
-        blocks.append(
-            "QUERY FOCUS WARNING: recent evidence queries are reusing the same keyword, rule, "
-            "or profile-field anchor without advancing the task."
-            + (f" Repeated focus: {focus_text}." if focus_text else "")
-            + " Your suggested next direction must change the evidence axis: adjacent "
-            "task-relevant time, different behavior class, or raw event edge. Do not repackage "
-            "the same keyword/rule focus with minor filter changes."
+            "CONVERGENCE WARNING: this task has run many cycles without producing a new "
+            "confirmed finding — it is WANDERING (varying the query without closing in). More "
+            "queries are not the fix; a decision is. In 'Stop state', either declare 'complete' "
+            "(or 'negative' — a well-scoped confirmed negative is a finished answer) if the "
+            "success criteria are already answered by what you hold, or, if exactly one "
+            "concrete evidence-backed thread is genuinely unexplored, name that single query as "
+            "your suggested next direction. Do not keep hopping across entities and windows."
         )
     if "STUCK" in (observation.get("signals") or []):
         prior = ledger.get("next_step_instruction") or ""

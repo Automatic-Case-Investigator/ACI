@@ -3,16 +3,12 @@ from __future__ import annotations
 
 
 from ._const import _CONTINUE_ACTIONS, _DEFAULT_STOP_CONDITION, _FORCE_CONTINUE_SIGNALS, _REPORT_INSTRUCTION, _TERMINAL_ACTIONS
-from .ledger import _coerce_query_focuses, _coerce_string_list, _coerce_time_windows, _coerce_trials, _confirmed_findings_from_observation, _merge_confirmed_findings
+from .ledger import _coerce_string_list, _coerce_trials, _confirmed_findings_from_observation, _merge_confirmed_findings
 from .pivots import _coerce_adjacency, _coerce_pivot, _pivot_instruction_fragment, _update_pivot_state
 
 
 def _next_action_from_signals(obs: dict) -> str:
     signals = set(obs.get("signals") or [])
-    if "WINDOW_STAGNANT" in signals:
-        return "profile_window"
-    if "FOCUS_STAGNANT" in signals:
-        return "pivot_entity"
     if "INVALID_TIME_WINDOW" in signals:
         return "retrieve_specific_event"
     if "TOOL_ERROR" in signals:
@@ -71,26 +67,6 @@ def _should_assess(obs: dict, action: str, observation_retries: int, is_triage: 
     if action == "stop_negative":
         return observation_retries >= 1 or "NO_NEW_EVIDENCE" in signals
     return False
-def _triage_ready_to_complete(obs: dict) -> bool:
-    """Triage needs enough SCOPED evidence to summarize and hand off, not exhaustive
-    closure. Completion is judged on accumulated evidence, NOT on whether the latest
-    batch was signal-clean: a flood / truncation / saturation is, for triage, a
-    'needs investigation' cue, so it does NOT block the handoff once concrete evidence
-    exists. Only a batch that is still pure orientation (no evidence yet) or actively
-    drifting to the wrong representation keeps triage working.
-    """
-    signals = set(obs.get("signals") or [])
-    if "ORIENTATION_ONLY" in signals or "WRONG_REPRESENTATION" in signals:
-        return False
-    if int(obs.get("evidence_queries") or 0) <= 0:
-        return False
-    if obs.get("small_scoped_evidence") or (obs.get("event_ids") or []) or (obs.get("evidence_markers") or []):
-        return True
-    # Triage is allowed to hand off on scoped aggregate evidence: a profile, capped hit
-    # set, or zero-result query can be the correct triage result when the report names
-    # the uncertainty and turns it into investigation work. Investigation still needs
-    # direct task evidence before concluding.
-    return bool(obs.get("advanced_objective") and (obs.get("summary") or obs.get("recommended_moves")))
 def _evidence_state_from_observation(observation: dict, action: str, ready: bool) -> str:
     signals = set(observation.get("signals") or [])
     if ready and action == "stop_completed":
@@ -145,40 +121,22 @@ def _exhausted_shape(observation: dict, ledger: dict) -> str:
 def _default_instruction(observation: dict, action: str) -> str:
     signals = set(observation.get("signals") or [])
     regimes = observation.get("volume_regimes") or []
-    if "WINDOW_STAGNANT" in signals:
-        stagnation = observation.get("window_stagnation") or {}
-        span = stagnation.get("covered_span") if isinstance(stagnation, dict) else {}
-        span_text = (
-            f" Covered span: {span.get('from')} to {span.get('to')}."
-            if isinstance(span, dict) and span.get("from") and span.get("to")
-            else ""
-        )
+    # NO_PROGRESS (the general convergence brake) takes precedence: many cycles have passed
+    # without a new confirmed finding. The remedy for WANDERING is not another query — it is
+    # to converge. Nudge the model to decide, without dictating the terminal call (it may
+    # legitimately still see one concrete unexplored thread).
+    if "NO_PROGRESS" in signals:
         return (
-            "You have repeatedly queried the same covered span without materially advancing "
-            "the objective. Treat the current time slice as provisionally exhausted. Choose "
-            "the next adjacent or task-relevant uncovered window from the burst map or "
-            "evidence edge, and explain why that direction tests the objective. Do not merely "
-            f"widen around the same center.{span_text}"
+            "You have run many cycles on this task without producing a new confirmed finding. "
+            "Stop widening the search and CONVERGE. Decide now between two honest endings: (a) "
+            "conclude the task with what you already have — a well-scoped confirmed NEGATIVE is "
+            "a complete answer, not a failure — or (b) if one specific, evidence-backed thread "
+            "remains, name it in a single next query; otherwise record the open thread as a New "
+            "Lead for another task and stop. Do NOT keep cycling across entities and windows "
+            "hoping something turns up."
         )
-    if "FOCUS_STAGNANT" in signals:
-        stagnation = observation.get("focus_stagnation") or {}
-        repeated = stagnation.get("repeated_focuses") if isinstance(stagnation, dict) else []
-        focus_text = ", ".join(
-            str(item.get("focus"))
-            for item in repeated[:3]
-            if isinstance(item, dict) and item.get("focus")
-        )
-        focus_part = f" Repeated focus: {focus_text}." if focus_text else ""
-        return (
-            "You have repeatedly used the same keyword, rule, or profile-field anchor without "
-            "materially advancing the objective. Treat that lexical/discriminator focus as "
-            "provisionally exhausted. Change the evidence axis now: move to an adjacent "
-            "task-relevant time window, a different behavior class, or a raw event edge that "
-            "tests the objective. Do not merely combine the same keyword or rule id with a "
-            f"slightly different filter.{focus_part}"
-        )
-    # STUCK takes precedence over everything: the same direction has returned nothing for
-    # several cycles, so any content-based instruction would just echo the dead plan.
+    # STUCK: the same direction has returned nothing for several cycles, so any content-based
+    # instruction would just echo the dead plan.
     if "STUCK" in signals:
         return (
             "This exact query direction has returned nothing several times in a row — it is "
@@ -270,8 +228,7 @@ def _compose_instruction(
         return _REPORT_INSTRUCTION
     signals = set(observation.get("signals") or [])
     if (
-        "WINDOW_STAGNANT" in signals
-        or "FOCUS_STAGNANT" in signals
+        "NO_PROGRESS" in signals
         or "INVALID_TIME_WINDOW" in signals
         or "TOOL_ERROR" in signals
     ):
@@ -301,12 +258,6 @@ def _reconcile_terminal_action(observation: dict, action: str, status: str, ledg
     """
     if status == "ready_to_assess" or action not in _TERMINAL_ACTIONS:
         return action, status
-    if (
-        action == "stop_completed"
-        and (ledger.get("objective") or "").lower().startswith("triage case")
-        and _triage_ready_to_complete(observation)
-    ):
-        return action, "ready_to_assess"
     fallback = _next_action_from_signals(observation)
     if fallback in _TERMINAL_ACTIONS:
         fallback = "retrieve_specific_event"
@@ -317,8 +268,6 @@ def _fallback_interpretation(
     """Deterministic ledger update used when no model is configured or the model call
     fails/omits a field. Signals map to actions; the model refines the prose."""
     action = _next_action_from_signals(observation)
-    if is_triage and _triage_ready_to_complete(observation):
-        action = "stop_completed"
     ready = _should_assess(observation, action, observation_retries, is_triage=is_triage)
 
     updated = dict(ledger)
@@ -347,7 +296,5 @@ def _fallback_interpretation(
     updated["remaining_gaps"] = _coerce_string_list(ledger.get("remaining_gaps"))
     updated["stop_condition"] = ledger.get("stop_condition") or _DEFAULT_STOP_CONDITION
     updated["stop_reason"] = ledger.get("stop_reason") or (updated["evidence_summary"] if ready else "")
-    updated["recent_time_windows"] = _coerce_time_windows(ledger.get("recent_time_windows"))
-    updated["recent_query_focuses"] = _coerce_query_focuses(ledger.get("recent_query_focuses"))
     updated["query_trials"] = _coerce_trials(ledger.get("query_trials"))
     return updated, ("ready_to_assess" if ready else "needs_more_work")

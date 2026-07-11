@@ -1,6 +1,6 @@
 # Default trial parameters for a benchmark run. The model provider is read from the
 # dashboard-configured ProviderConfig (DB), not here, and is snapshotted per run.
-trials: 3                 # independent runs per entry point (the agent is stochastic)
+trials: 1                 # independent runs per entry point (the agent is stochastic)
 agent: investigation
 run_concurrency: 2        # live benchmark sessions to run at once
 metrics: all               # or a subset, e.g. [phase_recall, verdict_correctness]

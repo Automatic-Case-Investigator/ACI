@@ -40,5 +40,5 @@ class AgentState(TypedDict):
     task_ledger: Optional[dict]  # durable per-task metacognition/evidence state updated after each observation
     last_observation: Optional[dict]  # normalized summary of the most recent tool-observation batch
     observation_retries: int  # consecutive observation cycles with no meaningful new evidence
-    refine_streak: int  # consecutive interpret cycles that chose refine_query without advancing
+    no_progress_cycles: int  # consecutive interpret cycles with no NEW confirmed finding (convergence brake)
     tool_result_cache: Optional[dict]  # run-local exact-argument cache for deterministic read tools

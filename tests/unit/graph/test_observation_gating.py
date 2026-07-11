@@ -14,7 +14,7 @@ import django  # noqa: E402
 django.setup()
 
 from agent.runtime.graph.builder import _route_interpret, _route_think, _route_use_tools  # noqa: E402
-from agent.runtime.graph.interpretation import _MAX_REFINE_STREAK, interpret  # noqa: E402
+from agent.runtime.graph.interpretation import _NO_PROGRESS_BRAKE_CYCLES, interpret  # noqa: E402
 from agent.runtime.graph.nodes_loop import _MAX_TASK_TOOL_CALLS  # noqa: E402
 from agent.runtime.graph.observation import build_observation  # noqa: E402
 from langchain_core.language_models import BaseChatModel  # noqa: E402
@@ -407,8 +407,6 @@ class InterpretContractTest(unittest.TestCase):
                 "stop_condition": "Retrieve concrete event",
                 "stop_reason": "",
                 "last_observation": "",
-                "recent_time_windows": [],
-                "recent_query_focuses": [],
                 "primary_pivot": {},
                 "active_pivots": [],
                 "next_pivot_strategy": "keep",
@@ -416,7 +414,7 @@ class InterpretContractTest(unittest.TestCase):
             },
             "last_observation": observation,
             "observation_retries": retries,
-            "refine_streak": 0,
+            "no_progress_cycles": 0,
         }
 
     def test_truncated_batch_routes_to_refine_query(self):
@@ -577,7 +575,9 @@ class InterpretContractTest(unittest.TestCase):
         self.assertIn("callback destination named", parsed["stop_condition"])
         self.assertEqual(parsed["stop_state"], "continue")
 
-    def test_triage_can_complete_on_scoped_aggregate_evidence(self):
+    def test_triage_completes_on_aggregate_evidence_when_the_model_votes_complete(self):
+        # Triage MAY hand off on a scoped aggregate (not only raw events) — but that is now
+        # the model's semantic call, honored via its stop vote, not a deterministic gate.
         obs = {
             "tools": ["profile_field"],
             "signals": ["TRUNCATED"],
@@ -596,11 +596,11 @@ class InterpretContractTest(unittest.TestCase):
         result = _run(interpret(
             state,
             {"configurable": {"model": _StubModel({
-                "what_showed": "A scoped aggregate query found noisy nearby evidence.",
+                "what_showed": "A scoped aggregate query grounded the alert; raw drilldown is investigation work.",
                 "advanced_objective": True,
-                "blocker": "Raw-event drilldown is still needed.",
-                "stop_state": "continue",
-                "next_step_instruction": "Continue querying raw events.",
+                "blocker": "",
+                "stop_state": "complete",
+                "next_step_instruction": "Write the handoff.",
             }), "tools": []}},
         ))
         self.assertEqual(result["status"], "ready_to_assess")
@@ -748,100 +748,50 @@ class InterpretContractTest(unittest.TestCase):
         self.assertIn("change", ledger["next_step_instruction"].lower())
         self.assertTrue(any("hwarren" in str(f) for f in ledger["forbidden_repeats"]))
 
-    def test_window_stagnant_routes_to_temporal_move_before_generic_stuck(self):
-        obs = {
+    def _wander_obs(self, advanced=False):
+        # A non-crystallizing cycle: a query ran but produced no new confirmed finding.
+        # `advanced` toggles the advancement flicker that used to reset the old STUCK counter.
+        return {
             "tools": ["search"],
-            "signals": ["EMPTY", "NO_NEW_EVIDENCE"],
+            "signals": [] if advanced else ["EMPTY", "NO_NEW_EVIDENCE"],
             "summary": "search=0 hit(s)",
             "recommended_moves": [],
-            "advanced_objective": False,
-            "time_windows": [{
-                "tool": "search",
-                "from": "2022-01-18T12:18:30Z",
-                "to": "2022-01-18T12:26:00Z",
-            }],
+            "advanced_objective": advanced,
         }
-        state = self._state(obs, retries=1)
-        state["task_ledger"]["recent_time_windows"] = [
-            {"tool": "search", "from": "2022-01-18T12:19:10Z", "to": "2022-01-18T12:24:30Z"},
-        ]
-        result = _run(interpret(state, {"configurable": {"model": None, "tools": []}}))
-        ledger = result["task_ledger"]
-        instr = ledger["next_step_instruction"]
-        self.assertEqual(ledger["next_action"], "profile_window")
-        self.assertIn("same covered span", instr)
-        self.assertIn("adjacent or task-relevant uncovered window", instr)
-        self.assertIn("Do not merely widen", instr)
-        self.assertNotIn("src↔dst", instr)
-        self.assertEqual(len(ledger["recent_time_windows"]), 2)
 
-    def test_adjacent_windows_do_not_trigger_window_stagnation(self):
-        obs = {
-            "tools": ["search"],
-            "signals": ["EMPTY", "NO_NEW_EVIDENCE"],
-            "summary": "search=0 hit(s)",
-            "recommended_moves": [],
-            "advanced_objective": False,
-            "time_windows": [{
-                "tool": "search",
-                "from": "2022-01-18T12:30:00Z",
-                "to": "2022-01-18T12:40:00Z",
-            }],
-        }
-        state = self._state(obs, retries=2)
-        state["task_ledger"]["recent_time_windows"] = [
-            {"tool": "search", "from": "2022-01-18T12:19:10Z", "to": "2022-01-18T12:24:30Z"},
-            {"tool": "profile_field", "from": "2022-01-18T12:19:00Z", "to": "2022-01-18T12:24:30Z"},
-        ]
+    def test_no_progress_brake_injects_converge_signal_and_instruction(self):
+        # At/above the threshold, the general convergence brake fires: it injects NO_PROGRESS
+        # and the deterministic instruction tells the agent to CONVERGE, not re-query.
+        state = self._state(self._wander_obs(), retries=1)
+        state["no_progress_cycles"] = _NO_PROGRESS_BRAKE_CYCLES
         result = _run(interpret(state, {"configurable": {"model": None, "tools": []}}))
+        self.assertIn("NO_PROGRESS", result["last_observation"]["signals"])
         instr = result["task_ledger"]["next_step_instruction"]
-        self.assertNotIn("same covered span", instr)
-        self.assertIn("change", instr.lower())
+        self.assertIn("converge", instr.lower())
 
-    def test_overlapping_window_waits_for_first_non_advancing_retry(self):
-        obs = {
-            "tools": ["search"],
-            "signals": ["EMPTY", "NO_NEW_EVIDENCE"],
-            "summary": "search=0 hit(s)",
-            "recommended_moves": [],
-            "advanced_objective": False,
-            "time_windows": [{
-                "tool": "search",
-                "from": "2022-01-18T12:18:30Z",
-                "to": "2022-01-18T12:26:00Z",
-            }],
-        }
-        state = self._state(obs, retries=0)
-        state["task_ledger"]["recent_time_windows"] = [
-            {"tool": "search", "from": "2022-01-18T12:19:10Z", "to": "2022-01-18T12:24:30Z"},
-            {"tool": "profile_field", "from": "2022-01-18T12:19:00Z", "to": "2022-01-18T12:24:30Z"},
-        ]
+    def test_no_progress_brake_dormant_below_threshold(self):
+        # Below the threshold the brake stays silent — a normal short task is never nudged.
+        state = self._state(self._wander_obs(), retries=1)
+        state["no_progress_cycles"] = _NO_PROGRESS_BRAKE_CYCLES - 1
         result = _run(interpret(state, {"configurable": {"model": None, "tools": []}}))
-        self.assertNotIn("same covered span", result["task_ledger"]["next_step_instruction"])
+        self.assertNotIn("NO_PROGRESS", result["last_observation"]["signals"])
 
-    def test_repeated_query_focus_forces_axis_change(self):
-        obs = {
-            "tools": ["search_keyword"],
-            "signals": ["EMPTY", "NO_NEW_EVIDENCE"],
-            "summary": "search_keyword=0 hit(s)",
-            "recommended_moves": [],
-            "advanced_objective": False,
-            "query_focuses": [{"tool": "search_keyword", "focus": "kw:create_account"}],
-        }
-        state = self._state(obs, retries=1)
-        state["task_ledger"]["recent_query_focuses"] = [
-            {"tool": "search_keyword", "focus": "kw:create_account"},
-        ]
+    def test_no_progress_counter_increments_without_new_finding(self):
+        state = self._state(self._wander_obs(), retries=1)
+        state["no_progress_cycles"] = 3
         result = _run(interpret(state, {"configurable": {"model": None, "tools": []}}))
-        ledger = result["task_ledger"]
-        instr = ledger["next_step_instruction"]
-        self.assertEqual(ledger["next_action"], "pivot_entity")
-        self.assertIn("same keyword, rule, or profile-field anchor", instr)
-        self.assertIn("Change the evidence axis", instr)
-        self.assertIn("create_account", instr)
-        self.assertIn("FOCUS_STAGNANT", result["last_observation"]["signals"])
+        self.assertEqual(result["no_progress_cycles"], 4)
 
-    def test_productive_window_observation_resets_recent_windows(self):
+    def test_no_progress_counter_ignores_advancement_flicker(self):
+        # THE key property: mere advanced_objective (with no NEW confirmed finding) does NOT
+        # reset the counter — this is the wander that defeated the old STUCK detector.
+        state = self._state(self._wander_obs(advanced=True), retries=0)
+        state["no_progress_cycles"] = 5
+        result = _run(interpret(state, {"configurable": {"model": None, "tools": []}}))
+        self.assertFalse(result["status"] == "ready_to_assess")
+        self.assertEqual(result["no_progress_cycles"], 6)
+
+    def test_no_progress_counter_resets_on_new_confirmed_finding(self):
         obs = {
             "tools": ["search"],
             "signals": [],
@@ -850,19 +800,11 @@ class InterpretContractTest(unittest.TestCase):
             "advanced_objective": True,
             "event_ids": ["e1"],
             "evidence_markers": ["event:e1"],
-            "time_windows": [{
-                "tool": "search",
-                "from": "2022-01-18T12:30:00Z",
-                "to": "2022-01-18T12:40:00Z",
-            }],
         }
         state = self._state(obs, retries=2)
-        state["task_ledger"]["recent_time_windows"] = [
-            {"tool": "search", "from": "2022-01-18T12:19:10Z", "to": "2022-01-18T12:24:30Z"},
-            {"tool": "profile_field", "from": "2022-01-18T12:19:00Z", "to": "2022-01-18T12:24:30Z"},
-        ]
+        state["no_progress_cycles"] = 6
         result = _run(interpret(state, {"configurable": {"model": None, "tools": []}}))
-        self.assertEqual(result["task_ledger"]["recent_time_windows"], obs["time_windows"])
+        self.assertEqual(result["no_progress_cycles"], 0)
 
     def test_discriminator_observation_targets_minority(self):
         # A flooded observation carrying a discriminator -> instruction targets the rare
@@ -1207,7 +1149,10 @@ class InterpretContractTest(unittest.TestCase):
         self.assertEqual(result["status"], "needs_more_work")
         self.assertEqual(result["task_ledger"]["next_action"], "refine_query")
 
-    def test_triage_prefers_stop_completed_over_continue_action_when_scoped_evidence_exists(self):
+    def test_triage_respects_model_continue_vote_no_deterministic_force_upgrade(self):
+        # There is NO deterministic triage lower-bar that force-upgrades a continue vote into
+        # completion. Even with scoped evidence present, if the model votes to keep going
+        # (here: pivot_entity), triage keeps going — completion is the model's judgment.
         obs = {
             "tools": ["search"],
             "evidence_queries": 1,
@@ -1217,65 +1162,27 @@ class InterpretContractTest(unittest.TestCase):
             "advanced_objective": True,
             "event_ids": ["e1", "e2", "e3"],
             "evidence_markers": ["event:e1", "event:e2", "event:e3"],
-            "small_scoped_evidence": True,
         }
         state = self._state(obs)
         state["agent_name"] = "triage"
         result = _run(interpret(
             state,
             {"configurable": {"model": _StubModel({
-                "what_showed": "small scoped set retrieved",
+                "what_showed": "small scoped set retrieved; want to correlate the entity next",
                 "advanced_objective": True,
                 "blocker": "",
                 "progress_status": "working",
                 "next_action": "pivot_entity",
-                "hypothesis": "enough to summarize",
-                "confirm_if": "report can be written",
+                "hypothesis": "not yet grounded — correlate before concluding",
+                "confirm_if": "surrounding activity read",
             }), "tools": []}},
         ))
-        self.assertEqual(result["status"], "ready_to_assess")
-        self.assertEqual(result["task_ledger"]["next_action"], "stop_completed")
-
-    def _churning_obs(self, advanced=False):
-        return {
-            "tools": ["search"], "evidence_queries": 3, "signals": ["TRUNCATED", "FLOODED"],
-            "summary": "search=10000 hit(s); signals=TRUNCATED,FLOODED",
-            "recommended_moves": ["scope by rule.groups"], "advanced_objective": advanced,
-        }
-
-    def _refine_model(self):
-        return _StubModel({
-            "what_showed": "still flooded", "advanced_objective": False,
-            "blocker": "too broad", "progress_status": "needs refinement",
-            "next_action": "refine_query", "hypothesis": "", "confirm_if": "narrow it",
-        })
-
-    def test_refine_loop_breaker_forces_pivot_at_cap(self):
-        state = self._state(self._churning_obs())
-        state["refine_streak"] = _MAX_REFINE_STREAK          # already at the cap
-        result = _run(interpret(state, {"configurable": {"model": self._refine_model(), "tools": []}}))
+        self.assertEqual(result["status"], "needs_more_work")
         self.assertEqual(result["task_ledger"]["next_action"], "pivot_entity")
-        self.assertEqual(result["refine_streak"], 0)
-        self.assertIn("PIVOT", result["task_ledger"]["blocker"])
-
-    def test_refine_streak_increments_below_cap(self):
-        state = self._state(self._churning_obs())
-        state["refine_streak"] = 0
-        result = _run(interpret(state, {"configurable": {"model": self._refine_model(), "tools": []}}))
-        self.assertEqual(result["task_ledger"]["next_action"], "refine_query")  # not yet broken
-        self.assertEqual(result["refine_streak"], 1)
-
-    def test_advancing_refine_resets_streak_and_is_not_broken(self):
-        # A productive refinement (advanced_objective=True) is never interrupted.
-        state = self._state(self._churning_obs(advanced=True))
-        state["refine_streak"] = _MAX_REFINE_STREAK
-        result = _run(interpret(state, {"configurable": {"model": self._refine_model(), "tools": []}}))
-        self.assertEqual(result["refine_streak"], 0)
-        self.assertNotEqual(result["task_ledger"]["next_action"], "pivot_entity")
 
     def _flood_with_evidence_obs(self):
         # The dd2d9d8d shape: a flood on the latest batch, but concrete evidence already
-        # accumulated (8 event ids, 12 markers) — enough for triage to hand off.
+        # accumulated (8 event ids, 12 markers).
         return {
             "tools": ["search"],
             "evidence_queries": 4,
@@ -1285,27 +1192,26 @@ class InterpretContractTest(unittest.TestCase):
             "advanced_objective": False,
             "event_ids": [f"e{i}" for i in range(8)],
             "evidence_markers": [f"event:e{i}" for i in range(12)],
-            "small_scoped_evidence": False,
         }
 
-    def test_triage_completes_on_flood_once_evidence_accumulated(self):
-        # For triage a flood is a needs-investigation cue, not a keep-drilling one: with
-        # concrete evidence already gathered it must hand off, not run to budget.
+    def test_triage_may_complete_on_flood_when_the_model_votes_complete(self):
+        # For triage a flood is a needs-investigation cue, not a keep-drilling one: once the
+        # model judges the alert grounded and votes complete, `_should_assess` grants the
+        # handoff even on a FLOODED/TRUNCATED batch (its triage-only tolerance is preserved).
         state = self._state(self._flood_with_evidence_obs())
         state["agent_name"] = "triage"
         result = _run(interpret(
             state,
             {"configurable": {"model": _StubModel({
-                "what_showed": "flooded, but scoped evidence already gathered",
+                "what_showed": "flooded, but the alert is grounded in the events already read",
                 "advanced_objective": False,
-                "blocker": "query too broad",
-                "progress_status": "enough to hand off",
-                "next_action": "refine_query",   # model wants to keep drilling…
+                "blocker": "",
+                "stop_state": "complete",
                 "hypothesis": "scanning + lateral movement",
                 "confirm_if": "enough scoped evidence to route",
             }), "tools": []}},
         ))
-        self.assertEqual(result["status"], "ready_to_assess")          # …triage hands off anyway
+        self.assertEqual(result["status"], "ready_to_assess")
         self.assertEqual(result["task_ledger"]["next_action"], "stop_completed")
 
     def test_investigation_does_not_complete_on_flood_even_with_evidence(self):
@@ -1425,7 +1331,6 @@ class QueryTrialsTest(unittest.TestCase):
         self.assertIn("/wp-content/uploads/2022/01/x.php", rendered)
 
     def test_trials_accumulate_and_repeat_increments_count(self):
-        from agent.runtime.graph.interpretation import _MAX_REFINE_STREAK  # noqa: F401
         state = InterpretContractTest()._state(
             self._obs_with_trial("dsl:url=/wp-content/create_account",
                                  "2022-01-18T12:19:10Z..2022-01-18T12:24:30Z", "empty", hits=0),

@@ -7,10 +7,10 @@ from ..state import AgentState
 from ..toolio import _call, _emit_node_entry, _tmap
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from ._const import _CONTINUE_ACTIONS, _DEFAULT_STOP_CONDITION, _MAX_REFINE_STREAK, _READY_EVIDENCE_KEEP, _STUCK_RETRIES
-from .ledger import _coerce_confirmed_findings, _coerce_query_focuses, _coerce_string_list, _coerce_time_windows, _coerce_trials, _confirmed_findings_from_observation, _default_ledger, _detect_focus_stagnation, _detect_window_stagnation, _merge_confirmed_findings, _merge_query_trials, _merge_recent_query_focuses, _merge_recent_time_windows, _merge_string_lists, _parse_interpretation_text
+from ._const import _DEFAULT_STOP_CONDITION, _NO_PROGRESS_BRAKE_CYCLES, _READY_EVIDENCE_KEEP, _STUCK_RETRIES
+from .ledger import _coerce_confirmed_findings, _coerce_string_list, _coerce_trials, _confirmed_findings_from_observation, _default_ledger, _merge_confirmed_findings, _merge_query_trials, _merge_string_lists, _parse_interpretation_text
 from .pivots import _coerce_adjacency, _coerce_pivot, _coerce_pivots, _update_pivot_state
-from .decisions import _action_from_review, _compose_instruction, _evidence_state_from_observation, _exhausted_shape, _fallback_interpretation, _forbidden_repeats, _reconcile_terminal_action, _should_assess, _triage_ready_to_complete
+from .decisions import _action_from_review, _compose_instruction, _evidence_state_from_observation, _exhausted_shape, _fallback_interpretation, _forbidden_repeats, _reconcile_terminal_action, _should_assess
 from .prompt import _batch_tool_outputs, _interpret_context, _interpret_system_prompt
 
 
@@ -53,8 +53,6 @@ def _apply_model_ledger(
         "stop_reason": str(parsed.get("stop_reason") or ledger.get("stop_reason") or "").strip(),
         "active_pivots": _coerce_pivots(ledger.get("active_pivots")),
         "primary_pivot": _coerce_pivot(ledger.get("primary_pivot")),
-        "recent_time_windows": _coerce_time_windows(ledger.get("recent_time_windows")),
-        "recent_query_focuses": _coerce_query_focuses(ledger.get("recent_query_focuses")),
         "query_trials": _coerce_trials(ledger.get("query_trials")),
     }
     (
@@ -177,36 +175,17 @@ async def interpret(state: AgentState, config) -> dict:
     is_triage = state["agent_name"] == "triage"
     extra_context = await _investigation_context(state, tools)
 
-    window_stagnation = _detect_window_stagnation(ledger, observation, observation_retries)
-    if window_stagnation:
-        signals = [*(observation.get("signals") or [])]
-        if "WINDOW_STAGNANT" not in signals:
-            signals.append("WINDOW_STAGNANT")
-        observation = {
-            **observation,
-            "signals": signals,
-            "window_stagnation": window_stagnation,
-        }
-    focus_stagnation = _detect_focus_stagnation(ledger, observation, observation_retries)
-    if focus_stagnation:
-        signals = [*(observation.get("signals") or [])]
-        if "FOCUS_STAGNANT" not in signals:
-            signals.append("FOCUS_STAGNANT")
-        observation = {
-            **observation,
-            "signals": signals,
-            "focus_stagnation": focus_stagnation,
-        }
-    next_recent_windows = _merge_recent_time_windows(
-        ledger.get("recent_time_windows"),
-        observation.get("time_windows"),
-        advanced=bool(observation.get("advanced_objective")),
-    )
-    next_recent_focuses = _merge_recent_query_focuses(
-        ledger.get("recent_query_focuses"),
-        observation.get("query_focuses"),
-        advanced=bool(observation.get("advanced_objective")),
-    )
+    # General convergence brake (replaces the miscalibrated window/focus stagnation
+    # heuristics that keyed on a REPEATED identical query shape and fired 0 times across the
+    # observed sessions). It measures convergence DIRECTLY: cycles since the task last
+    # produced a NEW confirmed finding, tracked in `no_progress_cycles`. Keyed on finding
+    # growth (NOT mere advanced_objective) so the advancement flicker that resets STUCK cannot
+    # mask a task that is retrieving events every cycle yet never crystallizing a finding —
+    # the observed 29-52 cycle "wander". Injected as a signal (like STUCK) so it steers this
+    # cycle's model call and the deterministic fallback; the remedy is CONVERGE, not re-query.
+    no_progress_cycles = state.get("no_progress_cycles", 0) or 0
+    if no_progress_cycles >= _NO_PROGRESS_BRAKE_CYCLES and "NO_PROGRESS" not in (observation.get("signals") or []):
+        observation = {**observation, "signals": [*(observation.get("signals") or []), "NO_PROGRESS"]}
     # The outcome-annotated trial history accumulates across the WHOLE task (not reset on
     # advancement) so the interpreter can reason over every discriminator/window it has
     # tried and what each returned.
@@ -244,13 +223,13 @@ async def interpret(state: AgentState, config) -> dict:
             ])
             parsed = _parse_interpretation_text(getattr(response, "content", "") or "")
             if isinstance(parsed, dict):
+                # Triage completion flows from the model's OWN stop vote (same path as
+                # investigation via `_action_from_review`) — there is no deterministic
+                # triage lower-bar that force-upgrades a continue into completion. Whether
+                # the alert is sufficiently grounded to hand off is a semantic judgment the
+                # interpret prompt makes; `_should_assess` still grants triage its
+                # flood/truncation tolerance once the model does vote to stop.
                 action = _action_from_review(parsed, observation)
-                if (
-                    is_triage
-                    and _triage_ready_to_complete(observation)
-                    and action in _CONTINUE_ACTIONS
-                ):
-                    action = "stop_completed"
                 updated_ledger, status = _apply_model_ledger(
                     ledger, observation, parsed, action, observation_retries, is_triage
                 )
@@ -279,8 +258,6 @@ async def interpret(state: AgentState, config) -> dict:
     updated_ledger["next_step_instruction"] = _compose_instruction(
         observation, reconciled_action, ready, provided, updated_ledger
     )
-    updated_ledger["recent_time_windows"] = next_recent_windows
-    updated_ledger["recent_query_focuses"] = next_recent_focuses
     updated_ledger["query_trials"] = next_query_trials
     if not updated_ledger.get("forbidden_repeats"):
         updated_ledger["forbidden_repeats"] = _forbidden_repeats(observation)
@@ -292,33 +269,12 @@ async def interpret(state: AgentState, config) -> dict:
                 updated_ledger.get("evidence_summary") or observation.get("summary") or ""
             )
 
-    # Refine-loop breaker: narrowing the same thread again and again without advancing the
-    # objective means the answer is not in more narrowing — force a pivot to a different
-    # entity/class/window. Deterministic backstop for the interpreter over-selecting
-    # refine_query. Only triggers on a NON-advancing streak, so a productive series of
-    # refinements is never interrupted.
-    refine_streak = state.get("refine_streak", 0) or 0
-    if (
-        not ready
-        and updated_ledger.get("next_action") == "refine_query"
-        and not observation.get("advanced_objective")
-    ):
-        if refine_streak >= _MAX_REFINE_STREAK:
-            updated_ledger["next_action"] = "pivot_entity"
-            updated_ledger["blocker"] = (
-                (updated_ledger.get("blocker") or "")
-                + " | refined this thread repeatedly without progress — PIVOT to a different "
-                "entity, behaviour class, or time window (the evidence is not in more "
-                "narrowing here)."
-            ).strip(" |")
-            updated_ledger["next_step_instruction"] = _compose_instruction(
-                observation, "pivot_entity", False, ledger=updated_ledger
-            )
-            refine_streak = 0
-        else:
-            refine_streak += 1
-    else:
-        refine_streak = 0
+    # Advance the convergence counter for the next cycle: reset when this cycle crystallized a
+    # NEW confirmed finding (genuine progress) or the task is wrapping up; otherwise increment.
+    # This is the state the NO_PROGRESS brake reads at the top of the next cycle.
+    prior_findings = len(_coerce_confirmed_findings(ledger.get("confirmed_findings")))
+    new_findings = len(_coerce_confirmed_findings(updated_ledger.get("confirmed_findings")))
+    next_no_progress = 0 if (ready or new_findings > prior_findings) else no_progress_cycles + 1
 
     no_new_evidence = "NO_NEW_EVIDENCE" in set(observation.get("signals") or [])
     next_retries = observation_retries + 1 if (no_new_evidence or not observation.get("advanced_objective")) else 0
@@ -334,7 +290,7 @@ async def interpret(state: AgentState, config) -> dict:
         "last_observation": observation,
         "status": status,
         "observation_retries": next_retries,
-        "refine_streak": refine_streak,
+        "no_progress_cycles": next_no_progress,
     }
     if ready:
         # Wrap-up path: keep the compacted, interpreted evidence for the report writer.

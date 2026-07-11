@@ -20,7 +20,7 @@ import re
 import logging
 
 from ._const import _EFFORT_CEILING, _EVIDENCE_TOOLS, _MAX_INVESTIGATION_RETRIES, _MAX_REFLECTION_RETRIES, _MIN_COVERAGE_GAP, _POST_CESSATION_TAIL_BINS, _SEARCH_RESULT_TOOLS
-from ._shared import _findings_section_text, _merge_preserved_findings, _new_leads_section_text, _preserved_findings_from_state
+from ._shared import _finding_bullet, _findings_section_text, _merge_preserved_findings, _new_leads_section_text, _preserved_findings_from_state
 
 log = logging.getLogger(__name__)
 
@@ -249,12 +249,28 @@ async def _synthesize_investigation_report(state: AgentState, config, src, new_c
     if not model:
         return "", new_ctx
     sys_prompt = config["configurable"].get("system_prompt", "")
+    # Give the model the confirmed findings the interpret loop already distilled into the
+    # ledger. Without them the synthesis re-derives findings from the raw (often compacted)
+    # tool results and drops some — which `_merge_preserved_findings` then mechanically
+    # appends, so a genuine finding survives but as a bare bolt-on that never grounded the
+    # report's Hypotheses/New Leads. Handing the model its own confirmed state lets it write
+    # them in as first-class findings AND reason forward from them, so the post-hoc merge
+    # becomes a rare backstop instead of the routine path.
+    confirmed_block = ""
+    confirmed = _preserved_findings_from_state(state)
+    if confirmed:
+        confirmed_block = (
+            "\n\nYou have ALREADY CONFIRMED the following finding(s) during this task — each is "
+            "backed by retrieved evidence. Carry EVERY one into ## Findings with its event id "
+            "(do not drop, weaken, or re-derive them), and let them ground your ## Hypotheses "
+            "and ## New Leads:\n" + "\n".join(_finding_bullet(f) for f in confirmed)
+        )
     instruction = (
         "Evidence gathering is complete and reviewed. Write your FINAL report now, grounded "
         "ONLY in the tool results above — do not make any further tool calls. Use exactly the "
         "mandatory three-section format:\n\n## Findings\n## Hypotheses\n## New Leads\n\n"
         "Each ## Findings bullet must be a NEW evidence-backed fact with its event ID. Use "
-        "'- None.' for a genuinely empty section."
+        "'- None.' for a genuinely empty section." + confirmed_block
     )
     try:
         text_only = model.bind_tools([])
@@ -341,31 +357,12 @@ async def assess(state: AgentState, config) -> dict:
     reflection_retries = state.get("reflection_retries", 0) or 0
     budget_left = reflection_retries < _MAX_REFLECTION_RETRIES
 
-    # Triage owns no findings board or leads to review; it only owes a deterministic
-    # promise — consult the SIEM for nearby events before writing its report.
+    # Triage owns no findings board or leads to review. Whether it grounded the alert in
+    # real SIEM evidence is now a SEMANTIC judgment the interpret prompt enforces (the model
+    # will not vote to conclude until it has profiled/retrieved/correlated real evidence or
+    # capably established a negative) — there is no deterministic "did a SIEM query run"
+    # re-injection here. Only the report SHAPE (an output-format concern) is repaired below.
     if reviewable and state["agent_name"] == "triage" and budget_left:
-        siem_tools = _EVIDENCE_TOOLS & set(_tmap(tools))
-        if siem_tools and not any(getattr(m, "name", "") in siem_tools for m in state["messages"]):
-            emit(src, "note", "task review (triage): report written without a SIEM query — re-injecting")
-            vicinity_hours = int(state.get("default_vicinity_window_hours") or 24)
-            correction = HumanMessage(content=(
-                "You finished the triage report without loading other alerts/events close to "
-                "the case/alert timestamp. Query the SIEM now: start with a TIGHT absolute "
-                f"window around the linked alert (≈±5–15 min) and widen only if empty; "
-                f"±{vicinity_hours} hours is the maximum bound, not the first window. Confirm "
-                "the field and value exist before filtering on them, and pivot on concrete "
-                "artifacts (host, user, source IP, rule family, command, file path) rather "
-                "than natural-language keywords. If a query comes back TRUNCATED/capped it is "
-                "too broad — tighten it. Then revise the report with what nearby events showed, "
-                "or state the exact zero-result query."
-            ))
-            return {
-                "current_task": task,
-                "messages": list(state["messages"]) + [correction],
-                "status": "needs_more_work",
-                "reflection_retries": reflection_retries + 1,
-                "ctx_tokens": new_ctx,
-            }
         missing_triage = _missing_triage_sections(final_answer)
         if missing_triage:
             model = config["configurable"].get("model")
@@ -620,6 +617,7 @@ async def assess(state: AgentState, config) -> dict:
         "task_ledger": None,
         "last_observation": None,
         "observation_retries": 0,
+        "no_progress_cycles": 0,
         "last_confirmed_findings": preserved_findings,
         # Carry the self-review's per-finding verdicts to the pivot node so it gates board
         # facts to confirmed bullets only (no second model call). None on the fail-open path.

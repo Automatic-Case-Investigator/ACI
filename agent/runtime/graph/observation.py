@@ -10,7 +10,6 @@ from .timeutil import _find_timestamp_range, _format_dt, _parse_dt, _pivot_key
 
 _SEARCH_TOOLS = frozenset({"search", "search_keyword"})
 _EVENT_SNAPSHOT_TOOLS = frozenset({"search", "search_keyword", "get_event"})
-_RETRIEVAL_TOOLS = frozenset({"search", "search_keyword", "get_event", "correlate_entity", "correlate_techniques"})
 _PROFILE_TOOLS = frozenset({"get_event_volume", "profile_field"})
 _EVIDENCE_TOOLS = frozenset({
     "search", "search_keyword", "profile_field", "get_event_volume",
@@ -795,10 +794,6 @@ def build_observation(
         summary = f"{summary} — top: {evidence_digest[0][:200]}"
     if signals:
         summary = f"{summary}; signals={', '.join(signals)}"
-    small_hit_counts = [n for n in hit_counts if 0 < n <= 25]
-    small_scoped_evidence = bool(
-        small_hit_counts or any(t in _RETRIEVAL_TOOLS for t in tools)
-    ) and "TRUNCATED" not in signals and "FLOODED" not in signals
 
     # The flood's deviation axis (prefer one whose minority-event sample was returned).
     discriminator = next(
@@ -838,12 +833,9 @@ def build_observation(
         "pivot_candidates": _dedupe_pivots(pivot_candidates),
         "volume_regimes": volume_regimes[:8],
         "hit_counts": hit_counts[:8],
-        "small_scoped_evidence": small_scoped_evidence,
         "time_windows": time_windows[:8],
         "query_focuses": query_focuses[:8],
         "trials": trials[:8],
-        "window_stagnation": {},
-        "focus_stagnation": {},
     }
 
 

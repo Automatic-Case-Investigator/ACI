@@ -142,7 +142,10 @@ class EmptyCompletionModel(BaseChatModel):
 
 
 class TriageNearbyEventsGuardModel(BaseChatModel):
-    """First skips SIEM, then follows the guard correction and queries nearby events."""
+    """Writes a bare (unstructured) report first, then queries nearby SIEM events and writes a
+    valid 3-section handoff. Exercises the end-to-end triage flow through the report-shape
+    repair; triage grounding is now enforced by the interpret prompt, not a deterministic SIEM
+    guard."""
 
     def __init__(self):
         super().__init__()
@@ -541,8 +544,10 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(triage_tasks[0]["status"], "completed")
         print(f"Triage final status: {final['status']}")
 
-    async def test_triage_requires_nearby_siem_events_when_siem_available(self):
-        """Triage cannot complete without a SIEM lookup for time-nearby events."""
+    async def test_triage_queries_siem_then_completes_with_valid_handoff(self):
+        """End-to-end triage: a scripted agent queries nearby SIEM events and produces a valid
+        3-section handoff that completes. (Grounding is enforced by the interpret prompt, not a
+        deterministic SIEM guard — removed; this pins that the triage flow still completes.)"""
         triage_run_id = "triage-run-siem-guard"
         case_id = "~siemguard"
 

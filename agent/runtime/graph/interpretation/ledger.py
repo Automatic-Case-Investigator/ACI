@@ -1,11 +1,10 @@
 """Ledger field coercion + merge helpers: the durable per-task memory transforms."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import json
 import re
 
-from ._const import _CONFIRMED_FINDINGS_KEEP, _DEFAULT_STOP_CONDITION, _FOCUS_STAGNANT_RETRIES, _JSON_OBJECT_RE, _QUERY_TRIALS_KEEP, _RECENT_QUERY_FOCUSES_KEEP, _RECENT_TIME_WINDOWS_KEEP, _SECTION_LABELS, _STOP_STATE_RE, _WINDOW_OVERLAP_RATIO, _WINDOW_STAGNANT_RETRIES
+from ._const import _CONFIRMED_FINDINGS_KEEP, _DEFAULT_STOP_CONDITION, _JSON_OBJECT_RE, _QUERY_TRIALS_KEEP, _SECTION_LABELS, _STOP_STATE_RE
 
 
 def _default_ledger(task: dict | None) -> dict:
@@ -35,8 +34,6 @@ def _default_ledger(task: dict | None) -> dict:
         "active_pivots": [],
         "next_pivot_strategy": "keep",
         "why_current_pivot_failed": "",
-        "recent_time_windows": [],
-        "recent_query_focuses": [],
         "query_trials": [],
     }
 def _parse_json_object(text: str) -> dict | None:
@@ -224,127 +221,6 @@ def _confirmed_findings_from_observation(observation: dict, parsed: dict | None 
             "status": "confirmed",
         })
     return out
-def _parse_window_dt(value) -> datetime | None:
-    text = str(value or "").strip()
-    if not text:
-        return None
-    try:
-        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
-def _format_window_dt(dt: datetime) -> str:
-    return dt.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-def _coerce_time_windows(value, *, limit: int = _RECENT_TIME_WINDOWS_KEEP) -> list[dict]:
-    if not isinstance(value, list):
-        return []
-    out: list[dict] = []
-    for item in value:
-        if not isinstance(item, dict):
-            continue
-        start = _parse_window_dt(item.get("from"))
-        end = _parse_window_dt(item.get("to"))
-        if not (start and end and end > start):
-            continue
-        out.append({
-            "tool": " ".join(str(item.get("tool") or "").split())[:80],
-            "from": _format_window_dt(start),
-            "to": _format_window_dt(end),
-        })
-    return out[-limit:]
-def _window_tuple(item: dict) -> tuple[datetime, datetime] | None:
-    start = _parse_window_dt(item.get("from"))
-    end = _parse_window_dt(item.get("to"))
-    if start and end and end > start:
-        return start, end
-    return None
-def _overlap_ratio(a: dict, b: dict) -> float:
-    aw = _window_tuple(a)
-    bw = _window_tuple(b)
-    if not aw or not bw:
-        return 0.0
-    start = max(aw[0], bw[0])
-    end = min(aw[1], bw[1])
-    if end <= start:
-        return 0.0
-    overlap = (end - start).total_seconds()
-    shorter = min((aw[1] - aw[0]).total_seconds(), (bw[1] - bw[0]).total_seconds())
-    return overlap / shorter if shorter > 0 else 0.0
-def _merge_recent_time_windows(existing, new, *, advanced: bool) -> list[dict]:
-    current = _coerce_time_windows(new)
-    if advanced:
-        return current[-_RECENT_TIME_WINDOWS_KEEP:]
-    merged = _coerce_time_windows(existing) + current
-    return merged[-_RECENT_TIME_WINDOWS_KEEP:]
-def _coerce_query_focuses(value, *, limit: int = _RECENT_QUERY_FOCUSES_KEEP) -> list[dict]:
-    if not isinstance(value, list):
-        return []
-    out: list[dict] = []
-    for item in value:
-        if not isinstance(item, dict):
-            continue
-        focus = " ".join(str(item.get("focus") or "").split())
-        if not focus:
-            continue
-        out.append({
-            "tool": " ".join(str(item.get("tool") or "").split())[:80],
-            "focus": focus[:500],
-        })
-    return out[-limit:]
-def _merge_recent_query_focuses(existing, new, *, advanced: bool) -> list[dict]:
-    current = _coerce_query_focuses(new)
-    if advanced:
-        return current[-_RECENT_QUERY_FOCUSES_KEEP:]
-    merged = _coerce_query_focuses(existing) + current
-    return merged[-_RECENT_QUERY_FOCUSES_KEEP:]
-def _detect_window_stagnation(ledger: dict, observation: dict, observation_retries: int) -> dict:
-    current = _coerce_time_windows(observation.get("time_windows"))
-    recent = _coerce_time_windows(ledger.get("recent_time_windows"))
-    if observation.get("advanced_objective") or observation_retries < _WINDOW_STAGNANT_RETRIES or not current or not recent:
-        return {}
-    overlapping: list[dict] = []
-    for prior in recent:
-        if any(_overlap_ratio(prior, now) >= _WINDOW_OVERLAP_RATIO for now in current):
-            overlapping.append(prior)
-    if len(overlapping) < 1:
-        return {}
-    all_windows = overlapping + current
-    parsed = [_window_tuple(item) for item in all_windows]
-    parsed = [item for item in parsed if item]
-    if not parsed:
-        return {}
-    covered_start = min(start for start, _ in parsed)
-    covered_end = max(end for _, end in parsed)
-    return {
-        "covered_span": {
-            "from": _format_window_dt(covered_start),
-            "to": _format_window_dt(covered_end),
-        },
-        "recent_windows": all_windows[-_RECENT_TIME_WINDOWS_KEEP:],
-        "reason": (
-            "Repeated non-advancing evidence queries substantially overlapped the same "
-            "covered time slice."
-        ),
-    }
-def _detect_focus_stagnation(ledger: dict, observation: dict, observation_retries: int) -> dict:
-    current = _coerce_query_focuses(observation.get("query_focuses"))
-    recent = _coerce_query_focuses(ledger.get("recent_query_focuses"))
-    if observation.get("advanced_objective") or observation_retries < _FOCUS_STAGNANT_RETRIES or not current or not recent:
-        return {}
-    prior = {item.get("focus") for item in recent}
-    repeated = [item for item in current if item.get("focus") in prior]
-    if not repeated:
-        return {}
-    return {
-        "repeated_focuses": repeated[-_RECENT_QUERY_FOCUSES_KEEP:],
-        "recent_focuses": (recent + current)[-_RECENT_QUERY_FOCUSES_KEEP:],
-        "reason": (
-            "Repeated non-advancing evidence queries reused the same keyword, DSL, "
-            "or profile-field anchor."
-        ),
-    }
 def _coerce_trials(value, *, limit: int = _QUERY_TRIALS_KEEP) -> list[dict]:
     if not isinstance(value, list):
         return []

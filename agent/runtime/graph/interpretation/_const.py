@@ -46,22 +46,22 @@ _CONTINUE_ACTIONS = frozenset({"pivot_entity", "retrieve_specific_event", "profi
 _FORCE_CONTINUE_SIGNALS = frozenset({
     "TRUNCATED", "SATURATED", "FLOODED", "ORIENTATION_ONLY", "INVALID_TIME_WINDOW", "TOOL_ERROR",
 })
-# After this many consecutive non-advancing `refine_query` cycles, the interpreter forces
-# a pivot instead of narrowing the same thread yet again.
-_MAX_REFINE_STREAK = 2
 # After this many consecutive non-advancing cycles (NO_NEW_EVIDENCE / EMPTY on the same
 # objective), the CURRENT DIRECTION is exhausted: interpret was echoing the same suggestion
 # back to itself (ledger dump -> model -> same suggestion). Force a change of approach and
 # drop the stuck forward target so the fixed point breaks.
 _STUCK_RETRIES = 2
-# A temporal version of STUCK: after several non-advancing cycles, repeated evidence
-# queries over substantially the same time slice should move to an adjacent/task-relevant
-# uncovered span instead of widening around the same center.
-_WINDOW_STAGNANT_RETRIES = 1
-_WINDOW_OVERLAP_RATIO = 0.8
-_RECENT_TIME_WINDOWS_KEEP = 8
-_FOCUS_STAGNANT_RETRIES = 1
-_RECENT_QUERY_FOCUSES_KEEP = 8
+# General per-task convergence brake. STUCK (above) catches a REPEATED identical direction;
+# this catches WANDERING — the agent varying its action type (pivot->retrieve->profile) for
+# many cycles while never crystallizing a new confirmed finding. It measures convergence
+# DIRECTLY (cycles since confirmed_findings last grew) rather than pattern-matching a query
+# shape, and is keyed on finding growth (NOT mere advanced_objective) so the advancement
+# flicker that resets STUCK cannot mask it. Session review of 291 interpret cycles showed the
+# old window/focus stagnation heuristics fired 0 times while tasks thrashed 29-52 cycles
+# unbraked; this is their general replacement. Set well above the median task length (~4
+# cycles) so it only engages on genuine runaway. It NUDGES the model to converge; the
+# per-task tool-call cap remains the hard backstop.
+_NO_PROGRESS_BRAKE_CYCLES = 8
 _CONFIRMED_FINDINGS_KEEP = 12
 # On the ready-to-assess handoff, how many recent tool-call/tool-result messages to carry
 # forward so `assess` can verify a SIEM query ran and synthesize the report from real
@@ -79,8 +79,6 @@ _PIVOT_KEYS = (
     "status", "failure_count", "last_failure_reason", "broader_alternative",
 )
 _PIVOT_FAILURE_SIGNALS = (
-    ("WINDOW_STAGNANT", "window_stagnant"),
-    ("FOCUS_STAGNANT", "focus_stagnant"),
     ("INVALID_TIME_WINDOW", "invalid_time_window"),
     ("TOOL_ERROR", "tool_error"),
     ("FLOODED", "flooded"),
@@ -89,9 +87,8 @@ _PIVOT_FAILURE_SIGNALS = (
     ("NO_NEW_EVIDENCE", "no_new_evidence"),
     ("EMPTY", "empty"),
 )
-# How many (discriminator, window) trials to remember per task. The recent_time_windows/
-# recent_query_focuses lists above drive the deterministic stagnation SIGNALS; query_trials
-# is the OUTCOME-annotated history the interpreter READS to reason over its own failures —
+# How many (discriminator, window) trials to remember per task. query_trials is the
+# OUTCOME-annotated history the interpreter READS to reason over its own failures —
 # it distinguishes "repeated an EMPTY query" (matching logic is wrong: profile the real
 # values / subtract the alert's own value) from "repeated a FLOOD" (narrow) from "reused a
 # window" (move). That semantic distinction is what the signals alone cannot carry.
