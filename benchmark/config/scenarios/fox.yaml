@@ -37,85 +37,132 @@ expected_verdict:
   severity: critical
   scope: ["wazuh-client"]              # the agent.id=27 host; a correct scope excludes 1/18 unless linked
 
-# Ordered attack phases. The authoritative, stable matcher is the timestamp WINDOW:
-# preprocess preserves event times deterministically from the raw log, and the agent
-# cites ISO timestamps in its report timeline.
+# Ordered attack phases. The authoritative matcher is:
+#   1) a discrete printed timestamp inside the labels.csv window, plus
+#   2) a content signature that identifies the phase.
 #
-# `marker_event_ids` below are the preprocessed `_source.id` values (stable, deterministic
-# by line index). NOTE: they do NOT match agent citations today — the agent cites the
-# OpenSearch envelope `_id` (`observation._EVENT_ID_KEYS` prefers `_id`), which `make_id()`
-# regenerates RANDOMLY on every preprocess/import, so it cannot be hardcoded as ground truth.
-# phase_recall therefore relies on the window; markers only start matching if PREPROCESS is
-# changed to write a deterministic `_id` (e.g. `_id = _source.id`) — elasticdump preserves the
-# file's `_id`, so this is a preprocess concern, not a load one. `marker_rules` are
-# documentation only (rules are shared across phases).
+# The scorer deliberately avoids matching Wazuh/OpenSearch `_id` values or any other
+# setup-specific identifiers. `marker_rules` below remain documentation of the real
+# detecting rule family for the phase; the `content_signature` is what phase_recall
+# actually looks for on the timestamped report line. Signature keywords are
+# conjunctive: every listed term must be present in the same surfaced line or raw event.
+# Phases with `scorable: false` have no distinguishing event in the dump and are
+# excluded from the recall denominator.
 phases:
   - name: service_stop
     start: 2022-01-17T09:04:46Z
     end:   2022-01-17T09:04:48Z
     agent_id: "1"
     marker_rules: ["80700"]
-    marker_event_ids: ["1700000000.100824", "1700000000.100825"]
+    marker_event_ids: []
+    content_signature:
+      all: ["type=service_stop", "unit=consequuntur"]
 
+  # UNSCORABLE: only 3 benign dnsmasq query lines fall in this hour (youtu.be x2,
+  # mail.price.fox.org); no long/encoded subdomains indicative of tunneling exist anywhere
+  # in the dump, so there is no distinguishing event to retrieve.
   - name: dnsteal
     start: 2022-01-17T09:04:48Z
     end:   2022-01-17T10:00:00Z
     agent_id: "18"
+    scorable: false
     marker_rules: []
     marker_event_ids: []
 
+  # The four AIT recon sub-phases have DISTINCT detection signatures (per the AIT ground
+  # truth), so they are scored separately and matched on their real rules — id→timestamp
+  # resolution attributes a cited event to the exact sub-window it falls in.
+  # network_scans is UNSCORABLE: a raw SYN/ping sweep leaves no payload for Wazuh's decoders,
+  # so there is no distinguishing event to retrieve — window is background noise only.
   - name: network_scans
     start: 2022-01-18T11:59:00Z
     end:   2022-01-18T12:17:00Z
     agent_id: "27"
-    marker_rules: ["31151", "31101"]
+    scorable: false          # no distinguishing event exists in the dump
+    marker_rules: []
     marker_event_ids: []
 
   - name: service_scans
     start: 2022-01-18T12:17:00Z
     end:   2022-01-18T12:17:47Z
     agent_id: "27"
-    marker_rules: ["31151"]
+    marker_rules: ["86601", "5706"]   # ET SCAN Nmap User-Agent + sshd insecure connection (scan)
     marker_event_ids: []
+    content_signature:
+      all:
+        - "et scan possible nmap user-agent observed"
+        - "172.17.130.196"
 
   - name: wpscan
     start: 2022-01-18T12:17:47Z
     end:   2022-01-18T12:18:30Z
     agent_id: "27"
-    marker_rules: ["31151"]
+    marker_rules: ["31101"]           # Web server 400 error, "WPScan v3.8.20" User-Agent
     marker_event_ids: []
+    content_signature:
+      all:
+        - "wpscan v3.8.20"
+        - "172.17.130.196"
 
   - name: dirb
     start: 2022-01-18T12:18:30Z
     end:   2022-01-18T12:38:00Z
     agent_id: "27"
-    marker_rules: ["31101", "31151", "30305"]
+    marker_rules: ["30305", "31151"]  # Apache forbidden dir/file + 31151 correlation of the 410k-hit burst
     marker_event_ids: []
+    content_signature:
+      all:
+        - "apache: attempt to access forbidden file or directory"
+        - "client denied by server configuration"
+        - "172.17.130.196"
 
   - name: webshell
     start: 2022-01-18T12:38:00Z
     end:   2022-01-18T12:38:30Z
     agent_id: "27"
     marker_rules: ["31108"]
-    marker_event_ids: ["1700000000.110407", "1700000000.110408"]
+    marker_event_ids: []
+    content_signature:
+      all:
+        - "wp_meta"
+        - "select * from wp_users"
+        - "wordpress_db"
 
+  # Same webshell URL as webshell/reverse_shell; the distinguishing content is the decoded
+  # cracking command (`wphashcrack`, `rockyou`, `john`, `phopkins`).
   - name: cracking
     start: 2022-01-18T12:38:30Z
     end:   2022-01-18T13:13:50Z
     agent_id: "27"
-    marker_rules: ["86601"]
+    marker_rules: ["31108"]
     marker_event_ids: []
+    content_signature:
+      all:
+        - "wp_meta"
+        - "wphashcrack"
+        - "rockyou.txt"
+        - "phopkins"
 
   - name: reverse_shell
     start: 2022-01-18T13:13:50Z
     end:   2022-01-18T13:14:30Z
     agent_id: "27"
     marker_rules: ["31108"]
-    marker_event_ids: ["1700000000.110414"]
+    marker_event_ids: []
+    content_signature:
+      all:
+        - "wp_meta"
+        - "/dev/tcp/192.168.130.77/51898"
 
+  # rule 5304 "User successfully changed UID" (su www-data:phopkins) then rule 5402
+  # "Successful sudo to ROOT executed" (`phopkins ... USER=root ; COMMAND=/bin/cat /etc/...`).
   - name: privilege_escalation
     start: 2022-01-18T13:14:30Z
     end:   2022-01-18T13:14:53Z
     agent_id: "27"
-    marker_rules: ["5501"]
-    marker_event_ids: ["1700000000.110415", "1700000000.110416", "1700000000.110417"]
+    marker_rules: ["5304", "5402"]
+    marker_event_ids: []
+    content_signature:
+      all:
+        - "www-data:phopkins"
+        - "phopkins"

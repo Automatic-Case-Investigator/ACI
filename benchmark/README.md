@@ -147,8 +147,8 @@ wardbeck, wilson, wheeler`.
 
 Implemented (each a file in `scoring/metrics/`):
 
-- **phase_recall** — of the labelled phases, how many the report reaches (cited marker
-  event or a timestamp inside the phase window). The primary outcome metric.
+- **phase_recall** — of the labelled phases, how many the report reaches via
+  timestamped evidence plus a conjunctive phase signature. The primary outcome metric.
 - **verdict_correctness** — does the diagnosis disposition (tp/fp/inconclusive/
   needs_investigation) match the scenario's expected verdict; flags **under-calls**
   (expected tp, called weaker — the "compromise suspected instead of confirmed" failure).

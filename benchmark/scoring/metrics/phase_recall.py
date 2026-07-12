@@ -22,7 +22,12 @@ class PhaseRecall(Metric):
     needs_judge = False
 
     def score(self, ctx: ScoringContext) -> MetricResult:
-        hits = {phase.name: ctx.report.covers(phase) for phase in ctx.scenario.phases}
+        # Phases flagged `scorable: false` have no distinguishing event in the dataset
+        # (e.g. fox network_scans / dnsteal — a raw SYN sweep and a no-tunneling DNS window),
+        # so an agent cannot reach them by evidence; they are excluded from the denominator
+        # rather than counted as guaranteed misses.
+        hits = {phase.name: ctx.report.covers(phase)
+                for phase in ctx.scenario.phases if phase.scorable}
         reached = sum(1 for v in hits.values() if v)
         total = len(hits)
         return MetricResult(
