@@ -33,7 +33,7 @@ Trigger (event_type, case_id, payload)
   point a webhook or poller calls. It resolves the binding, checks the global kill switch
   and the per-event override (see below), then calls `runtime.engine.dispatch.dispatch_run`
   — the same transport-agnostic dispatcher the orchestrator uses for interactive sub-agent
-  calls (see [Runtime & Agent Graph](runtime/agent-graph.md#runtime-entry)). Automatic runs
+  calls (see [Runtime & Agent Graph](/documents/architecture/runtime/agent-graph#runtime-entry)). Automatic runs
   are simply `dispatch_run(..., trigger=AgentRun.TRIGGER_AUTO, dedupe_window=...)`.
 
 ## Trigger Providers (Payload Parsing)
@@ -138,7 +138,7 @@ so the decision is always visible in `run.metadata` even when no side effect fir
    - The client is built the same way the SOAR MCP connector is: through
      `resolve_settings("aci-thehive", ...)`, so it uses whichever connection is marked
      **active** in Settings → Integrations (see
-     [MCP And Tool Policy](tools.md#integration-connections-many-per-provider-one-active)).
+     [MCP And Tool Policy](/documents/architecture/tools#integration-connections-many-per-provider-one-active)).
 
 ## Configuration Precedence
 
