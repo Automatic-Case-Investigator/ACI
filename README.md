@@ -58,4 +58,4 @@ Full documentation lives in [`docs/`](docs/README.md), organized by subsystem.
 
 ## License
 
-(License information to be added)
+Licensed under the [MIT License](LICENSE).
