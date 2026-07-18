@@ -131,8 +131,14 @@ The settings model is DB-over-env:
 
 - `ModelProviderConfig`: base URL, API key, model, tool-calling mode, timeout,
   context length, and sampling parameters.
-- `ProviderConfig`: enabled state and connection settings for built-in connectors
-  such as Wazuh, TheHive, and VirusTotal.
+- `IntegrationConnection`: named, multi-instance connections for built-in connectors
+  (Wazuh, TheHive, VirusTotal), grouped by platform type in the settings UI. Many
+  connections may exist per provider; exactly one `is_active` per provider is what the
+  runtime resolves. `resolve_settings` precedence is `.env defaults < ProviderConfig
+  (legacy singleton) < active IntegrationConnection`.
+- `ProviderConfig`: legacy per-provider enabled state and connection settings, kept as
+  the fallback layer beneath `IntegrationConnection` for deployments that predate the
+  multi-connection model.
 - `MCPServerConfig`: custom stdio or streamable-HTTP MCP servers, with optional
   per-agent allow lists.
 - `AgentConfig`: budget, tool-policy, and intent-streaming overrides.

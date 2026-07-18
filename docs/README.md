@@ -29,6 +29,7 @@ Look-up material that isn't owned by a single subsystem.
 How to run and work on the system.
 
 - [Getting Started](guides/getting-started.md) — install, configure, and run.
+- [Connecting With SOC Technologies](guides/connecting-with-soc-technologies.md) — per-platform setup for Wazuh, TheHive, and VirusTotal.
 - [Operations](guides/operations.md) — testing, development, and troubleshooting.
 
 ## Project

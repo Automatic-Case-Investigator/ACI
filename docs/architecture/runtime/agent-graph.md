@@ -2,8 +2,8 @@
 
 ## Runtime Entry
 
-An agent run starts through either the REST API, dashboard orchestrator, CLI, or
-workflow command. All specialist run paths converge on
+An agent run starts through either the REST API, the dashboard orchestrator, or a
+workflow trigger. All specialist run paths converge on
 `agent.runtime.engine.run.run_agent`, which:
 
 1. loads the registered `AgentDefinition` by `agent_name`;
@@ -28,8 +28,9 @@ The stable high-level runtime entry surfaces are:
 - `compose_system_prompt`
 
 The canonical orchestrator import surface is the package
-`agent.runtime.orchestrator`. The historical flat module
-`agent.runtime.orchestrator.py` remains only as a compatibility shim.
+`agent.runtime.orchestrator`. A flat compatibility module of the same name
+re-exports the package's public names, so code importing the flat path resolves
+to the same objects as code importing the package directly.
 
 Model calls intentionally have no client-side request timeout by default. Local
 vLLM/Ollama turns can run for a long time during tool-heavy investigations, so
@@ -55,10 +56,10 @@ node, not by the orchestrator.
 
 ## Agent Graph
 
-The graph is built from the package under `agent/runtime/graph/`. The package
-re-exports historical names through `agent.runtime.graph` (a dynamic re-export in
-`__init__.py`), but implementation is split across narrower modules, each owning one
-concern:
+The graph is built from the package under `agent/runtime/graph/`. Implementation is
+split across narrower modules, each owning one concern; `agent.runtime.graph`'s
+`__init__.py` dynamically re-exports every module's public names, so any of them
+can be imported directly from the package root:
 
 | Module | Owns |
 |---|---|
@@ -156,16 +157,14 @@ tasks that completed without a substantive conclusion.
 
 ### Per-Task Self-Review
 
-Older revisions enforced task quality with a fixed cascade of separate guard
-nodes (a triage-SIEM-query guard, an investigation-SIEM-query guard, a
-broad-query guard, a depth guard, a summary-format guard, and an
-incomplete-pivot guard), each hand-coding one failure mode as a Python
-`if`-branch with its own retry counter. Per the design philosophy's
-"prefer prompts and reusable workflow over edge-case branching", this was
-replaced with a single **per-task self-review** (`agent/runtime/graph/reflection.py:
-review_task_model`): one model call that judges the task holistically and
-returns a `TaskReview` (`conclude` or `keep_working`, plus per-`## Findings`
-bullet grounding/novelty verdicts).
+Task quality for `investigation` is enforced by a single **per-task self-review**
+(`agent/runtime/graph/reflection.py: review_task_model`) rather than a set of
+narrow, independently hand-coded checks: one model call judges the task
+holistically and returns a `TaskReview` (`conclude` or `keep_working`, plus
+per-`## Findings` bullet grounding/novelty verdicts). This follows the design
+philosophy's general preference for prompts and reusable workflow over
+accumulating edge-case branching — see
+[Architecture Overview](../overview.md#architectural-philosophy).
 
 The review is given deterministic *signals* to ground its judgment, computed in
 code rather than guessed by the model:
@@ -201,8 +200,7 @@ directly. Seeding is two-phase:
 1. **Deterministic extraction.** Plan items are parsed straight out of the
    triage report's `## Investigation Plan` and written with direct
    `create_task` calls — no model involvement. This guarantees exactly one
-   task per plan item regardless of model behavior, which is what the old
-   "seed guard" used to have to re-prompt for.
+   task per plan item regardless of model behavior.
 2. **Model pass for gaps.** A bounded second pass lets the model add tasks the
    plan may have omitted (e.g. an explicit C2-destination pivot or
    initial-access-vector task) and verify completeness via `list_tasks`.

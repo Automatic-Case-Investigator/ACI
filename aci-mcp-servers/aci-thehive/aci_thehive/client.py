@@ -71,13 +71,18 @@ def _normalize_case_timestamps(case: dict) -> dict:
 
 
 class TheHiveClient:
-    def __init__(self, *, host: str, port: str = "9000", api_key: str, verify_tls: str = "true") -> None:
-        if not host:
-            raise ValueError("TheHive host is not configured — set it in Settings → Integrations")
-        host = host.rstrip("/")
-        if not host.startswith(("http://", "https://")):
-            host = f"http://{host}"
-        self._base = f"{host}:{port}"
+    def __init__(self, *, base_url: str = "", api_key: str, verify_tls: str = "true",
+                 host: str = "", port: str = "9000") -> None:
+        # The connection is configured as a single base URL. `host`/`port` remain
+        # accepted for backward compatibility (legacy env vars / direct callers).
+        base = (base_url or "").strip().rstrip("/")
+        if not base and host:
+            base = f"{host.rstrip('/')}:{port}"
+        if not base:
+            raise ValueError("TheHive base URL is not configured — set it in Settings → Integrations")
+        if not base.startswith(("http://", "https://")):
+            base = f"http://{base}"
+        self._base = base
         api_key = api_key.strip().replace('\r', '').replace('\n', '')
         if not api_key:
             raise ValueError("TheHive API key is not configured — set it in Settings → Integrations")

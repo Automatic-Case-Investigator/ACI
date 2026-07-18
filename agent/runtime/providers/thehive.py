@@ -6,30 +6,30 @@ import sys
 from .base import KIND_SOAR, MCPProvider
 from .registry import register
 
-# settings key -> env var the aci_thehive subprocess expects
-_ENV_MAP = {
-    "host": "THEHIVE_HOST",
-    "port": "THEHIVE_PORT",
-    "api_key": "THEHIVE_API_KEY",
-    "verify_tls": "THEHIVE_VERIFY_TLS",
-}
-
-
 def _defaults() -> dict:
     return {
-        "host": "",
-        "port": "9000",
+        "base_url": "",
         "api_key": "",
         "verify_tls": "true",
     }
 
 
 def _build(resolved: dict, run_ctx: dict | None = None) -> dict:
+    # The connection is a single base_url now; derive it from a legacy host/port
+    # row when base_url is absent so pre-existing configs keep working.
+    base_url = str(resolved.get("base_url") or "").strip()
+    if not base_url and resolved.get("host"):
+        host = str(resolved.get("host") or "").rstrip("/")
+        base_url = f"{host}:{resolved.get('port', '9000')}" if host else ""
     return {
         "command": sys.executable,
         "args": ["-m", "aci_thehive.server"],
         "transport": "stdio",
-        "env": {env: str(resolved[key]) for key, env in _ENV_MAP.items()},
+        "env": {
+            "THEHIVE_URL": base_url,
+            "THEHIVE_API_KEY": str(resolved.get("api_key", "")),
+            "THEHIVE_VERIFY_TLS": str(resolved.get("verify_tls", "true")),
+        },
     }
 
 

@@ -37,6 +37,38 @@ class ProviderConfig(models.Model):
         return f"{self.key} ({'enabled' if self.enabled else 'disabled'})"
 
 
+class IntegrationConnection(models.Model):
+    """A named connection instance for a built-in integration provider.
+
+    Where `ProviderConfig` holds a single settings blob per provider key, this
+    model lets an operator register *many* connections for the same provider
+    (e.g. a prod and a lab Wazuh) and mark exactly one `is_active` per
+    `provider_key`. The runtime resolver (`runtime/config.resolve_settings`)
+    prefers the active connection, falling back to `ProviderConfig`/env when a
+    provider has no connections — so this table is purely additive.
+
+    The single-active-per-provider invariant is enforced in the settings views
+    (activate/save/delete), not by a DB constraint.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=128)
+    # One of the built-in connector keys (aci-wazuh / aci-thehive / aci-ti); the
+    # provider's schema defines which fields `settings` carries.
+    provider_key = models.CharField(max_length=64)
+    settings = models.JSONField(default=dict, blank=True)
+    is_active = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["provider_key", "name"]
+
+    def __str__(self):
+        flag = " *active" if self.is_active else ""
+        return f"{self.name} [{self.provider_key}]{flag}"
+
+
 class MCPServerConfig(models.Model):
     """Operator-editable MCP server registration.
 

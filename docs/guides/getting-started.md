@@ -1,10 +1,6 @@
 # Getting Started
 
-Install ACI, configure it, and run your first investigation. Steps 1–5 are one-time setup;
-step 6 is how you run investigations from then on.
-
-Then open the dashboard → **Settings** to configure the model provider and the Wazuh/TheHive
-connections. The sections below walk through each step.
+This is a tutorial of installing, configuring, and running the platform.
 
 ## Prerequisites
 
@@ -13,7 +9,7 @@ connections. The sections below walk through each step.
 - **External services** (local or remote):
   - Wazuh 4.x (SIEM)
   - TheHive 5.x (SOAR)
-  - An OpenAI-compatible LLM API (vLLM, Ollama, or Claude API)
+  - An OpenAI-compatible LLM API (vLLM, Ollama, or OpenAI API)
 
 ## How configuration works
 
@@ -86,54 +82,28 @@ Open [http://localhost:8000/dashboard/](http://localhost:8000/dashboard/).
 
 ## 5. Configure connections in the dashboard
 
-In the dashboard, open **Settings** and configure:
+In the dashboard, open **Settings -> Model** and configure model settings:
 
-- **Model provider** — base URL, API key, model name, sampling, context length, and timeout
-  for your OpenAI-compatible endpoint (vLLM / Ollama / Claude API).
-- **Wazuh (SIEM)** — Base URL, Index pattern, User, Password, Verify TLS.
-- **TheHive (SOAR)** — Host, Port, API key, Verify TLS.
-- **VirusTotal (TI)** — API key (optional; enables artifact enrichment).
+- base URL: API URL for the LLM provider
+- Model name: the model name to use
+- API key: API key for authenticating the API
+- Tool calling mode: the mode used for tool calling (auto recommended)
+- Temperature: Parameter deciding how creative the token decoding should be (0 stands for completely deterministic)
+- Max tokens: Maximum tokens allowed for the input
+- Context length: Context window size
+- Request timeout: Timeout for waiting LLM provider response (none recommended)
 
-Each connection has a **Test** button that verifies reachability before you save. These
-settings are stored in the database and persist across restarts.
+In the dashboard, open **Settings -> Integrations** and configure integration with SOC technologies:
+
+- **SIEM** — Base URL, Index pattern, Authentication credentials, Verify TLS.
+- **SOAR** — Host, Port, Authentication credentials, Verify TLS.
+- **TI (Optional)** — API key (optional; enables artifact enrichment).
+
+For platform-by-platform setup — including where to obtain each platform's API
+key — see [Connecting With SOC Technologies](connecting-with-soc-technologies.md).
 
 ## 6. Run an investigation
 
-### Dashboard (interactive)
+Type an incident question in the dashboard. The orchestrator should spawn a session and routes to triage and investigation as needed.
 
-Type an incident question in the dashboard. The orchestrator keeps a durable analyst session,
-routes to triage and investigation as needed, and republishes resumed or restarted specialist
-results back into that same analyst-visible session state.
-
-### CLI
-
-```bash
-python manage.py run_agent \
-  --agent-name investigation \
-  --case-id "~254202040" \
-  --question "Were there any failed SSH logins in the last 24 hours?"
-```
-
-### REST API
-
-Obtain a JWT, then start a run:
-
-```bash
-TOKEN=$(curl -s -X POST http://localhost:8000/api/token/ \
-  -H "Content-Type: application/json" \
-  -d '{"username": "<user>", "password": "<pass>"}' | python -c "import sys,json;print(json.load(sys.stdin)['access'])")
-
-curl -X POST http://localhost:8000/api/agent/runs/ \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"agent_name": "investigation", "case_id": "~254202040", "question": "Investigate the case"}'
-```
-
-See the [API Reference](../reference/api.md) for the full endpoint list (status, events,
-cancel, resume, restart, feedback).
-
-## Next steps
-
-- [Testing](operations.md#testing) — run the offline suite.
-- [Architecture Overview](../architecture/overview.md) — how the system is designed.
-- [Configuration Reference](../reference/configuration.md) — all settings.
+![image](/assets/images/example_conversation_start.png)

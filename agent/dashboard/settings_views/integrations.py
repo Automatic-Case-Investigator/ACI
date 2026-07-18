@@ -142,22 +142,16 @@ def settings_mcp_delete(request):
     return redirect("dashboard:settings")
 
 
-@csrf_exempt
-@require_POST
-def settings_connection_save(request):
-    """Save a built-in connector's connection settings into ProviderConfig.settings."""
-    from agent.runtime.providers.registry import get_provider
+def _collect_connection_settings(request, schema, base):
+    """Build a settings dict for `schema`'s fields from POST, over `base`.
 
-    key = (request.POST.get("provider") or "").strip()
-    schema = _CONNECTION_SCHEMA.get(key)
-    if schema is None:
-        messages.error(request, f"Unknown connector: {key}")
-        return redirect("dashboard:settings")
-
+    Returns (settings, error_message). `error_message` is non-None when a secret
+    field fails its `pattern` validation. Mirrors the historic behaviour: a blank
+    text/secret field clears that value, a checkbox becomes "true"/"false".
+    """
     import re
 
-    existing_row = ProviderConfig.objects.filter(key=key).first()
-    new_settings = dict(existing_row.settings) if existing_row and isinstance(existing_row.settings, dict) else {}
+    settings = dict(base) if isinstance(base, dict) else {}
     for f in schema["fields"]:
         name = f["name"]
         if f["type"] == "secret":
@@ -166,46 +160,162 @@ def settings_connection_save(request):
                 pattern = f.get("pattern")
                 if pattern and not re.match(pattern, submitted):
                     hint = f.get("pattern_hint", "the expected format")
-                    messages.error(
-                        request,
+                    return None, (
                         f"{schema['label']}: '{f['label']}' must be {hint} — "
                         "the submitted value was rejected and not saved "
-                        "(check you pasted the key itself, not other text).",
+                        "(check you pasted the key itself, not other text)."
                     )
-                    return redirect("dashboard:settings")
-            new_settings[name] = submitted  # blank clears the stored secret
+            settings[name] = submitted  # blank clears the stored secret
         elif f["type"] == "bool":
-            new_settings[name] = "true" if request.POST.get(name) else "false"
+            settings[name] = "true" if request.POST.get(name) else "false"
         else:
-            new_settings[name] = (request.POST.get(name) or "").strip()
+            settings[name] = (request.POST.get(name) or "").strip()
+    return settings, None
 
-    provider = get_provider(key)
-    defaults = {"settings": new_settings, "kind": provider.kind if provider else ProviderConfig.KIND_UTILITY}
-    # Internal providers (AVFS) can't be disabled; only persist `enabled` for the rest.
-    from agent.runtime.config import provider_category
-    if provider_category(key) != "internal":
-        defaults["enabled"] = request.POST.get("enabled") == "1"
-    ProviderConfig.objects.update_or_create(key=key, defaults=defaults)
-    messages.success(request, f"{schema['label']} connection saved.")
+
+@csrf_exempt
+@require_POST
+def settings_connection_save(request):
+    """Create or edit a named IntegrationConnection for a built-in provider.
+
+    A blank `conn_id` creates a new connection; the first connection for a
+    provider is auto-activated. Editing keeps the connection's provider fixed.
+    """
+    from agent.models import IntegrationConnection
+
+    key = (request.POST.get("provider") or "").strip()
+    conn_id = (request.POST.get("conn_id") or "").strip()
+
+    conn = None
+    if conn_id:
+        conn = IntegrationConnection.objects.filter(id=conn_id).first()
+        if conn is None:
+            messages.error(request, "Connection not found — it may have been deleted.")
+            return redirect("dashboard:settings")
+        key = conn.provider_key  # provider is immutable after creation
+
+    schema = _CONNECTION_SCHEMA.get(key)
+    if schema is None:
+        messages.error(request, f"Unknown connector: {key}")
+        return redirect("dashboard:settings")
+
+    name = (request.POST.get("name") or "").strip() or schema["label"]
+    base = conn.settings if conn else {}
+    new_settings, error = _collect_connection_settings(request, schema, base)
+    if error:
+        messages.error(request, error)
+        return redirect("dashboard:settings")
+
+    if conn:
+        conn.name = name
+        conn.settings = new_settings
+        conn.save(update_fields=["name", "settings", "updated_at"])
+        messages.success(request, f"Connection '{name}' saved.")
+    else:
+        first_for_provider = not IntegrationConnection.objects.filter(provider_key=key).exists()
+        IntegrationConnection.objects.create(
+            name=name, provider_key=key, settings=new_settings, is_active=first_for_provider,
+        )
+        note = " and set active" if first_for_provider else ""
+        messages.success(request, f"{schema['label']} connection '{name}' added{note}.")
+    return redirect("dashboard:settings")
+
+
+@csrf_exempt
+@require_POST
+def settings_connection_activate(request):
+    """Mark one connection active for its provider (clearing the others)."""
+    from django.db import transaction
+
+    from agent.models import IntegrationConnection
+
+    conn_id = (request.POST.get("conn_id") or "").strip()
+    conn = IntegrationConnection.objects.filter(id=conn_id).first()
+    if conn is None:
+        messages.error(request, "Connection not found — it may have been deleted.")
+        return redirect("dashboard:settings")
+
+    with transaction.atomic():
+        IntegrationConnection.objects.filter(provider_key=conn.provider_key).update(is_active=False)
+        IntegrationConnection.objects.filter(id=conn.id).update(is_active=True)
+    messages.success(request, f"'{conn.name}' is now the active connection.")
+    return redirect("dashboard:settings")
+
+
+@csrf_exempt
+@require_POST
+def settings_connection_delete(request):
+    """Delete one or more connections (accepts multiple `conn_id` for bulk delete).
+
+    For every provider whose active connection is removed, promote a surviving
+    sibling so each provider keeps at most one active connection.
+    """
+    from agent.models import IntegrationConnection
+
+    ids = [i.strip() for i in request.POST.getlist("conn_id") if i.strip()]
+    if not ids:
+        messages.error(request, "No connection selected.")
+        return redirect("dashboard:settings")
+
+    conns = list(IntegrationConnection.objects.filter(id__in=ids))
+    if not conns:
+        messages.error(request, "Connection(s) not found — they may have been deleted.")
+        return redirect("dashboard:settings")
+
+    names = [c.name for c in conns]
+    active_removed = {c.provider_key for c in conns if c.is_active}
+    IntegrationConnection.objects.filter(id__in=[c.id for c in conns]).delete()
+
+    for provider_key in active_removed:
+        if not IntegrationConnection.objects.filter(provider_key=provider_key, is_active=True).exists():
+            sibling = IntegrationConnection.objects.filter(provider_key=provider_key).first()
+            if sibling:
+                IntegrationConnection.objects.filter(id=sibling.id).update(is_active=True)
+
+    if len(names) == 1:
+        messages.success(request, f"Connection '{names[0]}' deleted.")
+    else:
+        messages.success(request, f"Deleted {len(names)} connections.")
     return redirect("dashboard:settings")
 
 
 @csrf_exempt
 @require_POST
 def settings_connection_test(request):
-    """Probe a connector's reachability using its current (DB-over-env) settings."""
+    """Probe a connection's reachability using its resolved (DB-over-env) settings.
+
+    Targets the connection named by `conn_id` when present (its stored settings
+    over env), otherwise the provider's active/legacy resolution. Freshly-typed,
+    non-blank fields override for this probe only, so values can be tested before
+    saving.
+    """
     from agent.runtime.config import resolve_settings
     from agent.runtime.providers.registry import get_provider
 
+    from agent.models import IntegrationConnection
+
     key = (request.POST.get("provider") or "").strip()
+    conn_id = (request.POST.get("conn_id") or "").strip()
+
+    conn = None
+    if conn_id:
+        conn = IntegrationConnection.objects.filter(id=conn_id).first()
+        if conn is not None:
+            key = conn.provider_key
+
     schema = _CONNECTION_SCHEMA.get(key)
     if schema is None:
         messages.error(request, f"Unknown connector: {key}")
         return redirect("dashboard:settings")
+
     provider = get_provider(key)
     resolved = resolve_settings(key, provider.setting_defaults() if provider else {})
-    # Let the operator test freshly-typed values without saving first: a non-blank
-    # submitted field overrides the stored/env value for this probe only.
+    # A specific connection's stored settings win over the active-resolution above.
+    if conn and isinstance(conn.settings, dict):
+        for field, value in conn.settings.items():
+            if value not in (None, ""):
+                resolved[field] = value
+    # Non-blank freshly-typed fields override for this probe only.
     for f in schema["fields"]:
         submitted = (request.POST.get(f["name"]) or "").strip()
         if submitted:

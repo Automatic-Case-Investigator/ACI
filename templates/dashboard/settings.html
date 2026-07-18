@@ -1,20 +1,19 @@
 <c-layout title="Settings · ACI" subtitle="Settings">
   <div class="settings-shell settings-shell-wide">
     <nav class="settings-rail" role="tablist" aria-label="Settings sections">
-      <a href="#model" role="tab" data-tab="model">Model</a>
-      <a href="#integrations" role="tab" data-tab="integrations">Integrations</a>
-      <a href="#connectors" role="tab" data-tab="connectors">MCP servers</a>
-      <a href="#agents" role="tab" data-tab="agents">Agents</a>
-      <a href="#automation" role="tab" data-tab="automation">Automation</a>
-      <a href="#debug" role="tab" data-tab="debug">Debug</a>
-      <a href="#baselines" role="tab" data-tab="baselines">Baselines</a>
+      <a href="#model" role="tab" data-tab="model" aria-controls="model">Model</a>
+      <a href="#integrations" role="tab" data-tab="integrations" aria-controls="integrations">Integrations</a>
+      <a href="#connectors" role="tab" data-tab="connectors" aria-controls="connectors">MCP servers</a>
+      <a href="#agents" role="tab" data-tab="agents" aria-controls="agents">Agents</a>
+      <a href="#automation" role="tab" data-tab="automation" aria-controls="automation">Automation</a>
+      <a href="#debug" role="tab" data-tab="debug" aria-controls="debug">Debug</a>
+      <a href="#baselines" role="tab" data-tab="baselines" aria-controls="baselines">Baselines</a>
     </nav>
 
     <div class="settings-main">
       <header class="settings-head" id="overview">
-        <div>
-          <h1>Settings</h1>
-        </div>
+        <h1>Settings</h1>
+        <p class="settings-sub">Configure the model, integrations, agents, and automation. Changes apply to the next run unless noted.</p>
       </header>
 
       {% if messages %}
@@ -22,8 +21,8 @@
         {% for m in messages %}<li class="settings-msg {% if m.tags %}{{ m.tags }}{% endif %}">{{ m }}</li>{% endfor %}
       </ul>
       {% endif %}
-      
-      <section class="settings-section" id="model">
+
+      <section class="settings-section" id="model" role="tabpanel" aria-labelledby="tab-model" tabindex="-1">
         <div class="settings-section-head">
           <div>
             <h2>Model provider</h2>
@@ -33,7 +32,7 @@
         <div class="model-presets">
           <span class="model-presets-label">Quick select:</span>
           <button type="button" class="preset-btn" data-preset="openai">OpenAI</button>
-          <button type="button" class="preset-btn" data-preset="ollama">Ollama (local)</button>
+          <button type="button" class="preset-btn" data-preset="ollama">Local</button>
           <button type="button" class="preset-btn" data-preset="custom">Custom</button>
         </div>
         <form method="post" action="{% url 'dashboard:settings_model_save' %}" class="settings-form settings-form-grid" id="model-form">
@@ -47,7 +46,7 @@
           <label>API key
             <span class="secret-field">
               <input type="password" name="api_key" id="model-api-key" value="{{ model.api_key|default:'' }}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore data-lpignore="true" readonly onfocus="this.removeAttribute('readonly')" placeholder="(none set — blank clears)">
-              <button type="button" class="link-btn secret-toggle">show</button>
+              <button type="button" class="secret-toggle">show</button>
             </span>
           </label>
           <label>Tool-calling mode
@@ -69,180 +68,161 @@
           <label>Request timeout (seconds, blank = none)
             <input type="number" name="timeout" min="0" value="{{ model.timeout|default:'' }}">
           </label>
-          <div class="form-actions"><button type="submit">Save model settings</button></div>
+          <div class="form-actions"><button type="submit" class="btn-primary save-primary">Save model settings</button></div>
         </form>
-        <script>
-        (function () {
-          var PRESETS = {
-            openai: {
-              base_url: "https://api.openai.com/v1",
-              models: ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "o3", "o3-mini", "o4-mini"],
-              context_length: "128000",
-              placeholder: "sk-...",
-            },
-            ollama: {
-              base_url: "http://localhost:11434/v1",
-              models: ["llama3.2", "llama3.1", "mistral", "qwen2.5", "deepseek-r1"],
-              context_length: "131072",
-              placeholder: "ollama",
-            },
-            custom: {
-              base_url: "",
-              models: [],
-              context_length: "",
-              placeholder: "",
-            },
-          };
-
-          function setDatalist(models) {
-            var dl = document.getElementById("model-suggestions");
-            dl.innerHTML = "";
-            models.forEach(function (m) {
-              var opt = document.createElement("option");
-              opt.value = m;
-              dl.appendChild(opt);
-            });
-          }
-
-          document.querySelectorAll(".preset-btn").forEach(function (btn) {
-            btn.addEventListener("click", function () {
-              var key = btn.dataset.preset;
-              var p = PRESETS[key];
-              if (!p) return;
-
-              var baseUrlInput = document.getElementById("model-base-url");
-              var modelInput = document.getElementById("model-name");
-              var ctxInput = document.getElementById("model-context-length");
-
-              baseUrlInput.value = p.base_url;
-              setDatalist(p.models);
-
-              if (p.models.length > 0 && !modelInput.value) {
-                modelInput.value = p.models[0];
-              }
-              if (p.context_length && !ctxInput.value) {
-                ctxInput.value = p.context_length;
-              }
-
-              if (key === "openai") {
-                var apiKeyInput = document.getElementById("model-api-key");
-                apiKeyInput.removeAttribute("readonly");
-                apiKeyInput.focus();
-              }
-
-              document.querySelectorAll(".preset-btn").forEach(function (b) {
-                b.classList.remove("preset-btn-active");
-              });
-              btn.classList.add("preset-btn-active");
-            });
-          });
-
-          // Highlight the active preset on page load based on current base URL.
-          var currentUrl = document.getElementById("model-base-url").value;
-          if (currentUrl === "https://api.openai.com/v1") {
-            var openaiBtn = document.querySelector('[data-preset="openai"]');
-            if (openaiBtn) {
-              openaiBtn.classList.add("preset-btn-active");
-              setDatalist(PRESETS.openai.models);
-            }
-          } else if (currentUrl.indexOf("localhost:11434") !== -1) {
-            var ollamaBtn = document.querySelector('[data-preset="ollama"]');
-            if (ollamaBtn) {
-              ollamaBtn.classList.add("preset-btn-active");
-              setDatalist(PRESETS.ollama.models);
-            }
-          }
-        })();
-        </script>
       </section>
 
-      <section class="settings-section" id="integrations">
+      <section class="settings-section" id="integrations" role="tabpanel" aria-labelledby="tab-integrations" tabindex="-1">
         <div class="settings-section-head">
           <div>
             <h2>Integrations</h2>
-            <p class="muted">External platform connections, applied on the next run. Secret fields are write-only — leave blank to keep the stored value.</p>
+            <p class="muted">Connections are grouped by platform type. The agent uses the connection marked <b>active</b> for each provider. Whether a provider runs at all is set in <a class="link-btn" href="#connectors">MCP servers</a>.</p>
           </div>
         </div>
-        {% regroup integrations by category as integration_groups %}
-        {% for group in integration_groups %}
-        <h3 class="settings-subheading">{{ group.grouper }}</h3>
-        <div class="settings-cards">
-          {% for c in group.list %}
-          <form method="post" action="{% url 'dashboard:settings_connection_save' %}" class="settings-card conn-card" data-cat="{{ c.category|lower }}">
-            <input type="hidden" name="provider" value="{{ c.key }}">
-            <div class="conn-head">
-              <h3>{{ c.label }} <span class="conn-kind conn-kind-{{ c.kind|lower }}">{{ c.kind }}</span></h3>
-              {% if c.internal %}
-              <span class="pill pill-on">always on</span>
-              {% else %}
-              <label class="check-inline"><input type="checkbox" name="enabled" value="1" {% if c.enabled %}checked{% endif %}> enabled</label>
-              {% endif %}
-            </div>
-            {% for f in c.fields %}
-            {% if f.type == 'bool' %}
-            <label class="check-inline conn-bool"><input type="checkbox" name="{{ f.name }}" value="true" {% if f.checked %}checked{% endif %}> {{ f.label }}</label>
-            {% else %}
-            <label class="conn-field">{{ f.label }}
-              {% if f.type == 'secret' %}
-              <span class="secret-field">
-                <input type="password" name="{{ f.name }}" value="{{ f.value }}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore data-lpignore="true" readonly onfocus="this.removeAttribute('readonly')" placeholder="(none set — blank clears)">
-                <button type="button" class="link-btn secret-toggle">show</button>
-              </span>
-              {% else %}
-              <input type="text" name="{{ f.name }}" value="{{ f.value }}" placeholder="{{ f.placeholder }}">
-              {% endif %}
-            </label>
+
+        {% for group in integrations %}
+        <div class="intg-group" data-cat="{{ group.category }}" data-group="{{ group.category }}">
+          <div class="intg-group-head">
+            <h3 class="intg-group-title">{{ group.kind }}</h3>
+            <span class="intg-group-meta muted tiny">{{ group.connection_count }} connection{{ group.connection_count|pluralize }}</span>
+            {% for p in group.providers %}
+            {% if not p.internal and not p.mcp_managed %}
+            <form method="post" action="{% url 'dashboard:settings_provider_toggle' %}" class="intg-provider-toggle">
+              <input type="hidden" name="key" value="{{ p.provider_key }}">
+              <input type="hidden" name="enabled" value="{% if p.enabled %}0{% else %}1{% endif %}">
+              <span class="pill {% if p.enabled %}pill-on{% else %}pill-off{% endif %}">{{ p.label }}: {% if p.enabled %}on{% else %}off{% endif %}</span>
+              <button type="submit" class="btn-secondary btn-sm">{% if p.enabled %}disable{% else %}enable{% endif %}</button>
+            </form>
             {% endif %}
             {% endfor %}
-            <div class="conn-actions">
-              <button type="submit" class="conn-save-btn">Save</button>
-              <button type="submit" class="link-btn" formaction="{% url 'dashboard:settings_connection_test' %}">Test connection</button>
-            </div>
-          </form>
-          {% if c.key == 'aci-ti' %}
-          <div class="settings-card conn-card-cache">
-            <div class="conn-head"><h3>TI Cache</h3></div>
-            <p class="muted" id="ti-cache-stats">Loading cache stats…</p>
-            <form method="post" action="{% url 'dashboard:settings_runtime_save' %}">
-              <input type="hidden" name="section" value="ti_cache">
-              <label class="conn-field">Cache TTL (hours)
-                <input type="number" name="ti_cache_ttl_hours" min="1" value="{{ runtime.ti_cache_ttl_hours }}" placeholder="24">
-              </label>
-              <p class="muted tiny">Shared across all TI providers. Applies to entries written after saving.</p>
-              <div class="conn-actions">
-                <button type="submit" class="conn-save-btn">Save TTL</button>
-              </div>
-            </form>
-            <form method="post" action="{% url 'dashboard:settings_ti_cache_clear' %}" onsubmit="return confirm('Delete all TI cache entries?');">
-              {% csrf_token %}
-              <div class="form-actions">
-                <button type="submit" class="danger-btn">Clear cache</button>
-              </div>
-            </form>
+            <button type="button" class="icon-btn intg-add-btn" data-add-group="{{ group.category }}" data-tip="Add new" aria-label="Add new {{ group.kind }} connection">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+            </button>
           </div>
-          <script>
-            fetch("{% url 'dashboard:settings_ti_cache_stats' %}")
-              .then(r => r.json())
-              .then(data => {
-                const el = document.getElementById("ti-cache-stats");
-                if (!el) return;
-                const providers = Object.entries(data.by_provider || {})
-                  .map(([k, v]) => k + ": " + v).join(", ");
-                el.textContent = "Number of cache entries: " + data.total;
-              })
-              .catch(() => {
-                const el = document.getElementById("ti-cache-stats");
-                if (el) el.textContent = "Cache stats unavailable.";
-              });
-          </script>
+
+          <div class="bulk-sel-bar" hidden>
+            <span class="bulk-count"><b>0</b> selected</span>
+            <span class="bulk-spacer"></span>
+            <button type="button" class="icon-btn icon-danger intg-bulk-delete" data-tip="Delete selected" aria-label="Delete selected connections">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>
+            </button>
+          </div>
+
+          {% if group.connections %}
+          <div class="settings-table-wrap">
+            <table class="settings-table intg-table" data-page-size="8">
+              <thead>
+                <tr>
+                  <th class="sel-col"><input type="checkbox" class="intg-select-all" aria-label="Select all"></th>
+                  <th>Name</th>
+                  <th>Provider</th>
+                  <th>Endpoint</th>
+                  <th>Status</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for c in group.connections %}
+                <tr data-conn-row data-conn-id="{{ c.id }}">
+                  <td class="sel-col"><input type="checkbox" class="intg-row-select" value="{{ c.id }}" aria-label="Select {{ c.name }}"></td>
+                  <td class="strong">{{ c.name }}</td>
+                  <td>{{ c.provider_label }}</td>
+                  <td class="mono-cell">{{ c.summary|default:'—' }}</td>
+                  <td>{% if c.is_active %}<span class="pill pill-on">active</span>{% else %}<span class="pill pill-off">inactive</span>{% endif %}</td>
+                  <td class="row-actions">
+                    <button type="button" class="icon-btn intg-edit-btn" data-edit-id="{{ c.id }}" data-tip="Edit" aria-label="Edit {{ c.name }}">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                    </button>
+                    {% if not c.is_active %}
+                    <form method="post" action="{% url 'dashboard:settings_connection_activate' %}" class="intg-inline-form">
+                      <input type="hidden" name="conn_id" value="{{ c.id }}">
+                      <button type="submit" class="icon-btn" data-tip="Set active" aria-label="Set {{ c.name }} active">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+                      </button>
+                    </form>
+                    {% endif %}
+                    <form method="post" action="{% url 'dashboard:settings_connection_delete' %}" class="intg-inline-form" data-confirm="Delete connection “{{ c.name }}”?">
+                      <input type="hidden" name="conn_id" value="{{ c.id }}">
+                      <button type="submit" class="icon-btn icon-danger" data-tip="Delete" aria-label="Delete {{ c.name }}">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>
+                      </button>
+                    </form>
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <div class="intg-pager" hidden>
+            <button type="button" class="btn-secondary btn-sm intg-page-prev">Prev</button>
+            <span class="intg-page-info muted tiny"></span>
+            <button type="button" class="btn-secondary btn-sm intg-page-next">Next</button>
+          </div>
+          {% else %}
+          <p class="muted settings-hint">No {{ group.kind }} connections yet — click “Add new”. Until then the agent falls back to your <code>.env</code> values.</p>
           {% endif %}
-          {% endfor %}
+
+          {# Hidden add/edit form templates cloned into a modal by the controller. #}
+          <div class="intg-forms" hidden>
+            {% for p in group.providers %}
+            <form class="intg-modal-form" data-role="add" data-provider="{{ p.provider_key }}" method="post" action="{% url 'dashboard:settings_connection_save' %}">
+              <input type="hidden" name="provider" value="{{ p.provider_key }}">
+              <label class="conn-field">Connection name
+                <input type="text" name="name" placeholder="e.g. Prod {{ p.label }}" required>
+              </label>
+              {% include "dashboard/_conn_fields.html" with fields=p.schema_fields %}
+              <div class="modal-actions">
+                <button type="button" class="btn-secondary btn-sm modal-cancel">Cancel</button>
+                <button type="submit" class="btn-primary save-primary btn-sm">Add connection</button>
+              </div>
+            </form>
+            {% endfor %}
+            {% for c in group.connections %}
+            <form class="intg-modal-form" data-role="edit" data-conn-id="{{ c.id }}" method="post" action="{% url 'dashboard:settings_connection_save' %}">
+              <input type="hidden" name="conn_id" value="{{ c.id }}">
+              <label class="conn-field">Connection name
+                <input type="text" name="name" value="{{ c.name }}" required>
+              </label>
+              {% include "dashboard/_conn_fields.html" with fields=c.fields %}
+              <div class="modal-actions">
+                <button type="button" class="btn-secondary btn-sm modal-cancel">Cancel</button>
+                <button type="submit" class="btn-secondary btn-sm" formaction="{% url 'dashboard:settings_connection_test' %}" formnovalidate>Test</button>
+                <button type="submit" class="btn-primary save-primary btn-sm">Save changes</button>
+              </div>
+            </form>
+            {% endfor %}
+          </div>
+
+          {% if group.show_ti_cache %}
+          <div class="settings-cards">
+            <div class="settings-card conn-card-cache">
+              <div class="conn-head"><h3>TI Cache</h3></div>
+              <p class="muted" id="ti-cache-stats">Loading cache stats…</p>
+              <form method="post" action="{% url 'dashboard:settings_runtime_save' %}">
+                <input type="hidden" name="section" value="ti_cache">
+                <label class="conn-field">Cache TTL (hours)
+                  <input type="number" name="ti_cache_ttl_hours" min="1" value="{{ runtime.ti_cache_ttl_hours }}" placeholder="24">
+                </label>
+                <p class="muted tiny">Shared across all TI providers. Applies to entries written after saving.</p>
+                <div class="conn-actions">
+                  <button type="submit" class="btn-primary save-primary btn-sm">Save TTL</button>
+                </div>
+              </form>
+              <form method="post" action="{% url 'dashboard:settings_ti_cache_clear' %}" data-confirm="Delete all TI cache entries? This cannot be undone.">
+                {% csrf_token %}
+                <div class="form-actions">
+                  <button type="submit" class="btn-danger btn-sm">Clear cache</button>
+                </div>
+              </form>
+            </div>
+          </div>
+          {% endif %}
         </div>
         {% endfor %}
-        <p class="muted tiny" style="margin: 0 16px 14px;">“Test connection” probes the values currently in the form (falling back to saved settings) — you can test before saving.</p>
+        <p class="muted settings-hint">“Add new” and “Edit” open a dialog. Secret fields show their stored value on this local console; submitting a blank secret clears it.</p>
       </section>
 
-      <section class="settings-section" id="connectors">
+      <section class="settings-section" id="connectors" role="tabpanel" aria-labelledby="tab-connectors" tabindex="-1">
         <div class="settings-section-head">
           <div>
             <h2>MCP servers</h2>
@@ -266,7 +246,7 @@
                     <form method="post" action="{% url 'dashboard:settings_provider_toggle' %}">
                       <input type="hidden" name="key" value="{{ p.key }}">
                       <input type="hidden" name="enabled" value="{% if p.enabled %}0{% else %}1{% endif %}">
-                      <button type="submit" class="link-btn">{% if p.enabled %}disable{% else %}enable{% endif %}</button>
+                      <button type="submit" class="btn-secondary btn-sm">{% if p.enabled %}disable{% else %}enable{% endif %}</button>
                     </form>
                   {% endif %}
                 </td>
@@ -295,11 +275,11 @@
                     <input type="hidden" name="transport" value="{{ s.transport }}">
                     <input type="hidden" name="command_or_url" value="{{ s.command_or_url }}">
                     <input type="hidden" name="enabled" value="{% if s.enabled %}0{% else %}1{% endif %}">
-                    <button type="submit" class="link-btn">{% if s.enabled %}disable{% else %}enable{% endif %}</button>
+                    <button type="submit" class="btn-secondary btn-sm">{% if s.enabled %}disable{% else %}enable{% endif %}</button>
                   </form>
-                  <form method="post" action="{% url 'dashboard:settings_mcp_delete' %}" onsubmit="return confirm('Delete MCP server {{ s.id }}?');">
+                  <form method="post" action="{% url 'dashboard:settings_mcp_delete' %}" data-confirm="Delete MCP server “{{ s.id }}”?">
                     <input type="hidden" name="id" value="{{ s.id }}">
-                    <button type="submit" class="link-btn link-danger">delete</button>
+                    <button type="submit" class="btn-danger btn-sm">delete</button>
                   </form>
                 </td>
               </tr>
@@ -327,11 +307,11 @@
             <input type="text" name="allowed_agents" placeholder="triage, investigation">
           </label>
           <label class="check-inline form-check"><input type="checkbox" name="enabled" value="1" checked> enabled</label>
-          <div class="form-actions"><button type="submit">Save custom server</button></div>
+          <div class="form-actions"><button type="submit" class="btn-primary save-primary">Save custom server</button></div>
         </form>
       </section>
 
-      <section class="settings-section" id="agents">
+      <section class="settings-section" id="agents" role="tabpanel" aria-labelledby="tab-agents" tabindex="-1">
         <div class="settings-section-head">
           <div>
             <h2>Agents</h2>
@@ -363,13 +343,13 @@
             <label class="check-inline"><input type="checkbox" name="stream_intent" value="1" {% if a.stream_intent %}checked{% endif %}> stream intent</label>
             <div class="settings-kv muted">handoff:
               {% if a.produces_handoff %}produces{% endif %}{% if a.consumes_handoff %}consumes{% endif %}{% if not a.produces_handoff and not a.consumes_handoff %}none{% endif %}</div>
-            <button type="submit">Save {{ a.name }}</button>
+            <button type="submit" class="btn-primary save-primary">Save {{ a.name }}</button>
           </form>
           {% endfor %}
         </div>
       </section>
 
-      <section class="settings-section" id="automation">
+      <section class="settings-section" id="automation" role="tabpanel" aria-labelledby="tab-automation" tabindex="-1">
         <div class="settings-section-head">
           <div>
             <h2>Automation</h2>
@@ -381,11 +361,11 @@
           <input type="hidden" name="section" value="workflows">
           <label class="check-inline"><input type="checkbox" name="workflows_enabled" value="1" {% if runtime.workflows_enabled %}checked{% endif %}> Automatic workflows enabled</label>
           <p class="muted tiny">When off, configured webhooks accept the request but return 503 instead of dispatching a run.</p>
-          <div class="form-actions"><button type="submit">Save</button></div>
+          <div class="form-actions"><button type="submit" class="btn-primary save-primary">Save</button></div>
         </form>
 
         <h3 id="triggers">Workflow triggers</h3>
-        <p class="muted" style="margin: 0 16px 6px;">Each trigger exposes a webhook URL — point your SIEM or SOAR at it so new alerts and cases start a workflow.</p>
+        <p class="muted settings-hint">Each trigger exposes a webhook URL — point your SIEM or SOAR at it so new alerts and cases start a workflow.</p>
         <div class="settings-table-wrap">
           <table class="settings-table settings-table-roomy">
             <thead>
@@ -397,7 +377,7 @@
                 <td><div class="strong">{{ t.name }}</div><code>{{ t.id }}</code></td>
                 <td class="webhook-url-cell">
                   <input type="text" class="webhook-url" value="{{ t.webhook_url }}" readonly onclick="this.select();">
-                  <button type="button" class="link-btn copy-webhook" data-url="{{ t.webhook_url }}">copy</button>
+                  <button type="button" class="btn-secondary btn-sm copy-webhook" data-url="{{ t.webhook_url }}">copy</button>
                 </td>
                 <td>{{ t.provider_label }}<div class="muted tiny"><code>{{ t.provider_key }}</code></div></td>
                 <td><code>{{ t.event_type }}</code></td>
@@ -406,15 +386,15 @@
                 <td>{% if t.secret_set %}<span class="pill pill-on">set</span>{% else %}<span class="pill pill-off">optional</span>{% endif %}</td>
                 <td><span class="pill {% if t.enabled %}pill-on{% else %}pill-off{% endif %}">{% if t.enabled %}enabled{% else %}disabled{% endif %}</span></td>
                 <td class="row-actions">
-                  <a class="link-btn" href="?edit_trigger={{ t.id }}#trigger-form">edit</a>
+                  <a class="btn-secondary btn-sm" href="?edit_trigger={{ t.id }}#trigger-form">edit</a>
                   <form method="post" action="{% url 'dashboard:settings_trigger_toggle' %}">
                     <input type="hidden" name="id" value="{{ t.id }}">
                     <input type="hidden" name="enabled" value="{% if t.enabled %}0{% else %}1{% endif %}">
-                    <button type="submit" class="link-btn">{% if t.enabled %}disable{% else %}enable{% endif %}</button>
+                    <button type="submit" class="btn-secondary btn-sm">{% if t.enabled %}disable{% else %}enable{% endif %}</button>
                   </form>
-                  <form method="post" action="{% url 'dashboard:settings_trigger_delete' %}" onsubmit="return confirm('Delete trigger {{ t.id }}?');">
+                  <form method="post" action="{% url 'dashboard:settings_trigger_delete' %}" data-confirm="Delete trigger “{{ t.id }}”?">
                     <input type="hidden" name="id" value="{{ t.id }}">
-                    <button type="submit" class="link-btn link-danger">delete</button>
+                    <button type="submit" class="btn-danger btn-sm">delete</button>
                   </form>
                 </td>
               </tr>
@@ -459,8 +439,8 @@
           </label>
           <label class="check-inline form-check"><input type="checkbox" name="enabled" value="1" {% if not edit_trigger or edit_trigger.enabled %}checked{% endif %}> enabled</label>
           <div class="form-actions">
-            <button type="submit">Save trigger</button>
-            {% if edit_trigger %}<a class="link-btn" href="{% url 'dashboard:settings' %}#trigger-form">cancel edit</a>{% endif %}
+            <button type="submit" class="btn-primary save-primary">Save trigger</button>
+            {% if edit_trigger %}<a class="btn-ghost btn-sm" href="{% url 'dashboard:settings' %}#trigger-form">cancel edit</a>{% endif %}
           </div>
         </form>
 
@@ -474,7 +454,7 @@
               <input type="number" name="dedupe_window" min="0" value="{{ w.dedupe_window }}">
             </label>
             <label class="check-inline"><input type="checkbox" name="enabled" value="1" {% if w.enabled %}checked{% endif %}> enabled</label>
-            <button type="submit">Save workflow</button>
+            <button type="submit" class="btn-primary save-primary">Save workflow</button>
           </form>
           {% empty %}
           <p class="muted">no trigger bindings registered</p>
@@ -482,7 +462,7 @@
         </div>
 
         <h3>Escalation policy</h3>
-        <p class="muted" style="margin: 0 16px 6px;">What an automatic run does with each verdict.</p>
+        <p class="muted settings-hint">What an automatic run does with each verdict.</p>
         <form method="post" action="{% url 'dashboard:settings_escalation_save' %}" class="settings-form settings-form-grid">
           {% for e in escalation_rows %}
           <label><code>{{ e.verdict }}</code>
@@ -491,11 +471,11 @@
             </select>
           </label>
           {% endfor %}
-          <div class="form-actions"><button type="submit">Save escalation policy</button></div>
+          <div class="form-actions"><button type="submit" class="btn-primary save-primary">Save escalation policy</button></div>
         </form>
       </section>
 
-      <section class="settings-section" id="debug">
+      <section class="settings-section" id="debug" role="tabpanel" aria-labelledby="tab-debug" tabindex="-1">
         <div class="settings-section-head">
           <div>
             <h2>Debug</h2>
@@ -505,11 +485,11 @@
         <form method="post" action="{% url 'dashboard:settings_runtime_save' %}" class="settings-form">
           <input type="hidden" name="section" value="debug">
           <label class="check-inline"><input type="checkbox" name="debug_mode" value="1" {% if runtime.debug_mode %}checked{% endif %}> Debug mode enabled</label>
-          <div class="form-actions"><button type="submit">Save</button></div>
+          <div class="form-actions"><button type="submit" class="btn-primary save-primary">Save</button></div>
         </form>
       </section>
 
-      <section class="settings-section" id="baselines">
+      <section class="settings-section" id="baselines" role="tabpanel" aria-labelledby="tab-baselines" tabindex="-1">
         <div class="settings-section-head">
           <div>
             <h2>Behavioral baselines</h2>
@@ -518,7 +498,7 @@
             <label class="inl">Lookback window (days)
               <input type="number" name="window_days" min="1" value="{{ baseline_window_days }}">
             </label>
-            <button type="submit">Recompute now</button>
+            <button type="submit" class="btn-primary save-primary">Recompute now</button>
           </form>
         </div>
 
@@ -534,9 +514,9 @@
           <label>Scheduler interval (hours)
             <input type="number" name="baseline_interval_hours" min="1" value="{{ runtime.baseline_interval_hours }}">
           </label>
-          <div class="form-actions"><button type="submit">Save baseline runtime</button></div>
+          <div class="form-actions"><button type="submit" class="btn-primary save-primary">Save baseline runtime</button></div>
         </form>
-        <p class="muted tiny" style="margin: 0 16px 14px;">The lookback window is shared by manual recompute and the scheduler. The scheduler interval applies on the next server restart.</p>
+        <p class="muted settings-hint">The lookback window is shared by manual recompute and the scheduler. The scheduler interval applies on the next server restart.</p>
 
         <h3>Configured subjects</h3>
         <div class="settings-table-wrap">
@@ -552,11 +532,11 @@
                   <form method="post" action="{% url 'dashboard:settings_baseline_subject_toggle' %}">
                     <input type="hidden" name="id" value="{{ s.id }}">
                     <input type="hidden" name="enabled" value="{% if s.enabled %}0{% else %}1{% endif %}">
-                    <button type="submit" class="link-btn">{% if s.enabled %}disable{% else %}enable{% endif %}</button>
+                    <button type="submit" class="btn-secondary btn-sm">{% if s.enabled %}disable{% else %}enable{% endif %}</button>
                   </form>
-                  <form method="post" action="{% url 'dashboard:settings_baseline_subject_delete' %}" onsubmit="return confirm('Delete baseline subject {{ s.subject_type }}:{{ s.subject_id }}?');">
+                  <form method="post" action="{% url 'dashboard:settings_baseline_subject_delete' %}" data-confirm="Delete baseline subject “{{ s.subject_type }}:{{ s.subject_id }}”?">
                     <input type="hidden" name="id" value="{{ s.id }}">
-                    <button type="submit" class="link-btn link-danger">delete</button>
+                    <button type="submit" class="btn-danger btn-sm">delete</button>
                   </form>
                 </td>
               </tr>
@@ -581,7 +561,7 @@
             <input type="text" name="subject_id" placeholder="alice  |  web-server-01" required>
           </label>
           <label class="check-inline form-check"><input type="checkbox" name="enabled" value="1" checked> enabled</label>
-          <div class="form-actions"><button type="submit">Add subject</button></div>
+          <div class="form-actions"><button type="submit" class="btn-primary save-primary">Add subject</button></div>
         </form>
 
         <h3>Computed baselines</h3>
@@ -639,47 +619,121 @@
       </section>
     </div>
   </div>
+
   <script>
+    // ── Settings page controller ────────────────────────────────────────────────
+    // One place binds everything: tabbed sections, model presets, TI-cache stats,
+    // secret show/hide, webhook copy, a styled confirm modal, toasts, per-form
+    // dirty state, and AJAX saves (POST via fetch → swap the panel in place, no
+    // full reload). CSRF is not enabled server-side (see aci/settings.py
+    // MIDDLEWARE), so plain fetch POSTs are accepted.
+    //
+    // Boosted-nav contract: the boosted router (nav.js) re-executes this script
+    // after swapping <main class="page">, so we tear down any window/document
+    // listeners from a previous visit via window.__aciSettingsCleanup before
+    // re-binding. Delegated listeners live on .settings-shell (which survives our
+    // own panel swaps but dies on a full page swap), so they never stack.
     (function () {
-      document.querySelectorAll(".secret-toggle").forEach((btn) => {
-        btn.addEventListener("click", () => {
-          const input = btn.parentElement.querySelector("input");
-          if (!input) return;
-          const reveal = input.type === "password";
-          input.type = reveal ? "text" : "password";
-          btn.textContent = reveal ? "hide" : "show";
-        });
-      });
-    })();
+      const shell = document.querySelector(".settings-shell");
+      if (!shell) return;
+      if (window.__aciSettingsCleanup) window.__aciSettingsCleanup();
 
-    (function () {
-      document.querySelectorAll(".copy-webhook").forEach((btn) => {
-        btn.addEventListener("click", async () => {
-          const url = btn.getAttribute("data-url") || "";
-          try {
-            await navigator.clipboard.writeText(url);
-          } catch (e) {
-            const input = btn.parentElement.querySelector(".webhook-url");
-            if (input) { input.select(); document.execCommand("copy"); }
-          }
-          const original = btn.textContent;
-          btn.textContent = "copied";
-          setTimeout(() => { btn.textContent = original; }, 1200);
-        });
-      });
-    })();
-
-    // Tabbed sections — one section visible at a time (progressive disclosure).
-    // The active tab is remembered in localStorage so it survives a save reload,
-    // and deep links (#agents) still select the right tab.
-    (function () {
-      const rail = document.querySelector(".settings-rail");
-      if (!rail) return;
-      const links = Array.from(rail.querySelectorAll("a[data-tab]"));
-      const sections = Array.from(document.querySelectorAll(".settings-section[id]"));
-      if (!links.length || !sections.length) return;
+      const MODEL_PRESETS = {
+        openai: {
+          base_url: "https://api.openai.com/v1",
+          models: ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "o3", "o3-mini", "o4-mini"],
+          context_length: "128000",
+        },
+        ollama: {
+          base_url: "http://localhost:11434/v1",
+          models: ["llama3.2", "llama3.1", "mistral", "qwen2.5", "deepseek-r1"],
+          context_length: "131072",
+        },
+        custom: { base_url: "", models: [], context_length: "" },
+      };
       const STORE_KEY = "aci-settings-tab";
+
+      // ── toasts ────────────────────────────────────────────────────────────────
+      function toastHost() {
+        let h = document.querySelector(".toast-host");
+        if (!h) { h = document.createElement("div"); h.className = "toast-host"; document.body.appendChild(h); }
+        return h;
+      }
+      function toast(msg, kind) {
+        if (!msg) return;
+        const el = document.createElement("div");
+        el.className = "toast " + (kind === "err" ? "toast-err" : "toast-ok");
+        const body = document.createElement("div");
+        body.className = "toast-msg";
+        body.textContent = msg;
+        const close = document.createElement("button");
+        close.className = "toast-close";
+        close.setAttribute("aria-label", "Dismiss");
+        close.textContent = "×";
+        let timer = 0;
+        function dismiss() { clearTimeout(timer); el.remove(); }
+        close.addEventListener("click", dismiss);
+        el.append(body, close);
+        toastHost().appendChild(el);
+        timer = setTimeout(dismiss, 4500);
+      }
+
+      // Convert any server-rendered flash banner into toasts, then remove it.
+      shell.querySelectorAll(".settings-msgs .settings-msg").forEach((li) => {
+        toast(li.textContent.trim(), li.classList.contains("error") ? "err" : "ok");
+      });
+      const banner = shell.querySelector(".settings-msgs");
+      if (banner) banner.remove();
+
+      // ── confirm modal (replaces native confirm()) ─────────────────────────────
+      function confirmModal(message) {
+        return new Promise((resolve) => {
+          const backdrop = document.createElement("div");
+          backdrop.className = "modal-backdrop";
+          const card = document.createElement("div");
+          card.className = "modal-card";
+          card.setAttribute("role", "dialog");
+          card.setAttribute("aria-modal", "true");
+          const h = document.createElement("h3");
+          h.textContent = "Please confirm";
+          const p = document.createElement("p");
+          p.textContent = message;
+          const actions = document.createElement("div");
+          actions.className = "modal-actions";
+          const cancel = document.createElement("button");
+          cancel.className = "btn-secondary btn-sm";
+          cancel.textContent = "Cancel";
+          const ok = document.createElement("button");
+          ok.className = "btn-danger btn-sm";
+          ok.textContent = "Confirm";
+          actions.append(cancel, ok);
+          card.append(h, p, actions);
+          backdrop.appendChild(card);
+          document.body.appendChild(backdrop);
+          ok.focus();
+
+          function done(result) {
+            document.removeEventListener("keydown", onKey);
+            backdrop.remove();
+            resolve(result);
+          }
+          function onKey(e) {
+            if (e.key === "Escape") done(false);
+            else if (e.key === "Enter") done(true);
+          }
+          document.addEventListener("keydown", onKey);
+          backdrop.addEventListener("click", (e) => { if (e.target === backdrop) done(false); });
+          cancel.addEventListener("click", () => done(false));
+          ok.addEventListener("click", () => done(true));
+        });
+      }
+
+      // ── tabs ──────────────────────────────────────────────────────────────────
+      const rail = shell.querySelector(".settings-rail");
+      const links = rail ? Array.from(rail.querySelectorAll("a[data-tab]")) : [];
       const ids = links.map((l) => l.dataset.tab);
+
+      function panels() { return Array.from(shell.querySelectorAll(".settings-section[id]")); }
 
       function activate(id, persist) {
         if (!ids.includes(id)) id = ids[0];
@@ -688,22 +742,303 @@
           l.classList.toggle("active", on);
           l.setAttribute("aria-selected", on ? "true" : "false");
         });
-        sections.forEach((s) => { s.hidden = s.id !== id; });
+        panels().forEach((s) => { s.hidden = s.id !== id; });
         if (persist) { try { localStorage.setItem(STORE_KEY, id); } catch (e) {} }
       }
+      function currentTab() {
+        let id = (location.hash || "").slice(1);
+        if (ids.includes(id)) return id;
+        try { id = localStorage.getItem(STORE_KEY); } catch (e) { id = null; }
+        return ids.includes(id) ? id : ids[0];
+      }
 
-      links.forEach((l) => {
-        l.addEventListener("click", (e) => {
-          e.preventDefault();
-          activate(l.dataset.tab, true);
+      // ── model presets ───────────────────────────────────────────────────────────
+      function setDatalist(models) {
+        const dl = shell.querySelector("#model-suggestions");
+        if (!dl) return;
+        dl.innerHTML = "";
+        models.forEach((m) => { const o = document.createElement("option"); o.value = m; dl.appendChild(o); });
+      }
+      function highlightPreset(key) {
+        shell.querySelectorAll(".preset-btn").forEach((b) => b.classList.toggle("preset-btn-active", b.dataset.preset === key));
+      }
+      function applyPreset(key) {
+        const p = MODEL_PRESETS[key];
+        if (!p) return;
+        const baseUrl = shell.querySelector("#model-base-url");
+        const modelName = shell.querySelector("#model-name");
+        const ctx = shell.querySelector("#model-context-length");
+        if (baseUrl) baseUrl.value = p.base_url;
+        setDatalist(p.models);
+        if (modelName && p.models.length && !modelName.value) modelName.value = p.models[0];
+        if (ctx && p.context_length && !ctx.value) ctx.value = p.context_length;
+        if (key === "openai") {
+          const k = shell.querySelector("#model-api-key");
+          if (k) { k.removeAttribute("readonly"); k.focus(); }
+        }
+        highlightPreset(key);
+      }
+      function syncPresetFromState() {
+        const base = shell.querySelector("#model-base-url");
+        if (!base) return;
+        const url = base.value;
+        if (url === "https://api.openai.com/v1") { highlightPreset("openai"); setDatalist(MODEL_PRESETS.openai.models); }
+        else if (url.indexOf("localhost:11434") !== -1) { highlightPreset("ollama"); setDatalist(MODEL_PRESETS.ollama.models); }
+      }
+
+      // ── TI cache stats ────────────────────────────────────────────────────────
+      function loadTiCacheStats() {
+        const el = shell.querySelector("#ti-cache-stats");
+        if (!el) return;
+        fetch("{% url 'dashboard:settings_ti_cache_stats' %}")
+          .then((r) => r.json())
+          .then((data) => { el.textContent = "Number of cache entries: " + data.total; })
+          .catch(() => { el.textContent = "Cache stats unavailable."; });
+      }
+
+      // ── shared POST → swap-the-panel-in-place (forms + bulk actions) ──────────
+      let activeModal = null;
+      function closeActiveModal() { if (activeModal) { activeModal.close(); activeModal = null; } }
+
+      async function postSwap(action, fd, opts) {
+        opts = opts || {};
+        const btn = opts.btn;
+        const isTest = !!opts.isTest;
+        if (btn) btn.classList.add("is-busy");
+        try {
+          const resp = await fetch(action, {
+            method: "POST", body: fd,
+            headers: { "X-Requested-With": "fetch" }, credentials: "same-origin",
+          });
+          const html = await resp.text();
+          const doc = new DOMParser().parseFromString(html, "text/html");
+          const flashes = Array.from(doc.querySelectorAll(".settings-msgs .settings-msg"));
+          if (isTest) {
+            // A connection test must not tear down the modal or swap the panel.
+            if (flashes.length) flashes.forEach((li) => toast(li.textContent.trim(), li.classList.contains("error") ? "err" : "ok"));
+            else toast(resp.ok ? "Tested." : "Test failed (" + resp.status + ").", resp.ok ? "ok" : "err");
+            return;
+          }
+          const newMain = doc.querySelector(".settings-main");
+          if (resp.ok && newMain) {
+            const y = window.scrollY;
+            const main = shell.querySelector(".settings-main");
+            main.innerHTML = newMain.innerHTML;
+            const fb = main.querySelector(".settings-msgs");
+            if (fb) fb.remove();
+            closeActiveModal();
+            refresh();
+            window.scrollTo(0, y);
+          }
+          if (flashes.length) flashes.forEach((li) => toast(li.textContent.trim(), li.classList.contains("error") ? "err" : "ok"));
+          else if (resp.ok) toast("Saved.", "ok");
+          else toast("Request failed (" + resp.status + ").", "err");
+        } catch (err) {
+          toast("Request failed — check your connection and try again.", "err");
+        } finally {
+          if (btn) btn.classList.remove("is-busy");
+        }
+      }
+
+      // ── Integrations: modals, pagination, multi-select ────────────────────────
+      function intgGroup(name) { return shell.querySelector('.intg-group[data-group="' + name + '"]'); }
+
+      function showFormModal(sourceForm, title) {
+        if (!sourceForm) return;
+        closeActiveModal();
+        const backdrop = document.createElement("div");
+        backdrop.className = "modal-backdrop";
+        const card = document.createElement("div");
+        card.className = "modal-card modal-card-form";
+        const h = document.createElement("h3");
+        h.textContent = title;
+        const form = sourceForm.cloneNode(true);
+        form.hidden = false;
+        card.append(h, form);
+        backdrop.appendChild(card);
+        // Appended inside the shell so the delegated submit/secret-toggle handlers fire.
+        shell.appendChild(backdrop);
+        const nameInput = form.querySelector('input[name="name"]');
+        if (nameInput) setTimeout(() => { try { nameInput.focus(); } catch (e) {} }, 0);
+        function close() { document.removeEventListener("keydown", onKey); backdrop.remove(); }
+        function onKey(e) { if (e.key === "Escape") close(); }
+        document.addEventListener("keydown", onKey);
+        backdrop.addEventListener("click", (e) => { if (e.target === backdrop) close(); });
+        form.querySelectorAll(".modal-cancel").forEach((b) => b.addEventListener("click", close));
+        activeModal = { backdrop, close };
+      }
+      function openAddModal(groupName) {
+        const g = intgGroup(groupName);
+        // One provider per type today; clone that provider's blank add form.
+        const form = g && g.querySelector('.intg-forms form[data-role="add"]');
+        showFormModal(form, "Add connection");
+      }
+      function openEditModal(id) {
+        const sel = window.CSS && CSS.escape ? CSS.escape(id) : id;
+        const form = shell.querySelector('.intg-forms form[data-role="edit"][data-conn-id="' + sel + '"]');
+        showFormModal(form, "Edit connection");
+      }
+
+      function updateSelection(g) {
+        if (!g) return;
+        const boxes = Array.from(g.querySelectorAll(".intg-row-select"));
+        const checked = boxes.filter((b) => b.checked);
+        const bar = g.querySelector(".bulk-sel-bar");
+        if (bar) {
+          bar.hidden = checked.length === 0;
+          const c = bar.querySelector(".bulk-count b");
+          if (c) c.textContent = String(checked.length);
+        }
+        const all = g.querySelector(".intg-select-all");
+        if (all) {
+          all.checked = boxes.length > 0 && checked.length === boxes.length;
+          all.indeterminate = checked.length > 0 && checked.length < boxes.length;
+        }
+      }
+      async function bulkDelete(g) {
+        if (!g) return;
+        const ids = Array.from(g.querySelectorAll(".intg-row-select:checked")).map((b) => b.value);
+        if (!ids.length) return;
+        const ok = await confirmModal("Delete " + ids.length + " selected connection" + (ids.length > 1 ? "s" : "") + "? This cannot be undone.");
+        if (!ok) return;
+        const fd = new FormData();
+        ids.forEach((id) => fd.append("conn_id", id));
+        await postSwap("{% url 'dashboard:settings_connection_delete' %}", fd, {});
+      }
+
+      function renderTablePage(table) {
+        const size = parseInt(table.dataset.pageSize, 10) || 8;
+        const rows = Array.from(table.tBodies[0].querySelectorAll("tr[data-conn-row]"));
+        const pages = Math.max(1, Math.ceil(rows.length / size));
+        const page = Math.min(Math.max(1, parseInt(table.dataset.page, 10) || 1), pages);
+        table.dataset.page = String(page);
+        rows.forEach((r, i) => { r.hidden = !(i >= (page - 1) * size && i < page * size); });
+        const group = table.closest(".intg-group");
+        const pager = group && group.querySelector(".intg-pager");
+        if (pager) {
+          pager.hidden = pages <= 1;
+          const info = pager.querySelector(".intg-page-info");
+          if (info) info.textContent = "Page " + page + " of " + pages;
+          const prev = pager.querySelector(".intg-page-prev");
+          const next = pager.querySelector(".intg-page-next");
+          if (prev) prev.disabled = page <= 1;
+          if (next) next.disabled = page >= pages;
+        }
+      }
+      function changePage(btn, delta) {
+        const group = btn.closest(".intg-group");
+        const table = group && group.querySelector(".intg-table");
+        if (!table) return;
+        table.dataset.page = String((parseInt(table.dataset.page, 10) || 1) + delta);
+        renderTablePage(table);
+      }
+      function initIntegrations() {
+        shell.querySelectorAll(".intg-table").forEach((t) => { t.dataset.page = "1"; renderTablePage(t); });
+        shell.querySelectorAll(".intg-group").forEach((g) => {
+          const bar = g.querySelector(".bulk-sel-bar");
+          if (bar) bar.hidden = true;
         });
+      }
+
+      // ── (re)initialise the self-executing bits after a panel swap ─────────────
+      function refresh() {
+        syncPresetFromState();
+        loadTiCacheStats();
+        initIntegrations();
+        activate(currentTab(), false);
+      }
+
+      // ── delegated interactions (bound to the shell → survive panel swaps) ─────
+      shell.addEventListener("click", (e) => {
+        const preset = e.target.closest(".preset-btn");
+        if (preset) { applyPreset(preset.dataset.preset); return; }
+
+        const secret = e.target.closest(".secret-toggle");
+        if (secret) {
+          const input = secret.parentElement.querySelector("input");
+          if (input) {
+            const reveal = input.type === "password";
+            input.type = reveal ? "text" : "password";
+            secret.textContent = reveal ? "hide" : "show";
+          }
+          return;
+        }
+
+        const copy = e.target.closest(".copy-webhook");
+        if (copy) {
+          const url = copy.getAttribute("data-url") || "";
+          const restore = () => setTimeout(() => { copy.textContent = "copy"; }, 1200);
+          (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject())
+            .then(() => { copy.textContent = "copied"; restore(); })
+            .catch(() => {
+              const input = copy.parentElement.querySelector(".webhook-url");
+              if (input) { input.select(); try { document.execCommand("copy"); } catch (e2) {} }
+              copy.textContent = "copied"; restore();
+            });
+          return;
+        }
+
+        const addBtn = e.target.closest(".intg-add-btn");
+        if (addBtn) { openAddModal(addBtn.dataset.addGroup); return; }
+        const editBtn = e.target.closest(".intg-edit-btn");
+        if (editBtn) { openEditModal(editBtn.dataset.editId); return; }
+        const bulkBtn = e.target.closest(".intg-bulk-delete");
+        if (bulkBtn) { bulkDelete(bulkBtn.closest(".intg-group")); return; }
+        const prev = e.target.closest(".intg-page-prev");
+        if (prev) { changePage(prev, -1); return; }
+        const next = e.target.closest(".intg-page-next");
+        if (next) { changePage(next, 1); return; }
+
+        const tab = e.target.closest(".settings-rail a[data-tab]");
+        if (tab) { e.preventDefault(); activate(tab.dataset.tab, true); }
       });
 
-      // Tear down any handler from a previous visit (boosted re-entry) so we
-      // never stack duplicate window listeners.
-      if (window.__aciSettingsCleanup) window.__aciSettingsCleanup();
+      // Selection (multi-select tables) + dirty tracking.
+      shell.addEventListener("change", (e) => {
+        const selAll = e.target.closest && e.target.closest(".intg-select-all");
+        if (selAll) {
+          const g = selAll.closest(".intg-group");
+          g.querySelectorAll(".intg-row-select").forEach((b) => { b.checked = selAll.checked; });
+          updateSelection(g);
+          return;
+        }
+        const rowSel = e.target.closest && e.target.closest(".intg-row-select");
+        if (rowSel) { updateSelection(rowSel.closest(".intg-group")); return; }
+        const form = e.target.closest && e.target.closest("form");
+        if (form) form.classList.add("is-dirty");
+      });
+      shell.addEventListener("input", (e) => {
+        const form = e.target.closest && e.target.closest("form");
+        if (form) form.classList.add("is-dirty");
+      });
+
+      // ── AJAX form submit ──────────────────────────────────────────────────────
+      shell.addEventListener("submit", async (e) => {
+        const form = e.target;
+        if (!(form instanceof HTMLFormElement)) return;
+        if ((form.getAttribute("method") || "get").toLowerCase() !== "post") return;
+        e.preventDefault();
+
+        const submitter = e.submitter;
+        const confirmMsg = (submitter && submitter.dataset.confirm) || form.dataset.confirm;
+        if (confirmMsg) {
+          const ok = await confirmModal(confirmMsg);
+          if (!ok) return;
+        }
+
+        const action = (submitter && submitter.getAttribute("formaction")) || form.getAttribute("action") || location.href;
+        const fd = new FormData(form);
+        if (submitter && submitter.name) fd.append(submitter.name, submitter.value || "");
+        const isTest = action.indexOf("/connection/test") !== -1;
+        const btn = submitter && submitter.tagName === "BUTTON"
+          ? submitter
+          : form.querySelector(".save-primary, button[type=submit], button:not([type])");
+        await postSwap(action, fd, { btn, isTest });
+      });
+
+      // ── window listeners (need teardown for boosted re-entry) ─────────────────
       function onHashChange() {
-        if (!document.querySelector(".settings-rail")) return; // left the page
+        if (!document.querySelector(".settings-shell")) return; // left the page
         const id = (location.hash || "").slice(1);
         if (id) activate(id, true);
       }
@@ -713,11 +1048,11 @@
         window.__aciSettingsCleanup = null;
       };
 
-      let initial = (location.hash || "").slice(1);
-      if (!ids.includes(initial)) {
-        try { initial = localStorage.getItem(STORE_KEY) || ids[0]; } catch (e) { initial = ids[0]; }
-      }
-      activate(initial, false);
+      // ── first paint ───────────────────────────────────────────────────────────
+      syncPresetFromState();
+      loadTiCacheStats();
+      initIntegrations();
+      activate(currentTab(), false);
     })();
   </script>
 </c-layout>

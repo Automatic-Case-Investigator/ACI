@@ -37,7 +37,10 @@ def _resolve_connection() -> tuple[str, str, bool]:
         from agent.models.config import ProviderConfig
 
         s = ProviderConfig.objects.get(key="aci-thehive").settings
-        url = url or f"{s['host'].rstrip('/')}:{s.get('port', '9000')}"
+        if not url:
+            url = (s.get("base_url") or "").strip()
+            if not url and s.get("host"):
+                url = f"{s['host'].rstrip('/')}:{s.get('port', '9000')}"
         key = key or s["api_key"]
         verify = str(s.get("verify_tls", "true")).lower() == "true"
     return url, key, verify

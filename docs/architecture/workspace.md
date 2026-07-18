@@ -1,20 +1,121 @@
-# AVFS Workspace Indexing
+# AVFS Workspace
 
-AVFS is the durable workspace for case artifacts, evidence, findings, reports,
-and memory. Successful AVFS writes trigger `agent.workspace.avfs_writer`, which
-updates:
+AVFS is the durable, per-agent filesystem workspace for case artifacts, evidence,
+findings, reports, session handoff notes, and cross-case memory. It is a
+streamable-HTTP MCP provider (`agent/runtime/providers/avfs.py`) — optional and
+skipped cleanly when unconfigured, since not every deployment needs durable
+storage to answer a question.
 
-- the nearest directory's `memory.md`;
-- concise parent `memory.md` indexes up to the case, run, or memory root.
+## Provider Registration And Skip Behavior
 
-Each `memory.md` contains:
+`avfs`'s `build_config` (`agent/runtime/providers/avfs.py`) treats a missing URL, a
+missing token, or the literal placeholder token `change-me-avfs-token` as "not
+configured" and returns an empty config — the provider is silently skipped rather
+than causing a startup or connection error. This is the documented way to run ACI
+without AVFS: leave `AVFS_AUTH_TOKEN` at its sample-env placeholder value.
 
-- `# Memory`
-- `## Purpose`
-- `## Files`
-- `## Child Directories`
-- `## Notes`
+AVFS is registered under the `filesystem` provider kind with one standardized
+capability, `workspace_read_write`, mapped to its tool set: `whoami`, `ls`, `read`,
+`cat`, `mkdir`, `write`. It does not require MCP instruction loading
+(`instructions_required=False`).
 
-Parent indexes summarize child directories rather than duplicating every nested
-artifact. This keeps AVFS browsable for future agents and analysts while raw
-payloads remain stored once under stable paths.
+The **agent id** that determines an agent's AVFS home directory (`/home/<agent_id>/`)
+resolves DB-over-env like every other connection setting (`resolve_settings("avfs",
+...)` over `AVFS_AGENT_ID`), but with one wrinkle: the resolver is cached per async
+run context (`agent/runtime/infra/avfs.py: bind_agent_id` / `_AGENT_ID_CACHE`)
+because the Django ORM cannot be queried synchronously from the graph's asyncio
+event loop — the id is resolved once (sync-safe) at run start and reused for the
+rest of the run.
+
+## Home Directory Layout
+
+`agent/runtime/infra/avfs.py` is the single source of truth for every AVFS path the
+runtime writes to or reads from — no other module constructs these paths by hand:
+
+| Helper | Path | Purpose |
+|---|---|---|
+| `home_dir()` | `/home/<agent_id>/` | The `~` referenced in agent prompts. |
+| `memory_dir()` | `~/memory` | Long-term, cross-case memory: learned patterns, false positives, baselines. |
+| `sessions_dir()` / `session_note_path(run_id)` | `~/sessions/<date>_<short_run_id>.md` | Per-run handoff notes — see [Session Handoff Notes](#session-handoff-notes) below. |
+| `tasks_dir()` | `~/tasks/<task_id>/` | Active work-in-progress notes for the current task queue. |
+| `knowledge_dir()` | `~/knowledge/<topic>.md` | Reusable, long-lived knowledge organized by topic. |
+| `case_dir(case_id)` | `~/cases/<case_id>` | Root for one case's workspace. |
+| `evidence_dir(case_id)` | `~/cases/<case_id>/evidence` | Raw tool output: SIEM event JSON, SOAR alert dumps, unprocessed API responses. |
+| `findings_dir(case_id)` | `~/cases/<case_id>/findings` | Derived analyst content: confirmed facts, timelines, scoped findings. |
+| `reports_dir(case_id)` | `~/cases/<case_id>/reports` | Report drafts, the final report (`final.md`), and the citation map (`citations.json`). |
+| `run_dir(agent_name, run_id)` | `~/<agent_name>/<run_id>` | Per-run scratch space outside the case tree. |
+
+`workspace_dirs()` returns `[sessions_dir(), tasks_dir(), memory_dir(),
+knowledge_dir()]` — the standard top-level folders the AVFS server prompt tells the
+agent to check. `_ensure_workspace_dirs` (`agent/runtime/graph/toolio.py`)
+pre-creates these at run start with `mkdir --parents` so the agent's prompt-directed
+`ls ~/sessions` etc. returns an empty listing instead of an `ENOENT` error — before
+this, a fresh case paid a failing round-trip per task just to discover the
+directory didn't exist yet.
+
+## Session Handoff Notes
+
+At run completion (`agent/runtime/graph/nodes_flow/completion.py`), the graph writes
+a session handoff note to `session_note_path(run_id)` via `build_session_note`
+(`agent/runtime/graph/publication.py`): the run id and status, the resolved verdict
+(with a note when triage and investigation verdicts disagreed), and the final
+report's Executive Summary/Verdict section (capped at 1200 characters). The AVFS
+server prompt tells every agent to read `~/sessions` first on start, so a later run
+against the same case can resume from what a prior run concluded instead of
+re-deriving context from scratch — this is the mechanism behind resumable
+investigations, complementing the `Handoff`/`prior_investigation_report` field the
+orchestrator threads through `AgentRun.metadata` for same-session resumes (see
+[Runtime & Agent Graph](runtime/agent-graph.md#runtime-entry)).
+
+## Memory Indexing
+
+Successful AVFS writes trigger `agent.workspace.avfs_writer`, which maintains a
+`memory.md` in the written file's directory and in each parent directory up to a
+computed stop point (`index_stop_for` — the case/triage/investigation/memory root,
+or the `helpers/<...>/<...>` root), so a future agent or analyst can browse the
+workspace without re-deriving what's in it.
+
+Each `memory.md` has four sections generated by `agent.workspace.indexer`:
+
+- `## Purpose` — inferred from the directory's role (`_purpose_for`: e.g. "Evidence
+  root for stored queries, raw events, artifacts..." for an `evidence/` directory,
+  "Long-term reusable memory for future ACI runs" for the memory root);
+- `## Files` — a table of direct file children (path, type, summary, created-by,
+  updated), each row's `Type` inferred from the extension (Markdown/JSON/JSONL/...)
+  and `Summary` inferred from a known filename (`case.json` → "Normalized SOAR case
+  metadata", `final.md` → "Final report artifact", a path under `evidence/events/` →
+  "Raw SIEM event evidence", etc. — `path_summary`);
+- `## Child Directories` — the same table shape, one row per direct subdirectory;
+- `## Notes` — free-form, preserved verbatim across regenerations.
+
+`upsert_memory_content` is additive and idempotent: a write to `changed_path` only
+updates that path's own row in its **immediate** parent's `memory.md` (via
+`_direct_child`), preserving every other existing row, the `Purpose`, and the
+`Notes` section. If an agent hand-edits a `memory.md` into a different shape, the
+table parser (`_parse_tables`) falls back to rebuilding a fresh index rather than
+raising — the file's presentation is regenerable, only the underlying artifacts
+are load-bearing. `parent_index_dirs` walks upward from the changed path to the
+directory-specific stop point, so one write updates every ancestor index between
+the file and (for example) the case root, but never crosses into an unrelated
+case's tree.
+
+## Citation Validation
+
+Findings and reports cite AVFS paths and/or native SIEM/SOAR event ids rather than
+re-stating evidence inline. `agent.workspace.citations` enforces the shape of that
+citation map before it's written to `~/cases/<case_id>/reports/citations.json`:
+
+- `normalize_citations` accepts either a bare list or `{"citations": [...]}` and
+  produces `Citation(claim_id, avfs_path, native_id)` records, accepting either
+  name in a few key pairs (`claim` or `claim_id`, `path` or `avfs_path`,
+  `event_id` or `native_id`).
+- `validate_citations(raw, exists)` rejects a citation with **neither** an AVFS path
+  nor a native id (a claim must point at *something* verifiable), and rejects an
+  AVFS path that the supplied `exists` callback reports as missing — so a citation
+  can never reference an evidence file that was never actually written.
+- `render_citations_json` serializes the validated list deterministically (sorted
+  keys) for a stable diff across report revisions.
+
+`CitationValidationError` (a `ValueError` subclass) is raised on either failure, so
+callers can surface a clear, specific rejection reason rather than a generic parse
+error.

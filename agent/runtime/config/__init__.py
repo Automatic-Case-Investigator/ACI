@@ -49,17 +49,48 @@ def _db_row(key: str):
         return None
 
 
-def resolve_settings(key: str, defaults: dict) -> dict:
-    """Merge the DB row's `settings` JSON over the provider's env-backed defaults.
+def _active_connection(key: str):
+    """Return the active IntegrationConnection for `key`, or None if unavailable.
 
-    `defaults` comes from the provider (pulled from django settings). DB values win
-    when present and non-empty so an admin can override a single field without
-    re-specifying the rest.
+    Mirrors `_db_row`: never raises (missing table pre-migration, app-registry
+    timing, or any DB error degrades to None so callers fall back to the legacy
+    ProviderConfig/env values).
+    """
+    try:
+        from agent.models import IntegrationConnection
+
+        return (
+            IntegrationConnection.objects.filter(provider_key=key, is_active=True)
+            .order_by("updated_at")
+            .last()
+        )
+    except Exception as exc:  # table missing, apps not ready, etc.
+        log.warning("IntegrationConnection lookup for %s unavailable: %s", key, exc)
+        return None
+
+
+def resolve_settings(key: str, defaults: dict) -> dict:
+    """Merge saved connection settings over the provider's env-backed defaults.
+
+    `defaults` comes from the provider (pulled from django settings). Non-empty
+    saved values win so an admin can override a single field without re-specifying
+    the rest. Precedence, lowest to highest:
+
+        env defaults  <  ProviderConfig.settings (legacy singleton)  <  active
+        IntegrationConnection.settings (the operator-selected connection)
+
+    When a provider has no connections, this is identical to the previous
+    behaviour — the active-connection layer is simply absent.
     """
     resolved = dict(defaults)
     row = _db_row(key)
     if row and isinstance(row.settings, dict):
         for field, value in row.settings.items():
+            if value not in (None, ""):
+                resolved[field] = value
+    conn = _active_connection(key)
+    if conn and isinstance(conn.settings, dict):
+        for field, value in conn.settings.items():
             if value not in (None, ""):
                 resolved[field] = value
     return resolved

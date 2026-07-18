@@ -191,6 +191,10 @@ class TestTheHiveDBSettings(DjangoTestCase):
 
     def setUp(self):
         ProviderConfig.objects.filter(key="aci-thehive").delete()
+        # Isolate the legacy ProviderConfig path: an active IntegrationConnection
+        # would otherwise win in resolve_settings. Rolled back after each test.
+        from agent.models import IntegrationConnection
+        IntegrationConnection.objects.filter(provider_key="aci-thehive").delete()
 
     def test_db_row_settings_used(self):
         ProviderConfig.objects.update_or_create(
@@ -198,8 +202,7 @@ class TestTheHiveDBSettings(DjangoTestCase):
             defaults={
                 "kind": ProviderConfig.KIND_SOAR,
                 "settings": {
-                    "host": "http://test-hive",
-                    "port": "9001",
+                    "base_url": "http://test-hive:9001",
                     "api_key": "testkey123",
                     "verify_tls": "false",
                 },
@@ -208,8 +211,7 @@ class TestTheHiveDBSettings(DjangoTestCase):
         from agent.runtime.providers.registry import get_provider
         provider = get_provider("aci-thehive")
         resolved = resolve_settings("aci-thehive", provider.setting_defaults() if provider else {})
-        self.assertEqual(resolved["host"], "http://test-hive")
-        self.assertEqual(resolved["port"], "9001")
+        self.assertEqual(resolved["base_url"], "http://test-hive:9001")
         self.assertEqual(resolved["api_key"], "testkey123")
         self.assertEqual(resolved["verify_tls"], "false")
 
@@ -217,7 +219,7 @@ class TestTheHiveDBSettings(DjangoTestCase):
         from agent.runtime.providers.registry import get_provider
         provider = get_provider("aci-thehive")
         resolved = resolve_settings("aci-thehive", provider.setting_defaults() if provider else {})
-        self.assertEqual(resolved["host"], "")
+        self.assertEqual(resolved["base_url"], "")
         self.assertEqual(resolved["api_key"], "")
 
     def test_partial_db_row_leaves_missing_fields_as_empty_defaults(self):
@@ -231,8 +233,127 @@ class TestTheHiveDBSettings(DjangoTestCase):
         from agent.runtime.providers.registry import get_provider
         provider = get_provider("aci-thehive")
         resolved = resolve_settings("aci-thehive", provider.setting_defaults() if provider else {})
-        self.assertEqual(resolved["host"], "")       # empty default, not from env
-        self.assertEqual(resolved["api_key"], "dbkey")  # DB wins
+        self.assertEqual(resolved["base_url"], "")       # empty default
+        self.assertEqual(resolved["api_key"], "dbkey")   # DB wins
+
+    def test_build_config_uses_base_url(self):
+        from agent.runtime.providers.registry import get_provider
+        provider = get_provider("aci-thehive")
+        env = provider.build_config(
+            {"base_url": "https://hive.example:9000", "api_key": "k", "verify_tls": "true"}
+        )["env"]
+        self.assertEqual(env["THEHIVE_URL"], "https://hive.example:9000")
+        self.assertEqual(env["THEHIVE_API_KEY"], "k")
+
+    def test_build_config_derives_url_from_legacy_host_port(self):
+        # A pre-existing row still keyed by host/port must keep working.
+        from agent.runtime.providers.registry import get_provider
+        provider = get_provider("aci-thehive")
+        env = provider.build_config(
+            {"host": "http://legacy-hive", "port": "9001", "api_key": "k"}
+        )["env"]
+        self.assertEqual(env["THEHIVE_URL"], "http://legacy-hive:9001")
+
+
+class TestIntegrationConnections(DjangoTestCase):
+    """Named, multi-instance connections per provider with one active per provider."""
+
+    def setUp(self):
+        from agent.models import IntegrationConnection
+        IntegrationConnection.objects.all().delete()
+        ProviderConfig.objects.filter(key="aci-wazuh").delete()
+
+    def _wazuh(self, provider="aci-wazuh"):
+        from agent.models import IntegrationConnection
+        return list(IntegrationConnection.objects.filter(provider_key=provider))
+
+    def test_first_connection_auto_active(self):
+        sv.settings_connection_save(_post({
+            "provider": "aci-wazuh", "name": "Prod", "url": "https://prod:9200",
+            "user": "admin", "password": "pw", "verify_tls": "true",
+        }))
+        conns = self._wazuh()
+        self.assertEqual(len(conns), 1)
+        self.assertTrue(conns[0].is_active)
+        self.assertEqual(conns[0].settings["url"], "https://prod:9200")
+
+    def test_second_connection_inactive_then_activate_flips(self):
+        from agent.models import IntegrationConnection
+        sv.settings_connection_save(_post({"provider": "aci-wazuh", "name": "Prod", "url": "https://prod:9200"}))
+        sv.settings_connection_save(_post({"provider": "aci-wazuh", "name": "Lab", "url": "https://lab:9200"}))
+        prod = IntegrationConnection.objects.get(name="Prod")
+        lab = IntegrationConnection.objects.get(name="Lab")
+        self.assertTrue(prod.is_active)
+        self.assertFalse(lab.is_active)
+
+        sv.settings_connection_activate(_post({"conn_id": str(lab.id)}))
+        prod.refresh_from_db(); lab.refresh_from_db()
+        self.assertFalse(prod.is_active)
+        self.assertTrue(lab.is_active)
+        # exactly one active per provider
+        self.assertEqual(IntegrationConnection.objects.filter(provider_key="aci-wazuh", is_active=True).count(), 1)
+
+    def test_resolve_prefers_active_connection_with_env_fallback(self):
+        from agent.models import IntegrationConnection
+        base = {"url": "https://env:9200"}
+        # No connections → env/legacy fallback unchanged.
+        self.assertEqual(resolve_settings("aci-wazuh", base)["url"], "https://env:9200")
+
+        sv.settings_connection_save(_post({"provider": "aci-wazuh", "name": "Prod", "url": "https://prod:9200"}))
+        self.assertEqual(resolve_settings("aci-wazuh", base)["url"], "https://prod:9200")
+
+        sv.settings_connection_save(_post({"provider": "aci-wazuh", "name": "Lab", "url": "https://lab:9200"}))
+        lab = IntegrationConnection.objects.get(name="Lab")
+        sv.settings_connection_activate(_post({"conn_id": str(lab.id)}))
+        self.assertEqual(resolve_settings("aci-wazuh", base)["url"], "https://lab:9200")
+
+    def test_delete_active_promotes_sibling(self):
+        from agent.models import IntegrationConnection
+        sv.settings_connection_save(_post({"provider": "aci-wazuh", "name": "Prod", "url": "https://prod:9200"}))
+        sv.settings_connection_save(_post({"provider": "aci-wazuh", "name": "Lab", "url": "https://lab:9200"}))
+        prod = IntegrationConnection.objects.get(name="Prod")  # the active one
+        sv.settings_connection_delete(_post({"conn_id": str(prod.id)}))
+        remaining = self._wazuh()
+        self.assertEqual(len(remaining), 1)
+        self.assertTrue(remaining[0].is_active)  # sibling promoted to keep one active
+
+    def test_bulk_delete_removes_all_and_promotes_active(self):
+        from agent.models import IntegrationConnection
+        sv.settings_connection_save(_post({"provider": "aci-wazuh", "name": "Prod", "url": "https://prod:9200"}))
+        sv.settings_connection_save(_post({"provider": "aci-wazuh", "name": "Lab", "url": "https://lab:9200"}))
+        sv.settings_connection_save(_post({"provider": "aci-wazuh", "name": "Dev", "url": "https://dev:9200"}))
+        prod = IntegrationConnection.objects.get(name="Prod")  # active (first)
+        lab = IntegrationConnection.objects.get(name="Lab")
+        # Bulk-delete the active one plus a sibling.
+        sv.settings_connection_delete(_post({"conn_id": [str(prod.id), str(lab.id)]}))
+        remaining = list(IntegrationConnection.objects.filter(provider_key="aci-wazuh"))
+        self.assertEqual(len(remaining), 1)
+        self.assertEqual(remaining[0].name, "Dev")
+        self.assertTrue(remaining[0].is_active)  # promoted since active was removed
+
+    def test_edit_updates_settings_keeps_provider(self):
+        from agent.models import IntegrationConnection
+        sv.settings_connection_save(_post({"provider": "aci-wazuh", "name": "Prod", "url": "https://prod:9200"}))
+        conn = IntegrationConnection.objects.get(name="Prod")
+        sv.settings_connection_save(_post({
+            "conn_id": str(conn.id), "name": "Prod DC1", "url": "https://prod-dc1:9200",
+        }))
+        conn.refresh_from_db()
+        self.assertEqual(conn.name, "Prod DC1")
+        self.assertEqual(conn.provider_key, "aci-wazuh")
+        self.assertEqual(conn.settings["url"], "https://prod-dc1:9200")
+
+    def test_virustotal_bad_key_rejected(self):
+        from agent.models import IntegrationConnection
+        sv.settings_connection_save(_post({"provider": "aci-ti", "name": "VT", "api_key": "not-a-valid-key"}))
+        self.assertEqual(IntegrationConnection.objects.filter(provider_key="aci-ti").count(), 0)
+
+    def test_virustotal_valid_key_accepted(self):
+        from agent.models import IntegrationConnection
+        sv.settings_connection_save(_post({"provider": "aci-ti", "name": "VT", "api_key": "a" * 64}))
+        conns = IntegrationConnection.objects.filter(provider_key="aci-ti")
+        self.assertEqual(conns.count(), 1)
+        self.assertTrue(conns.first().is_active)
 
 
 if __name__ == "__main__":

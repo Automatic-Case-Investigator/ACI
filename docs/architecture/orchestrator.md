@@ -1,6 +1,6 @@
 # Orchestrator
 
-## Public Reasoning Before Tools (Orchestrator)
+## Public Reasoning Before Tools
 
 This mechanism lives in `agent/runtime/analysis/intent.py`
 (`generate_public_intent`) and is consumed only by the orchestrator's own

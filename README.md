@@ -14,7 +14,7 @@ Most AI SOC tools optimize for speed across the full alert-to-response lifecycle
 
 ## Getting Started
 
-To install, configure, and run ACI (dashboard, CLI, or REST API), see
+To install, configure, and run ACI (dashboard or REST API), see
 [Getting Started](docs/guides/getting-started.md). For the system diagram, repository
 layout, and design philosophy, see the [Architecture Overview](docs/architecture/overview.md).
 
@@ -25,6 +25,7 @@ Full documentation lives in [`docs/`](docs/README.md), organized by subsystem.
 **Guides**
 
 - [Getting Started](docs/guides/getting-started.md) — prerequisites, installation, configuration, running.
+- [Connecting With SOC Technologies](docs/guides/connecting-with-soc-technologies.md) — connecting Wazuh, TheHive, and VirusTotal.
 - [Operations](docs/guides/operations.md) — testing, development, troubleshooting.
 
 **Architecture**

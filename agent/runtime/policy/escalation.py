@@ -54,10 +54,11 @@ def execute_escalation(run: AgentRun) -> None:
         _provider = get_provider("aci-thehive")
         _resolved = resolve_settings("aci-thehive", _provider.setting_defaults() if _provider else {})
         client = TheHiveClient(
-            host=_resolved.get("host") or None,
-            port=_resolved.get("port") or None,
-            api_key=_resolved.get("api_key") or None,
-            verify_tls=_resolved.get("verify_tls") or None,
+            base_url=_resolved.get("base_url") or "",
+            host=_resolved.get("host") or "",
+            port=_resolved.get("port") or "9000",
+            api_key=_resolved.get("api_key") or "",
+            verify_tls=_resolved.get("verify_tls") or "true",
         )
         verdict_label = (decision.get("verdict") or "unknown").upper()
         confidence = decision.get("confidence") or "?"

@@ -167,7 +167,7 @@ ACI/
 │   ├── dashboard/                # WebSocket consumer, run views/actions, settings views, runner lifecycle
 │   ├── models/                   # Django models: AgentRun, AgentEvent, config, learning (patterns/baselines/feedback)
 │   ├── views/                    # REST API views: runs, webhooks, public endpoints
-│   ├── management/commands/      # run_agent, run_workflow, compute_baselines
+│   ├── management/commands/      # run_workflow, compute_baselines
 │   └── templatetags/
 ├── agent/runtime/                # (expanded)
 │   ├── engine/                   # run_agent, dispatch_run, MCP client, model client, streaming, seeder_runner

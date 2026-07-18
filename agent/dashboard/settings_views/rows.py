@@ -33,7 +33,7 @@ _CONNECTION_SCHEMA = {
     "aci-wazuh": {
         "label": "Wazuh", "kind": "SIEM", "category": "SIEM",
         "fields": [
-            {"name": "url", "label": "Base URL", "type": "text", "placeholder": "https://wazuh:9200"},
+            {"name": "url", "label": "Indexer Base URL", "type": "text", "placeholder": "https://wazuh:9200"},
             {"name": "index_pattern", "label": "Index pattern", "type": "text", "placeholder": "wazuh-alerts-*"},
             {"name": "user", "label": "User", "type": "text", "placeholder": "admin"},
             {"name": "password", "label": "Password", "type": "secret"},
@@ -43,8 +43,7 @@ _CONNECTION_SCHEMA = {
     "aci-thehive": {
         "label": "TheHive", "kind": "SOAR", "category": "SOAR",
         "fields": [
-            {"name": "host", "label": "Host", "type": "text", "placeholder": "http://thehive"},
-            {"name": "port", "label": "Port", "type": "text", "placeholder": "9000"},
+            {"name": "base_url", "label": "API Base URL", "type": "text", "placeholder": "http://thehive:9000"},
             {"name": "api_key", "label": "API key", "type": "secret"},
             {"name": "verify_tls", "label": "Verify TLS", "type": "bool"},
         ],
@@ -55,7 +54,7 @@ _CONNECTION_SCHEMA = {
             {"name": "api_key", "label": "API key", "type": "secret",
              "pattern": r"^[0-9a-fA-F]{64}$",
              "pattern_hint": "a 64-character hexadecimal string"},
-            {"name": "base_url", "label": "Base URL", "type": "text",
+            {"name": "base_url", "label": "API Base URL", "type": "text",
              "placeholder": "https://www.virustotal.com"},
             {"name": "calls_per_minute", "label": "Rate limit (calls/min)", "type": "text",
              "placeholder": "4"},
@@ -65,39 +64,115 @@ _CONNECTION_SCHEMA = {
 # AVFS credentials are internal — configured via .env only, not the settings UI.
 
 
-def _integration_rows() -> list[dict]:
-    """Per-connector connection forms with effective (DB-over-env) values."""
-    from agent.runtime.config import is_enabled, provider_category, resolve_settings
-    from agent.runtime.providers.registry import get_provider
+def _connection_fields(schema, stored: dict) -> list[dict]:
+    """Render a connection's field values against its provider schema for the form."""
+    stored = stored if isinstance(stored, dict) else {}
+    # Back-compat display: a connection saved under the old TheHive host/port schema
+    # carries no `base_url`. Surface the derived value so the merged field isn't shown
+    # empty. Non-destructive — the stored row is untouched until the user next saves.
+    if not stored.get("base_url") and stored.get("host"):
+        host = str(stored.get("host")).rstrip("/")
+        port = str(stored.get("port") or "9000")
+        stored = {**stored, "base_url": f"{host}:{port}" if host else ""}
+    fields = []
+    for f in schema["fields"]:
+        value = stored.get(f["name"], "")
+        is_secret = f["type"] == "secret"
+        fields.append({
+            "name": f["name"],
+            "label": f["label"],
+            "type": f["type"],
+            "placeholder": f.get("placeholder", ""),
+            "value": str("" if value is None else value),
+            "secret_set": bool(value) if is_secret else False,
+            "checked": str(value).strip().lower() == "true" if f["type"] == "bool" else False,
+        })
+    return fields
 
-    rows = []
+
+# Kind display order for the Integrations section (SIEM → SOAR → TI).
+_INTEGRATION_KIND_ORDER = {"SIEM": 0, "SOAR": 1, "TI": 2}
+
+
+def _integration_rows() -> list[dict]:
+    """Connection groups by platform type (SIEM → SOAR → TI).
+
+    Each group lists every `IntegrationConnection` of that type across its
+    provider(s), plus the provider schema(s) used to render the add/edit forms.
+    The runtime uses the active connection per provider (falling back to
+    ProviderConfig/env when none exist).
+    """
+    from agent.models import IntegrationConnection
+    from agent.runtime.config import is_enabled, provider_category
+    from agent.runtime.providers.registry import get_provider, list_providers
+
+    # Providers that also appear in the MCP servers tab manage their own enable
+    # toggle there. Providers not in the registry (e.g. TI enrichment, aci-ti)
+    # have no MCP-tab row, so their enable toggle is surfaced in the group header.
+    mcp_keys = {p.key for p in list_providers()}
+
+    conns_by_provider: dict[str, list] = {}
+    for c in IntegrationConnection.objects.all():
+        conns_by_provider.setdefault(c.provider_key, []).append(c)
+
+    groups: dict[str, dict] = {}
     for key, schema in _CONNECTION_SCHEMA.items():
         provider = get_provider(key)
-        resolved = resolve_settings(key, provider.setting_defaults() if provider else {})
-        fields = []
-        for f in schema["fields"]:
-            value = resolved.get(f["name"], "")
-            is_secret = f["type"] == "secret"
-            fields.append({
-                "name": f["name"],
-                "label": f["label"],
-                "type": f["type"],
-                "placeholder": f.get("placeholder", ""),
-                "value": str("" if value is None else value),
-                "secret_set": bool(value) if is_secret else False,
-                "checked": str(value).strip().lower() == "true" if f["type"] == "bool" else False,
-            })
-        category = provider_category(key)
-        rows.append({
-            "key": key,
+        kind = schema["kind"]
+        grp = groups.get(kind)
+        if grp is None:
+            grp = groups[kind] = {
+                "kind": kind,
+                "category": kind.lower(),
+                "providers": [],
+                "connections": [],
+                "show_ti_cache": False,
+            }
+        schema_fields = [
+            {"name": f["name"], "label": f["label"], "type": f["type"],
+             "placeholder": f.get("placeholder", "")}
+            for f in schema["fields"]
+        ]
+        grp["providers"].append({
+            "provider_key": key,
             "label": schema["label"],
-            "kind": schema["kind"],
-            "category": schema.get("category", schema["kind"]),
-            "internal": category == "internal",
+            "schema_fields": schema_fields,
             "enabled": is_enabled(key, provider.default_enabled if provider else True),
-            "fields": fields,
+            "mcp_managed": key in mcp_keys,
+            "internal": provider_category(key) == "internal",
         })
-    return rows
+        if key == "aci-ti":
+            grp["show_ti_cache"] = True
+        for c in conns_by_provider.get(key, []):
+            fields = _connection_fields(schema, c.settings if isinstance(c.settings, dict) else {})
+            summary = next(
+                (f["value"] for f in fields if f["name"] in ("base_url", "url") and f["value"]),
+                "",
+            )
+            grp["connections"].append({
+                "id": str(c.id),
+                "name": c.name,
+                "is_active": c.is_active,
+                "provider_key": key,
+                "provider_label": schema["label"],
+                "fields": fields,
+                "summary": summary,
+            })
+
+    ordered = sorted(groups.values(), key=lambda g: _INTEGRATION_KIND_ORDER.get(g["kind"], 99))
+    for g in ordered:
+        g["connection_count"] = len(g["connections"])
+        # Active connections first, then alphabetical by name.
+        g["connections"].sort(key=lambda c: (not c["is_active"], c["name"].lower()))
+    return ordered
+
+
+def _integration_provider_options() -> list[dict]:
+    """Provider choices for the 'Add connection' dropdown (Wazuh / TheHive / VirusTotal)."""
+    return [
+        {"key": key, "label": schema["label"], "kind": schema["kind"]}
+        for key, schema in _CONNECTION_SCHEMA.items()
+    ]
 
 
 def _test_connection(key: str, s: dict) -> tuple[bool, str]:
@@ -112,7 +187,12 @@ def _test_connection(key: str, s: dict) -> tuple[bool, str]:
             r.raise_for_status()
             return True, f"reachable (cluster {r.json().get('status', 'ok')})"
         if key == "aci-thehive":
-            base = f"{(s.get('host') or '').rstrip('/')}:{s.get('port') or 9000}"
+            # Prefer the merged base_url; fall back to legacy host/port rows.
+            base = (s.get("base_url") or "").strip().rstrip("/")
+            if not base and s.get("host"):
+                base = f"{s.get('host').rstrip('/')}:{s.get('port') or 9000}"
+            if base and not base.startswith(("http://", "https://")):
+                base = f"http://{base}"
             verify = str(s.get("verify_tls", "true")).strip().lower() == "true"
             r = httpx.get(f"{base}/api/case", params={"range": "0-1"}, headers={"Authorization": f"Bearer {s.get('api_key', '')}"}, verify=verify, timeout=10)
             r.raise_for_status()

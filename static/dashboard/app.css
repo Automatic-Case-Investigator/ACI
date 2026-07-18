@@ -32,6 +32,10 @@
   --shadow-md: 0 6px 16px rgba(16, 24, 40, 0.12), 0 2px 4px rgba(16, 24, 40, 0.06);
   --ring: 0 0 0 3px rgba(37, 99, 235, 0.22);
 
+  /* spacing + radius scale (theme-independent — defined once, inherited by dark) */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px;
+  --radius: 8px; --radius-lg: 12px;
+
   /* event-kind / status palette (tuned for contrast on a light surface) */
   --think: #3b6ea5;
   --call: #9a6700;
@@ -395,6 +399,218 @@ code { font-size: 12px; color: var(--code-fg); }
   .settings-head h1 { font-size: 20px; }
   .settings-summary { grid-template-columns: 1fr; }
   .settings-section { padding: 0; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Settings redesign — professional pass
+   A real type scale, a clear action hierarchy (primary / secondary / danger),
+   and interactive components (toasts, confirm modal, dirty state). These rules
+   sit late in the cascade on purpose so they win over the base settings styles
+   above without needing to touch every original rule.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* — type scale ———————————————————————————————————————————————————————————— */
+.settings-head { padding: var(--sp-1) 2px var(--sp-2); }
+.settings-head h1 { font-size: 26px; font-weight: 700; letter-spacing: -0.01em; margin: 0; }
+.settings-head .settings-sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
+.settings-section-head { align-items: center; padding: var(--sp-4) 18px; }
+.settings-section h2 { font-size: 18px; font-weight: 650; letter-spacing: -0.01em; margin: 0; }
+.settings-section-head .muted { font-size: 13px; margin: 4px 0 0; }
+.settings-card h3 { font-size: 14px; font-weight: 650; }
+
+/* — segmented tab rail ————————————————————————————————————————————————————— */
+.settings-rail a { position: relative; font-size: 12.5px; font-weight: 500; padding: 8px 10px; }
+.settings-rail a.active {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  font-weight: 600;
+}
+
+/* — action hierarchy ——————————————————————————————————————————————————————— */
+.btn-primary, .btn-secondary, .btn-danger, .btn-ghost {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  border-radius: 7px; padding: 7px 14px; font-size: 13px; font-weight: 600;
+  border: 1px solid var(--line); background: var(--panel2); color: var(--fg);
+  cursor: pointer; text-decoration: none; line-height: 1.2; white-space: nowrap;
+  transition: background .15s, border-color .15s, color .15s, filter .15s;
+}
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+:root[data-theme="dark"] .btn-primary { color: #0e1117; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .btn-primary { color: #0e1117; }
+}
+.btn-primary:hover { filter: brightness(1.08); border-color: var(--accent); }
+.btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+.btn-ghost { background: none; border-color: transparent; color: var(--muted); padding: 6px 10px; }
+.btn-ghost:hover { background: var(--panel2); color: var(--accent); }
+.btn-danger {
+  background: none; color: var(--error);
+  border-color: color-mix(in srgb, var(--error) 45%, var(--line));
+}
+.btn-danger:hover { background: color-mix(in srgb, var(--error) 10%, transparent); border-color: var(--error); }
+.btn-sm { padding: 4px 10px; font-size: 12px; border-radius: 6px; }
+.btn-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+/* busy + dirty affordances */
+.btn-primary.is-busy, .btn-secondary.is-busy, .btn-danger.is-busy { opacity: .6; pointer-events: none; }
+form.is-dirty .save-primary::after {
+  content: ""; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--call); box-shadow: 0 0 0 2px color-mix(in srgb, var(--call) 30%, transparent);
+}
+
+/* — status pills (shape + color, not color alone) —————————————————————————— */
+.pill {
+  display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px;
+  border-radius: 999px; font-size: 11px; font-weight: 600; border: 1px solid var(--line);
+  background: var(--panel);
+}
+.pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+.pill-on { color: var(--result); border-color: color-mix(in srgb, var(--result) 40%, var(--line)); background: color-mix(in srgb, var(--result) 8%, transparent); }
+.pill-off { color: var(--muted); }
+
+/* — tables: bordered, rounded, zebra-hover ————————————————————————————————— */
+.settings-table-wrap { border: 1px solid var(--line); border-radius: var(--radius-lg); overflow: hidden; overflow-x: auto; }
+.settings-table { margin: 0; }
+.settings-table thead th {
+  background: var(--inset); position: sticky; top: 0; z-index: 1;
+  font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+}
+.settings-table tbody tr:hover { background: color-mix(in srgb, var(--accent) 4%, transparent); }
+.settings-table tbody tr:last-child td { border-bottom: none; }
+
+/* — inputs: consistent focus ————————————————————————————————————————————————— */
+.settings-form input:focus, .settings-form select:focus,
+.conn-field input:focus { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
+
+/* — secret input group (visual only — submit semantics unchanged) —————————————— */
+.secret-field {
+  border: 1px solid var(--line); border-radius: 6px; background: var(--bg);
+  padding: 0 6px 0 0; gap: 0; overflow: hidden;
+}
+.secret-field:focus-within { border-color: var(--accent); box-shadow: var(--ring); }
+.secret-field input { border: none !important; box-shadow: none !important; background: transparent !important; }
+.secret-toggle {
+  flex: none; font-size: 11px; font-weight: 600; color: var(--muted);
+  background: none; border: none; cursor: pointer; padding: 4px 6px;
+}
+.secret-toggle:hover { color: var(--accent); }
+
+/* — toasts (replace the top-pinned flash banner for the JS path) ——————————————— */
+.toast-host {
+  position: fixed; right: 16px; bottom: 16px; z-index: 200;
+  display: flex; flex-direction: column; gap: 8px;
+  max-width: min(360px, calc(100vw - 32px));
+}
+.toast {
+  display: flex; align-items: flex-start; gap: 10px;
+  background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--accent);
+  border-radius: 8px; padding: 10px 12px; box-shadow: var(--shadow-md);
+  font-size: 13px; color: var(--fg); animation: toast-in .18s ease-out;
+}
+.toast-ok { border-left-color: var(--result); }
+.toast-err { border-left-color: var(--error); }
+.toast-msg { min-width: 0; overflow-wrap: anywhere; }
+.toast-close { margin-left: auto; background: none; border: none; color: var(--muted); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 2px; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+/* — confirm modal (replaces native confirm()) —————————————————————————————————— */
+.modal-backdrop {
+  position: fixed; inset: 0; background: var(--backdrop); z-index: 210;
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+  animation: toast-in .12s ease-out;
+}
+.modal-card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md); max-width: 400px; width: 100%; padding: 18px 20px;
+}
+.modal-card h3 { margin: 0 0 6px; font-size: 16px; color: var(--fg); }
+.modal-card p { margin: 0 0 18px; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* replaces the ad-hoc inline `style="margin: 0 16px …"` hints in the template */
+.settings-hint { margin: 4px 16px 12px; font-size: 12px; color: var(--muted); }
+
+/* — Integrations: provider groups + named connection cards ————————————————————— */
+.intg-add { border-style: dashed; border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.intg-group { margin: 6px 16px 18px; }
+.intg-group + .intg-group { border-top: 1px solid var(--line); padding-top: 12px; }
+.intg-group-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+/* group name on the left; meta + toggle + add button aligned to the right */
+.intg-group-title { display: flex; align-items: center; gap: 8px; margin: 0 auto 0 0; font-size: 15px; font-weight: 650; color: var(--fg); }
+.intg-group-title::before {
+  content: ""; width: 9px; height: 9px; border-radius: 3px; flex: none; background: var(--muted);
+}
+.intg-group[data-cat="siem"] .intg-group-title::before { background: var(--accent); }
+.intg-group[data-cat="soar"] .intg-group-title::before { background: var(--finding); }
+.intg-group[data-cat="ti"]   .intg-group-title::before { background: var(--route); }
+.intg-group-meta { color: var(--muted); }
+.intg-provider-toggle { display: inline-flex; align-items: center; gap: 8px; margin: 0; }
+/* the settings-cards grid inside a group shouldn't re-add the section margin */
+.intg-group .settings-cards { margin: 8px 0 0; }
+.conn-actions { flex-wrap: wrap; }
+.conn-actions .intg-del { margin-left: auto; }
+
+/* connections stack vertically as collapsible disclosures (not a card grid) */
+.conn-list { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 0; }
+.conn-collapse {
+  background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+}
+.conn-collapse[data-cat="siem"] { border-left: 3px solid var(--accent); }
+.conn-collapse[data-cat="soar"] { border-left: 3px solid var(--finding); }
+.conn-collapse[data-cat="ti"]   { border-left: 3px solid var(--route); }
+/* active connection: accent ring so the selected credential is obvious */
+.conn-card-active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.conn-summary {
+  list-style: none; cursor: pointer; user-select: none;
+  display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+}
+.conn-summary::-webkit-details-marker { display: none; }
+.conn-summary::before {
+  content: "▶"; font-size: 9px; color: var(--muted); flex: none; transition: transform .15s;
+}
+.conn-collapse[open] > .conn-summary::before { transform: rotate(90deg); }
+.conn-collapse[open] > .conn-summary { border-bottom: 1px solid var(--line); }
+.conn-summary-name {
+  flex: 1; min-width: 0; font-size: 14px; font-weight: 650; color: var(--fg);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* the disclosed body: field stack + actions */
+.conn-collapse > .conn-card { display: flex; flex-direction: column; gap: 8px; padding: 12px; }
+
+/* — Integrations: type-grouped tables, pager, add/edit modal ——————————————————— */
+/* The bulk-select bar and checkbox column reuse the shared .bulk-sel-bar / .sel-col
+   styles; action buttons reuse .icon-btn (icon + hover tooltip via data-tip). */
+.intg-group-head .intg-add-btn { margin-left: 4px; }
+.intg-group .bulk-sel-bar { margin: 8px 0 0; }
+/* Fill the group's full width (override the global calc(100% - 32px)) so the table's
+   left/right insets match and the row dividers reach both edges. */
+.intg-group .settings-table-wrap { width: 100%; margin: 8px 0 0; }
+.intg-table { width: 100%; min-width: 0; table-layout: auto; }
+/* uniform cell padding + vertical centering; equal left/right (10px) padding */
+.intg-table th, .intg-table td { padding: 6px 10px; vertical-align: middle; }
+/* Name column absorbs ALL slack so the table always fills its width and every row
+   divider spans to the right edge; the rest size to their content. */
+.intg-table th:nth-child(2), .intg-table td:nth-child(2) { width: 100%; }
+.intg-table th:nth-child(3), .intg-table td:nth-child(3),
+.intg-table th:nth-child(4), .intg-table td:nth-child(4),
+.intg-table th:nth-child(5), .intg-table td:nth-child(5) { white-space: nowrap; }
+.intg-table th:last-child { text-align: right; }
+.intg-table td.row-actions { text-align: right; white-space: nowrap; }
+/* keep the action icons on one horizontal line so rows stay short */
+.intg-table .row-actions { display: flex; flex-wrap: nowrap; justify-content: flex-end; gap: 4px; }
+.intg-inline-form { display: inline-flex; margin: 0; }
+.intg-pager { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 10px 0 0; }
+.intg-pager .intg-page-info { min-width: 92px; text-align: center; }
+button:disabled, .btn-secondary:disabled, .btn-primary:disabled, .btn-danger:disabled {
+  opacity: .45; cursor: not-allowed;
+}
+/* connection add/edit dialog */
+.modal-card-form { max-width: 460px; width: 100%; max-height: 85vh; overflow-y: auto; }
+.modal-card-form .intg-modal-form { display: flex; flex-direction: column; gap: 10px; }
+.modal-card-form .modal-actions { margin-top: 6px; }
+
+@media (max-width: 920px) {
+  .settings-rail { padding: 6px; }
+  .btn-row { width: 100%; }
 }
 
 /* ── drawer navigation (global) ─────────────────────────────────────────── */

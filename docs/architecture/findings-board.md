@@ -1,8 +1,9 @@
 # Findings Board
 
-`aci-board` stores per-run Findings Board entries. The original three
-structural kinds (model-populated) have been joined by four deterministic,
-backend-populated kinds added by the `use_tools` enrichment pipeline:
+`aci-board` stores per-run Findings Board entries of seven kinds. `fact` and
+`hypothesis` are populated by parsing the model's own report sections; the
+remaining five are populated deterministically by the `use_tools` enrichment
+pipeline, with no model call involved in writing them:
 
 | Kind | Meaning | Population |
 |---|---|---|
@@ -37,19 +38,19 @@ Board into model context:
 escalation (an immediate case comment when active compromise is confirmed), and
 the per-task self-review's `unreported_compromise_artifacts` signal all read
 compromise-relevant evidence directly off the board (`agent/runtime/graph/
-validation.py: _board_compromise_facts`), not only from the agent's own
-narrative. Two deterministic triggers surface an entry: a narrative reverse-shell /
-C2 indicator, **or** any command the decode layer recovered from an encoded field
-(marked `[decoded]`/`[hex-decoded]`). The decode marker is technique-agnostic on
-purpose — a `mysql ... select * from wp_users` credential dump or an offline
-password-cracker invocation is surfaced the same as a `/dev/tcp/...` reverse shell;
-the code only asserts "an attacker hid a command here, account for it," and the
-model classifies the kill-chain phase in context (it has the full board). Decoded
-commands are ranked ahead of narrative matches so the deterministic ground truth is
-never crowded out of the interpret block's cap. This closes a gap where the decode
-layer had already extracted a confirmed indicator but the agent's literal-string
-search for it came back empty and it recorded a false negative — the board's own
-decoded artifact is now authoritative regardless of what the agent wrote.
+validation.py: _board_compromise_facts`) rather than relying on the agent's own
+narrative to mention it. Two deterministic triggers surface an entry: a narrative
+reverse-shell / C2 indicator, **or** any command the decode layer recovered from an
+encoded field (marked `[decoded]`/`[hex-decoded]`). The decode marker is
+technique-agnostic on purpose — a `mysql ... select * from wp_users` credential
+dump or an offline password-cracker invocation is surfaced the same as a
+`/dev/tcp/...` reverse shell; the code only asserts "an attacker hid a command
+here, account for it," and the model classifies the kill-chain phase in context (it
+has the full board). Decoded commands are ranked ahead of narrative matches so the
+deterministic ground truth is never crowded out of the interpret block's cap. The
+board's decoded artifact is authoritative regardless of whether the agent's own
+search for that indicator happens to return a hit — a confirmed decode is evidence
+on its own.
 
 The final investigation summary includes the structural categories before task
 summaries. This lets the orchestrator understand both accumulated knowledge and

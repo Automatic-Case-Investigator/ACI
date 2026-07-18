@@ -22,7 +22,7 @@ from agent.models import (
 )
 from django.http import JsonResponse
 
-from .rows import _agent_rows, _baseline_adapter_name, _baseline_snapshot_rows, _baseline_subject_hint, _baseline_subject_rows, _baseline_window_days, _custom_mcp_rows, _escalation_rows, _integration_rows, _provider_options, _provider_rows, _runtime_context, _workflow_event_options, _workflow_rows, _workflow_trigger_rows
+from .rows import _agent_rows, _baseline_adapter_name, _baseline_snapshot_rows, _baseline_subject_hint, _baseline_subject_rows, _baseline_window_days, _custom_mcp_rows, _escalation_rows, _integration_provider_options, _integration_rows, _provider_options, _provider_rows, _runtime_context, _workflow_event_options, _workflow_rows, _workflow_trigger_rows
 
 
 
@@ -52,6 +52,7 @@ def settings_view(request):
         "baseline_subject_hint": _baseline_subject_hint(),
         "baseline_window_days": _baseline_window_days(),
         "integrations": _integration_rows(),
+        "integration_provider_options": _integration_provider_options(),
         "runtime": _runtime_context(),
     })
 

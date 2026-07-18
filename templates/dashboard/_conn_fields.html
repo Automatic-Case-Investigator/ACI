@@ -1,0 +1,21 @@
+{% comment %}
+Renders a connection's schema fields for the add/edit modal forms. Accepts a
+`fields` list whose items carry name/label/type/placeholder, and optionally
+value/checked (present for edit forms, absent/empty for add forms).
+{% endcomment %}
+{% for f in fields %}
+{% if f.type == 'bool' %}
+<label class="check-inline conn-bool"><input type="checkbox" name="{{ f.name }}" value="true" {% if f.checked %}checked{% endif %}> {{ f.label }}</label>
+{% else %}
+<label class="conn-field">{{ f.label }}
+  {% if f.type == 'secret' %}
+  <span class="secret-field">
+    <input type="password" name="{{ f.name }}" value="{{ f.value|default:'' }}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore data-lpignore="true" readonly onfocus="this.removeAttribute('readonly')" placeholder="(none set — blank clears)">
+    <button type="button" class="secret-toggle">show</button>
+  </span>
+  {% else %}
+  <input type="text" name="{{ f.name }}" value="{{ f.value|default:'' }}" placeholder="{{ f.placeholder }}">
+  {% endif %}
+</label>
+{% endif %}
+{% endfor %}

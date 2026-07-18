@@ -33,6 +33,74 @@ to the model. Triage returns a report and proposed plan; the orchestrator decide
 whether to start investigation, and the investigation agent converts the handoff
 into its own queue work.
 
+### Case-Write Authorization (Two Layers)
+
+Posting to, closing, or otherwise mutating a SOAR case is treated as a distinct,
+higher-stakes capability than reading it — gated at two separate points so it can
+never happen without either explicit design intent (graph) or an explicit analyst
+request in the moment (orchestrator):
+
+1. **Graph tool policy (`_model_tools_for_agent`,
+   `agent/runtime/graph/toolio.py`)** unconditionally strips the write tool set
+   (`post_case_report`, `update_case`, `close_case`, `resolve_case`,
+   `add_case_comment`, `post_case_comment` — `_CASE_WRITE_TOOLS`) from what the
+   **investigation** agent's model can call, on every task, with no exception. The
+   investigation agent posts its final report through the graph's own
+   `publish_finish` node (see [Runtime & Agent Graph](runtime/agent-graph.md)), not
+   by the model deciding to call a write tool mid-investigation — the concern is a
+   model that follows an MCP server's own instructions (which may say "post a
+   report when done") and writes prematurely or repeatedly.
+2. **Orchestrator write gate (`agent/runtime/orchestrator/driver.py`)** applies the
+   same `_CASE_WRITE_TOOLS` set to its own tool-bound model call, but conditionally:
+   the tools are only exposed when the analyst's current message matches an
+   explicit write-intent phrase (`_WRITE_PHRASES`, a regex over words like "post",
+   "close", "update the case", etc. — case-insensitive). Without a matching phrase,
+   `write_authorized` is `False` and the write tools are simply absent from that
+   turn's tool list, so the model cannot call them regardless of what an MCP
+   server's guidance suggests.
+
+The two gates protect different actors — the investigation agent can never write
+autonomously; the orchestrator can, but only when the human just asked for it in
+that turn — and neither depends on prompt instructions alone, since MCP guidance is
+untrusted input the model should not be able to leverage into an unauthorized
+write.
+
+### Integration Connections: Many Per Provider, One Active
+
+A built-in provider's connection settings (Wazuh, TheHive, VirusTotal) are not a
+single fixed value. An operator registers **one or more named connections per
+provider** (e.g. a prod and a lab Wazuh) through Settings → Integrations, and marks
+exactly one **active** per provider. The active connection is what the runtime
+resolves into the live MCP subprocess or API client.
+
+- **Model:** `IntegrationConnection` (`agent/models/config.py`) — `name`,
+  `provider_key`, a `settings` JSON blob shaped by that provider's connection
+  schema, and `is_active`. The single-active-per-provider invariant is enforced in
+  the settings views (create/activate/delete), not by a database constraint.
+- **Resolution order**, lowest to highest precedence, in
+  `resolve_settings(key, defaults)` (`agent/runtime/config/__init__.py`):
+
+  ```text
+  .env / built-in defaults  <  ProviderConfig.settings (per-provider fallback)  <  active IntegrationConnection
+  ```
+
+  A provider with **zero** connections resolves from `ProviderConfig` and then
+  `.env` alone — the active-connection layer only applies once a connection exists
+  for that provider.
+- **Consumers.** Every place that builds a live connection — the built-in
+  provider's `build_config` (which shapes the MCP subprocess env/args), the
+  Settings **Test** action, and automatic escalation's `TheHiveClient`
+  (`agent/runtime/policy/escalation.py`, see
+  [Workflows & Webhooks](automation.md#escalation-policy)) — goes through this
+  same `resolve_settings` call, so there is exactly one place that decides which
+  connection is "the" connection for a provider at any moment.
+- **TheHive connection shape.** TheHive's connection settings are a single
+  `base_url` field (e.g. `http://thehive:9000`). Both the MCP client
+  (`aci-mcp-servers/aci-thehive/aci_thehive/client.py`) and the escalation
+  `TheHiveClient` construction also accept a separate `host` + `port` pair as an
+  alternate way to supply the same address, resolving to the identical base URL
+  either way.
+
 ### SIEM Query Robustness (Wazuh)
 
 `aci-mcp-servers/aci-wazuh/aci_wazuh/client.py` (`WazuhClient`) adds

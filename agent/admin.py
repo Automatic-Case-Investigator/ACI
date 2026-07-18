@@ -10,6 +10,7 @@ from .models import (
     BaselineSubjectConfig,
     EscalationRule,
     FeedbackEntry,
+    IntegrationConnection,
     MCPServerConfig,
     ModelProviderConfig,
     PatternCandidate,
@@ -47,6 +48,13 @@ class ProviderConfigAdmin(admin.ModelAdmin):
     list_display = ("key", "kind", "enabled", "updated_at")
     list_filter = ("kind", "enabled")
     search_fields = ("key",)
+
+
+@admin.register(IntegrationConnection)
+class IntegrationConnectionAdmin(admin.ModelAdmin):
+    list_display = ("name", "provider_key", "is_active", "updated_at")
+    list_filter = ("provider_key", "is_active")
+    search_fields = ("name", "provider_key")
 
 
 @admin.register(AgentRun)

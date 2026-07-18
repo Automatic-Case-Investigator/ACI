@@ -30,6 +30,7 @@ def _get_client() -> TheHiveClient:
     global _client
     if _client is None:
         _client = TheHiveClient(
+            base_url=os.environ.get("THEHIVE_URL", ""),
             host=os.environ.get("THEHIVE_HOST", ""),
             port=os.environ.get("THEHIVE_PORT", "9000"),
             api_key=os.environ.get("THEHIVE_API_KEY", ""),
