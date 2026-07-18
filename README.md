@@ -4,13 +4,16 @@
 
 Most AI SOC tools optimize for speed across the full alert-to-response lifecycle — triage, enrichment, risk scoring, containment. ACI's focus is different: deeper investigation before conclusion. It breaks a case into discrete investigation tasks, runs iterative SIEM queries, preserves intermediate evidence, and anchors every finding to retrieved log events rather than case narrative. The result is a traceable investigation record — what happened, which evidence supports it, which claims are still unconfirmed, and what follow-up is needed — that analysts, responders, and auditors can independently verify.
 
+See how it works:
+
+- [Performing multi step attack analysis with agentic ai](https://aci.acezxn.net/documents/blog/performing-multi-step-attack-analysis-with-agentic-ai)
+
 ## Features
 
 - **Live reasoning stream**: Real-time visibility into agent intent, tool calls, and results via WebSocket dashboard
 - **Task-driven investigation**: Cases are decomposed into discrete, prioritized tasks worked one at a time, keeping investigation focused and progress auditable
 - **Evidence-anchored findings**: Confirmed facts, working hypotheses, and extracted artifacts are tracked across tasks and tied to specific retrieved log events
 - **MCP tool ecosystem**: Pluggable integrations with SIEM, SOAR, workspace, and memory providers via Model Context Protocol
-- **Durable analyst session state**: Orchestrator conversations, specialist handoffs, resumes, and restarts are persisted back into the analyst-visible session state
 
 ## Getting Started
 
