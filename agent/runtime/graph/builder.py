@@ -8,7 +8,12 @@ from .nodes_flow import assess, finish, pivot, publish_finish, reassess_verdict,
 from .interpretation import interpret
 from .nodes_loop import _MAX_TASK_TOOL_CALLS, claim, seed, think, use_tools
 from .state import AgentState
+from .triage_flat import triage_think
 
+
+def _route_seed(state: AgentState) -> str:
+    """Triage runs the flat loop; every other agent runs the task-queue loop."""
+    return "triage_think" if state["agent_name"] == "triage" else "claim"
 
 
 def _route_claim(state: AgentState) -> str:
@@ -20,7 +25,21 @@ def _route_use_tools(state: AgentState) -> str:
     """Interpret tool output before the model is allowed to act again."""
     if state.get("status") == "cancelled":
         return "finish"
+    # Triage's flat loop has no interpret node — its history IS its memory, so the
+    # raw tool results go straight back to the model that will act on them next.
+    if state["agent_name"] == "triage":
+        return "triage_think"
     return "interpret"
+
+
+def _route_triage_think(state: AgentState) -> str:
+    """Act on tool calls, or finish once the flat loop produced a report."""
+    if state.get("status") == "cancelled":
+        return "finish"
+    if state["steps"] >= state["max_steps"] or state["tool_calls_made"] >= state["max_tool_calls"]:
+        return "finish"
+    last = state["messages"][-1] if state["messages"] else None
+    return "use_tools" if (last and getattr(last, "tool_calls", None)) else "finish"
 
 
 def _route_interpret(state: AgentState) -> str:
@@ -72,6 +91,7 @@ def build_graph():
     g.add_node("seed", seed)
     g.add_node("claim", claim)
     g.add_node("think", think)
+    g.add_node("triage_think", triage_think)
     g.add_node("use_tools", use_tools)
     g.add_node("interpret", interpret)
     g.add_node("assess", assess)
@@ -82,9 +102,20 @@ def build_graph():
     g.add_node("publish_finish", publish_finish)
 
     g.set_entry_point("seed")
-    g.add_edge("seed", "claim")
+    g.add_conditional_edges(
+        "seed", _route_seed, {"claim": "claim", "triage_think": "triage_think"},
+    )
     g.add_conditional_edges("claim", _route_claim, {"think": "think", "finish": "finish"})
-    g.add_conditional_edges("use_tools", _route_use_tools, {"interpret": "interpret", "finish": "finish"})
+    g.add_conditional_edges(
+        "use_tools",
+        _route_use_tools,
+        {"interpret": "interpret", "triage_think": "triage_think", "finish": "finish"},
+    )
+    g.add_conditional_edges(
+        "triage_think",
+        _route_triage_think,
+        {"use_tools": "use_tools", "finish": "finish"},
+    )
     g.add_conditional_edges(
         "interpret",
         _route_interpret,

@@ -160,14 +160,17 @@ def is_active(session_id: str) -> bool:
 def get_ctx(session_id: str) -> dict:
     from agent.runtime.infra import logbus
     from agent.runtime.engine.model_client import model_context_length_sync
+    from agent.runtime.graph.toolio import _COMPACT_THRESHOLD
 
     run = _current_context_run(session_id)
     ctx = logbus.get_context_usage(str(run.id)) if run else None
     # A just-started specialist may be the active model caller before its first
     # usage payload arrives. Show the freshest session reading until that run
     # reports tokens, instead of resetting the wheel to an empty context window.
+    # Freshest first: the orchestrator's own reading (keyed by session_id) is
+    # often older than the specialist reading it handed off to.
     if ctx is None:
-        ctx = logbus.get_context_usage(session_id) or logbus.get_latest_context_usage(session_id)
+        ctx = logbus.get_latest_context_usage(session_id) or logbus.get_context_usage(session_id)
     if ctx is None:
         state = _load_session_state(session_id) or {}
         persisted_tokens = int(state.get("ctx_tokens") or 0)
@@ -187,6 +190,10 @@ def get_ctx(session_id: str) -> dict:
         # Epoch seconds of the model call that produced this usage (None until a
         # sub-agent records one). Lets the dashboard show how fresh the reading is.
         "ts": (ctx or {}).get("ts"),
+        # Fraction at which the context wheel switches to its warning color —
+        # sourced from the compaction trigger so the color change coincides with
+        # history actually being compacted.
+        "warn_frac": _COMPACT_THRESHOLD,
     }
 
 

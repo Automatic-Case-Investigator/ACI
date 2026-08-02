@@ -27,10 +27,21 @@ def _run(coro):
 
 class ObservationRoutingTest(unittest.TestCase):
     def test_use_tools_routes_to_interpret(self):
-        self.assertEqual(_route_use_tools({"status": ""}), "interpret")
+        self.assertEqual(
+            _route_use_tools({"status": "", "agent_name": "investigation"}), "interpret",
+        )
+
+    def test_triage_use_tools_routes_back_to_its_flat_loop(self):
+        # Triage has no interpret node: its raw tool results go straight back to the
+        # model that acts on them next, which is the point of the flat loop.
+        self.assertEqual(
+            _route_use_tools({"status": "", "agent_name": "triage"}), "triage_think",
+        )
 
     def test_cancelled_use_tools_finishes(self):
-        self.assertEqual(_route_use_tools({"status": "cancelled"}), "finish")
+        self.assertEqual(
+            _route_use_tools({"status": "cancelled", "agent_name": "triage"}), "finish",
+        )
 
     def test_ready_interpret_routes_to_assess(self):
         self.assertEqual(_route_interpret({

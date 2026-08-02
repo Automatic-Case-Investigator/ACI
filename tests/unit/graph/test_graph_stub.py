@@ -27,6 +27,7 @@ django.setup()
 from aci_taskqueue.store import init_db, list_tasks, create_task as sq_create
 from agent.runtime.graph import GRAPH, AgentState
 from agent.runtime.graph import seed
+from agent.runtime.graph.triage_flat import build_triage_objective
 from agent.runtime.analysis.verdict import parse_verdict
 from agent.runtime.engine.seeder_runner import _augment_temporal_method, _item_priority
 from langchain_core.messages import AIMessage
@@ -249,11 +250,13 @@ class SeedWindowPropagationTests(unittest.IsolatedAsyncioTestCase):
         )
         config = {"configurable": {"tools": [TQTool("create_task", sq_create)]}}
         await seed(state, config)
-        tasks = list_tasks("~seed", "seed-run-1", "triage")
-        self.assertEqual(len(tasks), 1)
-        self.assertIn("±48 hours", tasks[0]["description"])
-        self.assertIn("## Investigation Plan", tasks[0]["description"])
-        self.assertIn("Do not substitute ±24 hours", tasks[0]["description"])
+        # Triage runs the flat loop and never claims from the queue, so seed creates
+        # no task. The configured window now travels in the loop's anchor message.
+        self.assertEqual(list_tasks("~seed", "seed-run-1", "triage"), [])
+        objective = build_triage_objective(state)
+        self.assertIn("±48 hours", objective)
+        self.assertIn("## Investigation Plan", objective)
+        self.assertIn("triage this case", objective)
 
 
 class SeederTemporalMethodTests(unittest.TestCase):
@@ -540,9 +543,10 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
         triage_tasks = list_tasks(case_id, triage_run_id, "triage")
 
         self.assertEqual(inv_tasks, [], "Triage must not create investigation queue tasks")
-        self.assertEqual(len(triage_tasks), 1)
-        self.assertEqual(triage_tasks[0]["status"], "completed")
-        print(f"Triage final status: {final['status']}")
+        # The flat loop answers the analyst's question directly and never uses the
+        # task queue, so triage now creates no tasks of its own either.
+        self.assertEqual(triage_tasks, [])
+        self.assertEqual(final["status"], "completed")
 
     async def test_triage_queries_siem_then_completes_with_valid_handoff(self):
         """End-to-end triage: a scripted agent queries nearby SIEM events and produces a valid
@@ -581,11 +585,13 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
             },
         )
 
-        triage_tasks = list_tasks(case_id, triage_run_id, "triage")
         self.assertEqual(final["status"], "completed")
-        self.assertEqual(model._turns, 4)
-        self.assertEqual(triage_tasks[0]["status"], "completed")
-        self.assertIn("Nearby SIEM events were checked", triage_tasks[0]["summary"])
+        # The flat loop spends extra model turns on the per-cycle public-intent call,
+        # so pin the OUTCOME (a durable handoff naming the SIEM check) rather than a
+        # turn count, which is an artifact of the loop shape.
+        self.assertIn("Nearby SIEM events were checked", final["final_answer"])
+        for section in ("## Triage Summary", "## Key Evidence", "## Investigation Plan"):
+            self.assertIn(section, final["final_answer"])
 
     async def test_triage_verdict_contract_node_appends_canonical_json(self):
         triage_run_id = "triage-run-contract"
@@ -619,7 +625,6 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(final["status"], "completed")
-        self.assertEqual(model._turns, 2)
         self.assertEqual(final["verdict"]["verdict"], "needs_investigation")
         self.assertEqual(final["final_answer"].count("```json"), 1)
         self.assertEqual(parse_verdict(final["final_answer"]), final["verdict"])

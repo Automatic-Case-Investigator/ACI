@@ -15,6 +15,7 @@ module to avoid a circular import between `runner.py` and `views.py`.
 from __future__ import annotations
 
 from agent.models import AgentEvent, AgentRun, FeedbackEntry
+from agent.runtime.infra import logbus
 
 # Non-terminal statuses — a run in any of these is still "in progress". Mirrors
 # `agent.views.ActiveRunsView.ACTIVE_STATES`; redefined here so the dashboard path
@@ -127,6 +128,7 @@ def delete_run(run: AgentRun) -> None:
             stop_run(item)
 
     run_ids = [str(item.id) for item in runs]
+    logbus.clear_session_context_usage(session_id)
     AgentEvent.objects.filter(session_id=session_id).delete()
     FeedbackEntry.objects.filter(run_id__in=run_ids).delete()
     AgentRun.objects.filter(id__in=run_ids).delete()

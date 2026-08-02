@@ -82,8 +82,10 @@ def _current_context_run(session_id: str) -> AgentRun | None:
     try:
         runs = list(AgentRun.objects.filter(metadata__session_id=session_id))
     except Exception:
-        runs = []
-    if not runs:
+        # Only for backends that can't index into JSON metadata. An empty result
+        # from the query above is a real answer (no specialist has spawned yet) —
+        # scanning here on that path cost a 200-row table scan on every 400ms
+        # dashboard status push, for the whole orchestrator-only phase of a session.
         runs = [
             run for run in AgentRun.objects.exclude(agent_name="orchestrator").order_by("-updated_at")[:200]
             if (run.metadata or {}).get("session_id") == session_id

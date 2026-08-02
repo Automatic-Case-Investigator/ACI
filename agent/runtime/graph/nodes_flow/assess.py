@@ -11,7 +11,7 @@ from ..sanitize import _sanitize_history, _sanitize_message
 from ..state import AgentState
 from ..synthesis import _execution_record
 from ..timeutil import _find_timestamp_range
-from ..toolio import _SEED_TASK_TITLE, _call, _emit_node_entry, _extract_input_tokens, _is_error_tool_result, _tmap
+from ..toolio import _SEED_TASK_TITLE, _call, _emit_node_entry, _is_error_tool_result, _tmap, _track_input_tokens
 from ..validation import _board_compromise_facts, _unpivoted_network_iocs
 from datetime import datetime, timedelta
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
@@ -277,7 +277,7 @@ async def _synthesize_investigation_report(state: AgentState, config, src, new_c
         msgs = _sanitize_history(state["messages"] + [HumanMessage(content=instruction)])
         resp = await text_only.ainvoke([SystemMessage(content=sys_prompt)] + msgs)
         _sanitize_message(resp)
-        return (resp.content or "").strip(), (_extract_input_tokens(resp) or new_ctx)
+        return (resp.content or "").strip(), _track_input_tokens(resp, src, new_ctx)
     except Exception as exc:
         log.warning("[%s] task report synthesis failed: %s", state["agent_name"], exc)
         return "", new_ctx
@@ -327,7 +327,7 @@ async def assess(state: AgentState, config) -> dict:
                 synth_resp = await text_only.ainvoke([SystemMessage(content=sys_prompt)] + synth_msgs)
                 _sanitize_message(synth_resp)
                 final_answer = (synth_resp.content or "").strip()
-                new_ctx = _extract_input_tokens(synth_resp) or new_ctx
+                new_ctx = _track_input_tokens(synth_resp, src, new_ctx)
             except Exception as exc:
                 log.warning("[%s] assess synthesis failed: %s", state["agent_name"], exc)
         if not final_answer:
@@ -395,7 +395,7 @@ async def assess(state: AgentState, config) -> dict:
                     synth_resp = await text_only.ainvoke([SystemMessage(content=sys_prompt)] + synth_msgs)
                     _sanitize_message(synth_resp)
                     synthesized = (synth_resp.content or "").strip()
-                    new_ctx = _extract_input_tokens(synth_resp) or new_ctx
+                    new_ctx = _track_input_tokens(synth_resp, src, new_ctx)
                     if not _missing_triage_sections(synthesized):
                         final_answer = synthesized
                         missing_triage = []

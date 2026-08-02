@@ -304,6 +304,12 @@
   };
 
   // ── context ring ────────────────────────────────────────────────────────────
+  // Fallback warning threshold; the server sends the real one (sourced from the
+  // history-compaction trigger) so the color change lines up with compaction.
+  const CTX_WARN_DEFAULT = 0.8;
+  let ctxState = null;
+  let ctxAgeTimer = null;
+
   function ctxAge(ts) {
     if (!ts) return "";
     const secs = Math.max(0, Math.round(Date.now() / 1000 - ts));
@@ -313,17 +319,32 @@
     return ` · ${Math.round(secs / 3600)}h ago`;
   }
 
-  function updateCtx(tokens, limit, source, runId, ts) {
+  // Split out from updateCtx so the relative age can be re-rendered on a timer:
+  // status pushes only arrive when something changes, so on an idle session the
+  // label would otherwise sit at "just now" indefinitely.
+  function renderCtxTitle() {
+    if (!ctxState) return;
+    const { tokens, limit, source, runId, ts, pct } = ctxState;
+    const who = source ? `${source}${runId ? ` ${String(runId).slice(0, 8)}` : ""}: ` : "";
+    const label =
+      `${who}${tokens.toLocaleString()} / ${limit.toLocaleString()} tokens (${pct}%)${ctxAge(ts)}`;
+    if (ctxTitle) ctxTitle.textContent = label;
+    // The <title> is hover-only, and the ring is hidden entirely on narrow
+    // screens — mirror it onto the element for assistive tech.
+    if (ctxRing) ctxRing.setAttribute("aria-label", `context usage — ${label}`);
+  }
+
+  function updateCtx(tokens, limit, source, runId, ts, warnFrac) {
     if (!ctxArc || !limit) return;
-    const frac = Math.min(tokens / limit, 1);
+    const raw = tokens / limit;
+    // The arc can't draw past full, but the percentage is left unclamped: the
+    // limit is operator-entered, so ">100%" is the signal that it's misconfigured.
+    const frac = Math.min(raw, 1);
+    const warn = warnFrac > 0 ? warnFrac : CTX_WARN_DEFAULT;
     ctxArc.style.strokeDashoffset = (CTX_CIRC * (1 - frac)).toFixed(2);
-    const pct = Math.round(frac * 100);
-    ctxArc.style.stroke = frac < 0.7 ? "var(--result)" : frac < 0.9 ? "var(--call)" : "var(--error)";
-    if (ctxTitle) {
-      const who = source ? `${source}${runId ? ` ${String(runId).slice(0, 8)}` : ""}: ` : "";
-      ctxTitle.textContent =
-        `${who}${tokens.toLocaleString()} / ${limit.toLocaleString()} tokens (${pct}%)${ctxAge(ts)}`;
-    }
+    ctxArc.style.stroke = raw < warn ? "var(--result)" : raw < 0.95 ? "var(--call)" : "var(--error)";
+    ctxState = { tokens, limit, source, runId, ts, pct: Math.round(raw * 100) };
+    renderCtxTitle();
   }
 
   function initCtx() {
@@ -331,7 +352,9 @@
     const tokens = Number(ctxRing.dataset.ctxTokens || 0);
     const limit = Number(ctxRing.dataset.ctxLimit || 0);
     const ts = Number(ctxRing.dataset.ctxTs || 0) || null;
-    updateCtx(tokens, limit, ctxRing.dataset.ctxSource || "", ctxRing.dataset.ctxRunId || "", ts);
+    const warn = Number(ctxRing.dataset.ctxWarn || 0);
+    updateCtx(tokens, limit, ctxRing.dataset.ctxSource || "", ctxRing.dataset.ctxRunId || "", ts, warn);
+    ctxAgeTimer = setInterval(renderCtxTitle, 30000);
   }
 
   // ── spinner / idle / stop-button (B3) ───────────────────────────────────────
@@ -865,7 +888,9 @@
       } else if (m.type === "status" && statusEl) {
         updateStatusPanel(m.html);
         setProcessing(!!m.processing, m.processing_source || m.ctx_source);
-        if (m.ctx_limit) updateCtx(m.ctx_tokens || 0, m.ctx_limit, m.ctx_source, m.ctx_run_id, m.ctx_ts);
+        if (m.ctx_limit) {
+          updateCtx(m.ctx_tokens || 0, m.ctx_limit, m.ctx_source, m.ctx_run_id, m.ctx_ts, m.ctx_warn_frac);
+        }
       } else if (m.type === "queue" && queueEl) {
         updateInvestigationPanel(m.html, m.show_queue);
         if (cols) cols.classList.toggle("no-queue", !m.show_queue);
@@ -941,6 +966,9 @@
     }
     clearInterval(spinTimer);
     spinTimer = null;
+    clearInterval(ctxAgeTimer);
+    ctxAgeTimer = null;
+    ctxState = null;
     window.removeEventListener("resize", onSidePanelWindowResize);
   };
   }

@@ -66,11 +66,13 @@
         <input name="question" placeholder="Follow-up question…" autocomplete="off" required>
         <button type="submit" id="ask-btn">ask</button>
         <svg class="ctx-ring" id="ctx-ring" viewBox="0 0 36 36" width="28" height="28"
+             role="img" aria-label="context usage"
              data-ctx-tokens="{{ snap.ctx.tokens|default:0 }}"
              data-ctx-limit="{{ snap.ctx.limit|default:0 }}"
              data-ctx-source="{{ snap.ctx.source|default:'' }}"
              data-ctx-run-id="{{ snap.ctx.run_id|default:'' }}"
-             data-ctx-ts="{{ snap.ctx.ts|default:'' }}">
+             data-ctx-ts="{{ snap.ctx.ts|default:'' }}"
+             data-ctx-warn="{{ snap.ctx.warn_frac|default:'' }}">
           <circle class="ctx-bg" cx="18" cy="18" r="14" fill="none" stroke-width="4"/>
           <circle class="ctx-arc" id="ctx-arc" cx="18" cy="18" r="14" fill="none" stroke-width="4"
             stroke-dasharray="87.96" stroke-dashoffset="87.96"

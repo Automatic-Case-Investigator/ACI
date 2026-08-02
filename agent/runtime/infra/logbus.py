@@ -36,6 +36,7 @@ _run: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("aci_run", 
 _debug: contextvars.ContextVar[bool] = contextvars.ContextVar("aci_debug_mode", default=False)
 _ctx_lock = threading.Lock()
 _ctx_by_run: dict[str, dict] = {}
+_MAX_CTX_ENTRIES = 500
 _issue_lock = threading.Lock()
 _issues_by_run: dict[str, list[dict]] = {}
 
@@ -90,6 +91,15 @@ def update_context_usage(tokens: int, source: str) -> None:
             "tokens": tokens,
             "ts": time(),
         }
+        # Readings outlive their run on purpose (the dashboard falls back to the
+        # freshest session reading while a new specialist spins up), so nothing
+        # else evicts them. Cap the store so a long-lived server process doesn't
+        # accumulate one entry per agent run indefinitely.
+        if len(_ctx_by_run) > _MAX_CTX_ENTRIES:
+            for stale in sorted(_ctx_by_run, key=lambda k: _ctx_by_run[k].get("ts", 0))[
+                : len(_ctx_by_run) - _MAX_CTX_ENTRIES
+            ]:
+                _ctx_by_run.pop(stale, None)
 
 
 def get_context_usage(run_id: str) -> dict | None:
@@ -104,6 +114,16 @@ def get_latest_context_usage(session_id: str) -> dict | None:
         if not items:
             return None
         return dict(max(items, key=lambda v: v.get("ts", 0)))
+
+
+def clear_session_context_usage(session_id: str) -> None:
+    """Drop every context reading for a session (its runs are being deleted)."""
+    with _ctx_lock:
+        for run_id in [
+            k for k, v in _ctx_by_run.items()
+            if v.get("session_id") == session_id or k == session_id
+        ]:
+            _ctx_by_run.pop(run_id, None)
 
 
 def clear_run_issues(run_id: str) -> None:

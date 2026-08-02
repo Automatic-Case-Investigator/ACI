@@ -75,8 +75,26 @@ async def model_context_length() -> int:
     return value if value > 0 else int(DEFAULTS["context_length"])
 
 
+# Short-lived cache for the sync context-length lookup. Its callers are hot —
+# `_should_compact` runs on every model turn and the dashboard's context wheel
+# reads it on every status push (~2.5x/sec per open session) — and each call was
+# a fresh ModelProviderConfig query. The TTL is short enough that a settings edit
+# takes effect on its own, so there is no invalidation hook to keep in sync.
+_CTX_LEN_TTL_SECONDS = 5.0
+_ctx_len_cache: tuple[float, int] | None = None
+
+
 def model_context_length_sync() -> int:
     """Sync variant — safe for sync helpers (e.g. _should_compact) called in any context."""
+    global _ctx_len_cache
+
+    import time as _time
+
+    now = _time.monotonic()
+    cached = _ctx_len_cache
+    if cached is not None and now - cached[0] < _CTX_LEN_TTL_SECONDS:
+        return cached[1]
+
     try:
         from agent.models import ModelProviderConfig
 
@@ -84,7 +102,9 @@ def model_context_length_sync() -> int:
         value = int(row.context_length or 0) if row else 0
     except Exception:
         value = 0
-    return value if value > 0 else int(DEFAULTS["context_length"])
+    resolved = value if value > 0 else int(DEFAULTS["context_length"])
+    _ctx_len_cache = (now, resolved)
+    return resolved
 
 
 async def _model_config() -> dict:

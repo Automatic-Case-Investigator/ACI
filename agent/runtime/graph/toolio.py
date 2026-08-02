@@ -7,7 +7,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 
 from ..engine.streaming import invoke_streaming
 from ..infra.avfs import home_dir
-from ..infra.logbus import emit, src_label, summarize_args, summarize_result
+from ..infra.logbus import emit, src_label, summarize_args, summarize_result, update_context_usage
 
 from .sanitize import _normalize, _sanitize_history, _sanitize_message
 from .state import AgentState
@@ -117,6 +117,26 @@ def _extract_input_tokens(response) -> int:
     return 0
 
 
+def _track_input_tokens(response, src: str, fallback: int = 0) -> int:
+    """Extract this call's prompt-token count, publish it to the dashboard context
+    wheel, and return it (or `fallback` when the provider omitted usage).
+
+    Every model call that contributes to an agent's context should go through
+    this rather than `_extract_input_tokens` alone — a call site that only
+    extracts leaves the wheel frozen on the previous call's number.
+    """
+    tokens = _extract_input_tokens(response)
+    if tokens:
+        update_context_usage(tokens, src)
+    return tokens or fallback
+
+
+# Fraction of the context window at which history compaction kicks in. The
+# dashboard context wheel reads this too (via runner.get_ctx) so its warning
+# band changes color at exactly the point compaction fires.
+_COMPACT_THRESHOLD = 0.8
+
+
 def _should_compact(ctx_tokens: int) -> bool:
     if not ctx_tokens:
         return False
@@ -125,7 +145,7 @@ def _should_compact(ctx_tokens: int) -> bool:
         limit = model_context_length_sync()
     except Exception:
         limit = 131072
-    return ctx_tokens >= int(limit * 0.8)
+    return ctx_tokens >= int(limit * _COMPACT_THRESHOLD)
 
 
 def _is_tool_related(msg) -> bool:

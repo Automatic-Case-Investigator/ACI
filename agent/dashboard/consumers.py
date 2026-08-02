@@ -347,7 +347,7 @@ class RunConsumer(AsyncWebsocketConsumer):
         status_sig = (
             snap["status"], snap["case_id"], snap["run_id"], snap["inv_status"],
             snap["processing"], snap.get("processing_source"), ctx["tokens"], ctx.get("run_id"), ctx.get("source"),
-            ctx.get("limit"), ctx.get("ts"), verdict_sig, snap.get("verdict_run_id"),
+            ctx.get("limit"), ctx.get("ts"), ctx.get("warn_frac"), verdict_sig, snap.get("verdict_run_id"),
             snap.get("can_restart"), snap.get("restart_agent"), snap.get("restart_run_id"),
             snap.get("analyst_verdict"),
         )
@@ -364,6 +364,7 @@ class RunConsumer(AsyncWebsocketConsumer):
                 "ctx_run_id": ctx.get("run_id", ""),
                 "ctx_source": ctx.get("source", ""),
                 "ctx_ts": ctx.get("ts"),
+                "ctx_warn_frac": ctx.get("warn_frac"),
             }))
         queue_sig = (snap["show_queue"],) + tuple(
             (t["id"], t["status"], t["priority"], t["title"], t.get("summary"), t.get("updated_at"))

@@ -10,7 +10,12 @@ triage = register(
         "category, and returns a triage report with a prioritized investigation plan.",
         prompt_layers=["platform", "triage", "siem_methodology", "playbook"],
         tool_policy=["aci-thehive", "aci-wazuh", "aci-taskqueue", "aci-memory", "avfs"],
-        budget=Budget(max_steps=12, max_tool_calls=18),
+        # Flat-loop budget: one step per reasoning cycle, several tool calls per step.
+        # The old 12/18 was sized for the ledger loop, where interpret compressed the
+        # history between cycles; a flat loop that must actually READ the raw events
+        # downstream of the alert needs roughly what the orchestrator spends (~20 calls
+        # over ~7 rounds) plus headroom, while staying well under investigation (40/60).
+        budget=Budget(max_steps=16, max_tool_calls=40),
         produces_handoff=True,
     )
 )

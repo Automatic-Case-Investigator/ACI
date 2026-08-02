@@ -12,7 +12,7 @@ from ...agents.base import Handoff
 from ...workspace.avfs_writer import update_memory_indexes
 from ..analysis.artifacts import record_artifacts
 from ..engine.seeder_runner import run_seeder
-from ..infra.logbus import emit, src_label, summarize_args, summarize_result, summarize_think, update_context_usage
+from ..infra.logbus import emit, src_label, summarize_args, summarize_result, summarize_think
 
 from .board import _format_board_context
 from .interpretation import _default_ledger
@@ -20,7 +20,7 @@ from .observation import build_observation
 from .sanitize import _HARMONY_TOKEN_RE, _sanitize_history, _sanitize_message
 from .state import AgentState
 from .timeutil import _find_timestamp_range, _format_dt, _parse_dt
-from .toolio import _call, _cancel_requested, _cap_tool_result, _compact_history, _emit_node_entry, _ensure_parent_dir, _ensure_workspace_dirs, _expand_tilde_args, _extract_input_tokens, _has_pending_tasks, _invoke_bound_model, _is_error_tool_result, _list_tasks, _model_tools_for_agent, _parse_claimed_task, _reclaim_stale_tasks, _should_compact, _tmap
+from .toolio import _call, _cancel_requested, _cap_tool_result, _compact_history, _emit_node_entry, _ensure_parent_dir, _ensure_workspace_dirs, _expand_tilde_args, _has_pending_tasks, _invoke_bound_model, _is_error_tool_result, _list_tasks, _model_tools_for_agent, _parse_claimed_task, _reclaim_stale_tasks, _should_compact, _tmap, _track_input_tokens
 
 
 
@@ -236,69 +236,10 @@ async def seed(state: AgentState, config) -> dict:
     vicinity_hours = int(state.get("default_vicinity_window_hours") or 24)
 
     if agent_name == "triage":
-        if create:
-            description = (
-                f"Analyst question: {state['question']}\n\n"
-                "Complete a bounded triage handoff and write a report. Use the tool names "
-                "provided by the SOAR, SIEM, and memory MCP server guidance. Triage is bounded "
-                "but must be GROUNDED: your job is to reach the raw evidence that confirms or "
-                "refutes the alert, not just to gather context around it.\n\n"
-                "Ground the alert first. Let the analyst's own wording (case / alert / event) "
-                "choose the first lookup - do not guess from the id's shape. If they called it "
-                "an alert, load the actual ALERT record and read its raw fields before triaging "
-                "(a summary is not enough); if that specific lookup fails, try the case lookup, "
-                "then a SIEM search on the identifier itself.\n\n"
-                "Then run the analyst loop on the alert's concrete pivots (host, user, source "
-                "IP, rule family), the way a competent analyst would - this is the substance of "
-                "triage, not an optional extra:\n"
-                "- PROFILE the discriminating fields (`profile_field`) to see what values "
-                "actually exist and what deviates from the baseline, before you filter on them.\n"
-                "- RETRIEVE AND READ the specific raw events behind the hits (`get_event` on the "
-                "ids a `search`/`search_keyword` returns) - open the actual event and read its "
-                "fields (command, path, status, user, decoded payload); do not stop at a hit "
-                "count.\n"
-                "- CORRELATE the key entities (`correlate_entity`) to see the surrounding "
-                "activity - the same user/host/IP across roles and adjacent time - following the "
-                "chain the alert sits in.\n\n"
-                "Let historical context INFORM this loop, not replace it: known FP/TP patterns "
-                "for the rule, prior analyst feedback, and entity baselines shape your "
-                "disposition, but they are context, not evidence - never conclude from them "
-                "without reading the raw events. Consulting them is where triage STARTS, not "
-                "where it stops.\n\n"
-                "Derive an absolute time window around the case `date` field or alert timestamp "
-                f"using the configured default vicinity window of +/-{vicinity_hours} hours "
-                "unless the task or evidence already gives an explicit absolute range; start "
-                "tighter and widen toward that bound only if empty. Summarize both matching "
-                "events and well-scoped zero-result queries in the report.\n\n"
-                "Triage is not expected to exhaust every branch. Once you have GROUNDED the "
-                "alert - read the raw events that confirm or refute it, or capably established "
-                "the evidence is not there - write the handoff instead of continuing to "
-                "investigate, and carry unresolved adjacent questions into the investigation "
-                "plan. A single empty or over-broad query is NOT grounding.\n\n"
-                "After these bounded steps, write the full triage report as the TEXT of your final "
-                "message. The platform will generate the structured diagnosis verdict "
-                "JSON block after your report. "
-                f"In the report's ## Investigation Plan, every item must include an "
-                f"absolute time window. If the case, alert, or evidence does not already "
-                f"provide a narrower explicit range for that item, derive the window from "
-                f"the configured default vicinity window of ±{vicinity_hours} hours around "
-                f"the case `date` / alert anchor timestamp. Do not substitute ±24 hours unless this run's "
-                f"configured value is 24. If you intentionally use a narrower range for "
-                f"a plan item, state why it is narrower than ±{vicinity_hours} hours. "
-                "The platform records your text output — do not end with tool calls only."
-            )
-            result = await _call(create, {
-                "case_id": state["case_id"],
-                "run_id": state["run_id"],
-                "agent_name": "triage",
-                "title": f"Triage {state['case_id']}",
-                "description": description,
-                "priority": 100,
-            }, _dbg=src)
-            if _is_error_tool_result(result):
-                emit(src, "error", "seed: create_task FAILED", detail=str(result))
-            else:
-                emit(src, "note", "created triage task")
+        # Triage runs the flat loop (`triage_flat.triage_think`), which anchors on the
+        # analyst's question directly and never claims from the queue, so there is no
+        # task to seed. The objective text lives in `triage_flat.build_triage_objective`.
+        pass
 
     else:
         # investigation: only seed if queue is empty
@@ -697,9 +638,7 @@ async def think(state: AgentState, config) -> dict:
     response = await _invoke_bound_model(bound, call_messages, state["agent_name"])
     _sanitize_message(response)
 
-    new_ctx = _extract_input_tokens(response) or ctx_tokens
-    if new_ctx:
-        update_context_usage(new_ctx, src)
+    new_ctx = _track_input_tokens(response, src, ctx_tokens)
 
     # If the model produced nothing on the FIRST call for a task (empty messages
     # before this node ran), retry once with an explicit tool-use nudge. This
@@ -716,7 +655,7 @@ async def think(state: AgentState, config) -> dict:
         _sanitize_message(retry_resp)
         if (retry_resp.content or "").strip() or getattr(retry_resp, "tool_calls", None):
             response = retry_resp
-            new_ctx = _extract_input_tokens(retry_resp) or new_ctx
+            new_ctx = _track_input_tokens(retry_resp, src, new_ctx)
 
     text = (response.content or "").strip()
     if text:
