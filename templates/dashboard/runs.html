@@ -102,10 +102,10 @@
                 {% if r.verdict %}
                 <span class="vchip v-{{ r.verdict }}">{{ r.verdict|upper }}</span>
                 {% endif %}
-                {% if r.escalation_label %}<div class="next-step next-step-action"><c-lucideicon.arrow-right width="12" height="12" /> {{ r.escalation_label }}</div>{% endif %}
+                {% if r.response_label %}<div class="next-step next-step-action"><c-lucideicon.arrow-right width="12" height="12" /> {{ r.response_label }}</div>{% endif %}
                 {% if r.recommended_action %}<div class="next-step muted">{{ r.recommended_action|truncatechars:120 }}</div>{% endif %}
                 {% if r.execution_error %}<div class="next-step tiny" style="color: var(--error)">{{ r.execution_error|truncatechars:100 }}</div>{% endif %}
-                {% if not r.verdict and not r.escalation_label and not r.recommended_action %}
+                {% if not r.verdict and not r.response_label and not r.recommended_action %}
                 <span class="muted tiny">{% if r.is_live %}interactive{% else %}—{% endif %}</span>
                 {% endif %}
               </td>

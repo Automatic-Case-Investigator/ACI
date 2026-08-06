@@ -12,7 +12,7 @@ from agent.models import (
     AgentConfig,
     BaselineSnapshot,
     BaselineSubjectConfig,
-    EscalationRule,
+    ResponsePolicy,
     MCPServerConfig,
     ModelProviderConfig,
     ProviderConfig,

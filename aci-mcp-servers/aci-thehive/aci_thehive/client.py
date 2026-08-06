@@ -171,6 +171,15 @@ class TheHiveClient:
     def get_alert(self, alert_id: str) -> dict:
         return self._get(f"/api/alert/{alert_id}")
 
+    def promote_alert_to_case(self, alert_id: str, fields: dict | None = None) -> dict:
+        """Promote an alert into a new case and return the created case.
+
+        TheHive 5 copies the alert's title, description, severity, tags, and
+        observables onto the case, so the promotion carries the alert's context
+        with it. `fields` overrides any of those on the new case.
+        """
+        return self._post(f"/api/v1/alert/{alert_id}/case", fields or {})
+
     # Fields kept when summarising alerts — full descriptions are dropped because
     # a single case can link thousands of alerts (megabytes of markdown).
     _ALERT_SUMMARY_FIELDS = (

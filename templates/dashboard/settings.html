@@ -353,7 +353,7 @@
         <div class="settings-section-head">
           <div>
             <h2>Automation</h2>
-            <p class="muted">The global kill switch, webhook triggers, workflow bindings, and verdict escalation.</p>
+            <p class="muted">The global kill switch, webhook triggers, workflow bindings, and the verdict response policy.</p>
           </div>
         </div>
 
@@ -461,17 +461,35 @@
           {% endfor %}
         </div>
 
-        <h3>Escalation policy</h3>
-        <p class="muted settings-hint">What an automatic run does with each verdict.</p>
-        <form method="post" action="{% url 'dashboard:settings_escalation_save' %}" class="settings-form settings-form-grid">
-          {% for e in escalation_rows %}
-          <label><code>{{ e.verdict }}</code>
-            <select name="action_{{ e.verdict }}">
-              {% for act in e.actions %}<option value="{{ act }}" {% if e.action == act %}selected{% endif %}>{{ act }}</option>{% endfor %}
-            </select>
-          </label>
-          {% endfor %}
-          <div class="form-actions"><button type="submit" class="btn-primary save-primary">Save escalation policy</button></div>
+        <h3>Response policy</h3>
+        <p class="muted settings-hint">What an automatic run does with each verdict, by the kind of object it is acting on.</p>
+        <form method="post" action="{% url 'dashboard:settings_response_policy_save' %}" class="settings-form rp-form">
+          <div class="rp-scroll">
+            <div class="rp-grid" role="group" aria-label="Response policy matrix" style="--rp-cols: {{ response_policy_rows.subject_headers|length }};">
+              <div></div>
+              {% for h in response_policy_rows.subject_headers %}<div class="rp-colhead">{{ h }}</div>{% endfor %}
+
+              {% for row in response_policy_rows.rows %}
+              <div class="rp-verdict">
+                <span class="rp-verdict-name">{{ row.verdict_label }}</span>
+              </div>
+              {% for c in row.cells %}
+                <div class="rp-cell">
+                  <select name="{{ c.field }}" aria-label="{{ c.aria_label }}">
+                    {% for act in c.actions %}<option value="{{ act.value }}" {% if c.action == act.value %}selected{% endif %}>{{ act.label }}</option>{% endfor %}
+                  </select>
+                </div>
+              {% endfor %}
+              {% endfor %}
+            </div>
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="btn-primary save-primary">Save response policy</button>
+            <button type="submit" class="btn-secondary"
+                    formaction="{% url 'dashboard:settings_response_policy_reset' %}"
+                    formnovalidate
+                    onclick="return confirm('Revert every response policy cell to its shipped default?');">Revert to defaults</button>
+          </div>
         </form>
       </section>
 

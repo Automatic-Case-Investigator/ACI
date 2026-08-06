@@ -6,6 +6,7 @@ from ...analysis.verdict import (
     apply_verdict_integrity,
     parse_verdict,
     validate_verdict,
+    verdict_enum_line,
 )
 from ...infra.avfs import reports_dir, session_note_path
 from ...infra.logbus import emit, src_label
@@ -69,6 +70,7 @@ def _apply_verdict_policies(
         escalation_posted=bool(state.get("escalation_posted")),
         over_budget=over_budget,
         classify_gaps=normalize_followups,
+        agent_name=state["agent_name"],
     )
     for kind, msg in notes:
         emit(src, kind, msg)
@@ -205,13 +207,16 @@ async def verdict_contract(state: AgentState, config) -> dict:
         "and `scope_state=isolated` unless lateral spread is proven.\n"
         "- For triage, `needs_investigation` is appropriate when the initial triage "
         "evidence is insufficient or conflicting. Only choose `tp` or `fp` when the "
-        "triage report cites evidence that supports that classification.\n"
+        "triage report cites evidence that supports that classification. Triage must "
+        "NEVER return `inconclusive`: that verdict asserts the question is "
+        "unanswerable, which a bounded first pass is not entitled to conclude. If you "
+        "cannot decide, the answer is `needs_investigation`.\n"
         "- Keep truly classification-blocking gaps in `blocking_gaps`, for example "
         "`cannot distinguish admin from attacker` or `persistence cannot be confirmed`.\n\n"
         "Return EXACTLY this fenced JSON block:\n"
         "```json\n"
         "{\n"
-        '  "verdict": "tp | fp | inconclusive | needs_investigation",\n'
+        f'  "verdict": "{verdict_enum_line(state["agent_name"])}",\n'
         '  "confidence": "low | medium | high",\n'
         '  "classification_basis": "malicious_evidence | benign_evidence | insufficient_evidence | conflicting_evidence",\n'
         '  "impact_state": "active | contained | unknown",\n'
@@ -291,7 +296,7 @@ async def _repair_verdict_output(state: AgentState, config, final_answer: str, v
         "Required schema:\n"
         "```json\n"
         "{\n"
-        '  "verdict": "tp | fp | inconclusive | needs_investigation",\n'
+        f'  "verdict": "{verdict_enum_line(state["agent_name"])}",\n'
         '  "confidence": "low | medium | high",\n'
         '  "classification_basis": "malicious_evidence | benign_evidence | insufficient_evidence | conflicting_evidence",\n'
         '  "impact_state": "active | contained | unknown",\n'
@@ -443,7 +448,7 @@ async def reassess_verdict(state: AgentState, config) -> dict:
         "Return EXACTLY this fenced JSON block — no other text:\n"
         "```json\n"
         "{\n"
-        '  "verdict": "tp | fp | inconclusive | needs_investigation",\n'
+        f'  "verdict": "{verdict_enum_line(state["agent_name"])}",\n'
         '  "confidence": "low | medium | high",\n'
         '  "classification_basis": "malicious_evidence | benign_evidence | insufficient_evidence | conflicting_evidence",\n'
         '  "impact_state": "active | contained | unknown",\n'
@@ -531,6 +536,7 @@ async def publish_finish(state: AgentState, config) -> dict:
             strict=(state["agent_name"] == "triage"),
             escalation_posted=bool(state.get("escalation_posted")),
             over_budget=over_budget,
+            agent_name=state["agent_name"],
         )
         if notes:
             floored_verdict_update = verdict

@@ -12,7 +12,7 @@ from agent.models import (
     AgentConfig,
     BaselineSnapshot,
     BaselineSubjectConfig,
-    EscalationRule,
+    ResponsePolicy,
     MCPServerConfig,
     ModelProviderConfig,
     ProviderConfig,
@@ -22,7 +22,7 @@ from agent.models import (
 )
 from django.http import JsonResponse
 
-from .rows import _agent_rows, _baseline_adapter_name, _baseline_snapshot_rows, _baseline_subject_hint, _baseline_subject_rows, _baseline_window_days, _custom_mcp_rows, _escalation_rows, _integration_provider_options, _integration_rows, _provider_options, _provider_rows, _runtime_context, _workflow_event_options, _workflow_rows, _workflow_trigger_rows
+from .rows import _agent_rows, _baseline_adapter_name, _baseline_snapshot_rows, _baseline_subject_hint, _baseline_subject_rows, _baseline_window_days, _custom_mcp_rows, _response_policy_rows, _integration_provider_options, _integration_rows, _provider_options, _provider_rows, _runtime_context, _workflow_event_options, _workflow_rows, _workflow_trigger_rows
 
 
 
@@ -44,7 +44,7 @@ def settings_view(request):
         "workflow_event_options": _workflow_event_options(),
         "trigger_provider_options": _provider_options(),
         "edit_trigger": edit_trigger,
-        "escalation_rows": _escalation_rows(),
+        "response_policy_rows": _response_policy_rows(),
         "baseline_subjects": _baseline_subject_rows(),
         "baseline_snapshots": _baseline_snapshot_rows(),
         "baseline_subject_types": [c[0] for c in BaselineSubjectConfig.SUBJECT_CHOICES],

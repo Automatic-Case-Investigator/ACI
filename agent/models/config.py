@@ -212,29 +212,50 @@ class WorkflowTriggerConfig(models.Model):
         return f"{self.name} ({self.provider_key} → {self.event_type})"
 
 
-class EscalationRule(models.Model):
-    """Analyst-editable verdict → action mapping for automatic workflows."""
+class ResponsePolicy(models.Model):
+    """Analyst-editable (verdict, subject) → response action matrix.
 
-    ACTION_AUTO_CLOSE = "auto_close"
-    ACTION_AUTO_ESCALATE = "auto_escalate"
-    ACTION_HOLD = "hold"
-    ACTION_NONE = "none"
-    ACTION_CHOICES = [
-        (ACTION_AUTO_CLOSE, "Auto-close"),
-        (ACTION_AUTO_ESCALATE, "Auto-escalate"),
-        (ACTION_HOLD, "Hold for analyst"),
-        (ACTION_NONE, "No action"),
+    What an automatic run does with each verdict, split by the kind of object it is
+    acting on. The subject split exists because affordances differ: a case can be
+    resolved, a SOAR alert can be promoted, and a SIEM alert has no writable
+    lifecycle at all. Which actions are *offerable* per cell is fixed in code
+    (`runtime.policy.matrix.ALLOWED_ACTIONS`); this table stores only the choice.
+    """
+
+    # An alert is one subject regardless of which system raised it: SOAR and SIEM
+    # alerts get the same response settings, because the only thing that can happen
+    # to either is that a case gets created from it.
+    SUBJECT_CASE = "case"
+    SUBJECT_ALERT = "alert"
+    SUBJECT_CHOICES = [
+        (SUBJECT_CASE, "Case"),
+        (SUBJECT_ALERT, "Alert"),
     ]
 
-    verdict = models.CharField(max_length=32, unique=True)
-    action = models.CharField(max_length=16, choices=ACTION_CHOICES, default=ACTION_HOLD)
+    ACTION_NONE = "none"
+    ACTION_DOCUMENT = "document"
+    ACTION_RESOLVE = "resolve"
+    ACTION_INVESTIGATE = "investigate"
+    ACTION_PROMOTE_CASE = "promote_case"
+    ACTION_CHOICES = [
+        (ACTION_NONE, "No action"),
+        (ACTION_DOCUMENT, "Document report"),
+        (ACTION_RESOLVE, "Document and resolve"),
+        (ACTION_INVESTIGATE, "Investigate"),
+        (ACTION_PROMOTE_CASE, "Document and promote to case"),
+    ]
+
+    verdict = models.CharField(max_length=32)
+    subject = models.CharField(max_length=16, choices=SUBJECT_CHOICES, default=SUBJECT_CASE)
+    action = models.CharField(max_length=16, choices=ACTION_CHOICES, default=ACTION_NONE)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ["verdict"]
+        ordering = ["verdict", "subject"]
+        unique_together = [("verdict", "subject")]
 
     def __str__(self):
-        return f"{self.verdict} → {self.action}"
+        return f"{self.verdict}/{self.subject} → {self.action}"
 
 
 class RuntimeConfig(models.Model):

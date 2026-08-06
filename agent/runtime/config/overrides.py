@@ -1,9 +1,9 @@
 """Apply analyst-editable DB overrides over the code-defined registries.
 
 The agent and workflow registries supply defaults; the settings UI lets an analyst
-override budget, tool policy, dedupe windows, and the escalation map. These
+override budget, tool policy, dedupe windows, and the response matrix. These
 resolvers merge the DB rows over the defaults and are read by the runtime
-(`run.py`, `dispatch_trigger`, `apply_escalation_policy`). All are defensive: a
+(`run.py`, `dispatch_trigger`, `apply_response_policy`). All are defensive: a
 missing table (pre-migration / tests) degrades silently to the code defaults.
 """
 from __future__ import annotations
@@ -67,23 +67,32 @@ def resolve_workflow(event_type: str, *, default_enabled: bool, default_window: 
     return bool(row.enabled), int(row.dedupe_window)
 
 
-# Code defaults, used when no EscalationRule row exists for a verdict.
-DEFAULT_ESCALATION = {
-    "tp": "auto_escalate",
-    "fp": "auto_close",
-    "inconclusive": "hold",
-    "needs_investigation": "hold",
-}
+def resolve_response_policy() -> dict:
+    """Return the ``(verdict, subject) -> action`` matrix, DB rows over code defaults.
 
+    Rows naming a cell or action the matrix no longer offers are ignored rather than
+    trusted: the code matrix is the authority on what is offerable, so a stale row
+    left behind by a matrix change cannot resurrect a retired action.
 
-def resolve_escalation_map() -> dict:
-    """Return the verdict → action map, DB rows overriding the code defaults."""
-    out = dict(DEFAULT_ESCALATION)
+    Rows saved under a retired subject (`soar_alert` / `siem_alert`, from before the
+    two were merged into one `alert`) are remapped rather than dropped, so the merge
+    does not silently reset an operator's configuration. A row already stored under
+    the current subject always wins over a remapped legacy one.
+    """
+    from ..response_policy import policy
+
+    out = dict(policy.DEFAULT_ACTIONS)
     try:
-        from agent.models import EscalationRule
+        from agent.models import ResponsePolicy
 
-        for row in EscalationRule.objects.all():
-            out[row.verdict] = row.action
+        rows = list(ResponsePolicy.objects.all())
+        # Legacy first, so a current-subject row overwrites anything remapped onto it.
+        rows.sort(key=lambda r: r.subject in policy.LEGACY_SUBJECTS, reverse=True)
+        for row in rows:
+            subject = policy.LEGACY_SUBJECTS.get(row.subject, row.subject)
+            key = (row.verdict, subject)
+            if key in policy.ALLOWED_ACTIONS and policy.is_allowed(*key, row.action):
+                out[key] = row.action
     except Exception as exc:
-        log.debug("EscalationRule lookup unavailable: %s", exc)
+        log.debug("ResponsePolicy lookup unavailable: %s", exc)
     return out

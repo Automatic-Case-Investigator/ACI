@@ -8,7 +8,7 @@ from .models import (
     BaselineComputeConfig,
     BaselineSnapshot,
     BaselineSubjectConfig,
-    EscalationRule,
+    ResponsePolicy,
     FeedbackEntry,
     IntegrationConnection,
     MCPServerConfig,
@@ -38,9 +38,10 @@ class WorkflowTriggerConfigAdmin(admin.ModelAdmin):
     search_fields = ("id", "name", "provider_key", "event_type")
 
 
-@admin.register(EscalationRule)
-class EscalationRuleAdmin(admin.ModelAdmin):
-    list_display = ("verdict", "action", "updated_at")
+@admin.register(ResponsePolicy)
+class ResponsePolicyAdmin(admin.ModelAdmin):
+    list_display = ("verdict", "subject", "action", "updated_at")
+    list_filter = ("subject", "action")
 
 
 @admin.register(ProviderConfig)

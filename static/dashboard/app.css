@@ -258,6 +258,27 @@ code, pre, .ctx-ring { font-family: var(--mono); }
 .form-title h3 { margin: 0 0 2px; color: var(--fg); }
 .form-actions { display: flex; gap: 10px; align-items: center; }
 .form-check { align-self: end; padding-bottom: 8px; }
+/* response policy matrix — a verdict × subject grid, not a flat list of rows.
+   Every cell renders the same: the grid shows what is configured, not how it
+   differs from the shipped defaults. */
+.rp-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 0 16px; }
+.rp-head h3 { margin: 0; }
+.rp-form { max-width: none; }
+.rp-scroll { width: 100%; min-width: 0; overflow-x: auto; }
+.rp-grid {
+  /* --rp-cols is set from the subject count so adding a subject needs no CSS edit. */
+  display: grid; grid-template-columns: 148px repeat(var(--rp-cols, 2), minmax(150px, 1fr));
+  gap: 6px; align-items: stretch; min-width: 460px; padding-bottom: 2px;
+}
+.rp-colhead { font-size: 11px; color: var(--meta); padding: 0 0 2px 2px; align-self: end; }
+.rp-verdict { display: flex; align-items: center; padding-right: 8px; min-width: 0; }
+.rp-verdict-name { font-size: 12px; color: var(--fg); }
+.rp-cell {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--panel); padding: 7px 8px; min-width: 0;
+}
+.rp-cell select { width: 100%; }
+
 .settings-table-wrap { width: calc(100% - 32px); min-width: 0; overflow-x: auto; margin: 12px 16px 16px; }
 .settings-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; min-width: 680px; }
 .settings-table th {

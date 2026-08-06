@@ -21,6 +21,15 @@ from ...agents.base import Handoff
 from ...models import AgentRun
 from .run import run_agent
 
+# Terminal states that get a response decision. `failed` and `incomplete_budget`
+# are included so an unattended workflow always leaves a trace on the case; a
+# `cancelled` run is excluded because the analyst deliberately stopped it.
+_RESPONDABLE_STATES = frozenset({
+    AgentRun.STATUS_COMPLETED,
+    AgentRun.STATUS_FAILED,
+    AgentRun.STATUS_INCOMPLETE_BUDGET,
+})
+
 
 async def _refresh_run_or_none(run: AgentRun, stage: str) -> AgentRun | None:
     """Refresh a run, returning None if an operator deleted it mid-dispatch."""
@@ -58,7 +67,7 @@ async def dispatch_run(
     workflows so a burst of identical triggers can't fan out into duplicate work.
     """
     if dedupe_window > 0:
-        from ..policy.workflow import find_duplicate_run, AUDIT_DEDUPED
+        from ..response_policy.workflow import find_duplicate_run, AUDIT_DEDUPED
         from ..infra.logbus import emit
 
         existing = await sync_to_async(find_duplicate_run, thread_sensitive=True)(
@@ -90,24 +99,27 @@ async def dispatch_run(
         return run
     run = refreshed
 
-    # Always record the escalation decision for completed runs so the routing
-    # action is visible in run.metadata regardless of how the run was triggered.
-    if run.status == AgentRun.STATUS_COMPLETED:
-        from ..policy.workflow import apply_escalation_policy
+    # Record the response decision so the routing action is visible in run.metadata
+    # regardless of how the run was triggered. Failed and budget-truncated runs are
+    # included deliberately: gating on `completed` alone meant a crashed triage left
+    # no trace on the case at all, which is indistinguishable from a clean pass.
+    # `cancelled` stays out — the analyst stopped it, and acting anyway overrides them.
+    if run.status in _RESPONDABLE_STATES:
+        from ..response_policy.workflow import apply_response_policy
 
-        await sync_to_async(apply_escalation_policy, thread_sensitive=True)(run)
-        refreshed = await _refresh_run_or_none(run, "escalation policy")
+        await sync_to_async(apply_response_policy, thread_sensitive=True)(run)
+        refreshed = await _refresh_run_or_none(run, "response policy")
         if refreshed is None:
             return run
         run = refreshed
 
     # Execute the TheHive side-effect (case update, comment) only for automatic
     # runs — interactive sessions let the analyst decide whether to act.
-    if trigger != AgentRun.TRIGGER_INTERACTIVE and run.status == AgentRun.STATUS_COMPLETED:
-        from ..policy.escalation import execute_escalation
+    if trigger != AgentRun.TRIGGER_INTERACTIVE and run.status in _RESPONDABLE_STATES:
+        from ..response_policy.execution import execute_response
 
-        await sync_to_async(execute_escalation, thread_sensitive=True)(run)
-        refreshed = await _refresh_run_or_none(run, "escalation execution")
+        await sync_to_async(execute_response, thread_sensitive=True)(run)
+        refreshed = await _refresh_run_or_none(run, "response execution")
         if refreshed is None:
             return run
         run = refreshed

@@ -33,6 +33,15 @@ import re
 # set derived from it; use `VERDICT_ORDER` where presentation order matters.
 VERDICT_ORDER = ("tp", "fp", "inconclusive", "needs_investigation")
 VALID_VERDICTS = frozenset(VERDICT_ORDER)
+
+# Human labels for UI surfaces. The slug stays the identifier everywhere else
+# (logs, API, the verdict block itself) — this is display only.
+VERDICT_LABELS = {
+    "tp": "True positive",
+    "fp": "False positive",
+    "inconclusive": "Inconclusive",
+    "needs_investigation": "Needs investigation",
+}
 VALID_CONFIDENCE = frozenset({"low", "medium", "high"})
 VALID_IMPACT_STATE = frozenset({"active", "contained", "unknown"})
 VALID_SCOPE_STATE = frozenset({"isolated", "lateral_spread", "unknown"})
@@ -533,6 +542,54 @@ def apply_success_verification_floor(v: dict, *, offensive_alert: bool) -> tuple
     return floored, True
 
 
+# Verdicts each agent may TERMINATE on. `inconclusive` is an investigation-only
+# outcome: it asserts "we looked hard and still cannot tell". Triage is a bounded
+# first pass, so the same evidential state does not mean the question is unanswerable
+# — it means nobody has looked properly yet. Reporting that as `needs_investigation`
+# routes it to an action; `inconclusive` from triage is a dead end that reads like a
+# conclusion. Agents absent from this map may use the full verdict vocabulary.
+_AGENT_TERMINAL_VERDICTS = {
+    "triage": frozenset({"tp", "fp", "needs_investigation"}),
+}
+
+
+def verdict_enum_line(agent_name: str = "") -> str:
+    """The `tp | fp | ...` enum an agent may return, for prompt schema blocks.
+
+    Keeps the prompt and the scope floor reading from one source, so the model is
+    never offered a verdict the pipeline would immediately rewrite.
+    """
+    allowed = _AGENT_TERMINAL_VERDICTS.get(agent_name) or VALID_VERDICTS
+    return " | ".join(v for v in VERDICT_ORDER if v in allowed)
+
+
+def apply_agent_scope_floor(v: dict, agent_name: str) -> tuple[dict, bool]:
+    """Remap a verdict the agent is not entitled to terminate on.
+
+    Runs LAST in the integrity pipeline: earlier steps (notably the citation policy)
+    can themselves demote a verdict *to* `inconclusive`, and for triage that result
+    must land on `needs_investigation` too.
+    """
+    allowed = _AGENT_TERMINAL_VERDICTS.get(agent_name)
+    current = (v or {}).get("verdict")
+    if not allowed or not current or current in allowed:
+        return v, False
+
+    out = dict(v)
+    out["verdict"] = "needs_investigation"
+    out["demoted_from"] = current
+    reason = (
+        f"{current} is not a terminal verdict for {agent_name}; a bounded first pass "
+        "that cannot decide is a request for investigation, not a conclusion"
+    )
+    out["reassessment_reason"] = reason
+    # An unresolved triage is by definition missing the evidence that would resolve
+    # it — surface that as a blocking gap so the response policy sees an open item.
+    if not out.get("blocking_gaps"):
+        out["blocking_gaps"] = ["Triage could not determine a disposition from the evidence retrieved"]
+    return out, True
+
+
 def apply_verdict_integrity(
     v: dict,
     *,
@@ -541,6 +598,7 @@ def apply_verdict_integrity(
     over_budget: bool = False,
     offensive_alert: bool | None = None,
     classify_gaps: bool = True,
+    agent_name: str = "",
 ) -> tuple[dict, list[tuple[str, str]]]:
     """Single ordered verdict-integrity pipeline shared by every verdict node.
 
@@ -551,6 +609,8 @@ def apply_verdict_integrity(
       3. open-gaps          — demote a tp/fp with blocking gaps or a mismatched basis
       4. success floor      — fp on an offensive alert w/o benign proof -> needs_investigation
       5. completeness floor — escalated / over-budget fp -> needs_investigation
+      6. agent scope        — a verdict outside the agent's terminal set (triage
+                              `inconclusive`) -> needs_investigation
 
     Returns ``(verdict, notes)`` where ``notes`` is a list of ``(emit_kind, message)``
     for the caller to surface. Idempotent, so ``publish_finish`` can safely re-run it on
@@ -613,6 +673,14 @@ def apply_verdict_integrity(
             "note",
             f"verdict {verdict.get('demoted_from', '').upper()} floored to "
             f"NEEDS_INVESTIGATION — {verdict.get('reassessment_reason', '')[:160]}",
+        ))
+
+    verdict, rescoped = apply_agent_scope_floor(verdict, agent_name)
+    if rescoped:
+        notes.append((
+            "note",
+            f"verdict {verdict.get('demoted_from', '').upper()} rescoped to "
+            f"NEEDS_INVESTIGATION — not a terminal verdict for {agent_name}",
         ))
 
     return verdict, notes

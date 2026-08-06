@@ -25,11 +25,11 @@ from django.contrib.sessions.backends.db import SessionStore
 from agent.agents.registry import get_agent
 from agent.dashboard import settings_views as sv
 from agent.models import (
-    AgentConfig, WorkflowConfig, EscalationRule, MCPServerConfig, ProviderConfig,
+    AgentConfig, WorkflowConfig, ResponsePolicy, MCPServerConfig, ProviderConfig,
 )
 from agent.runtime.config import is_enabled, provider_category, resolve_settings, INTERNAL_PROVIDERS, DEFAULT_PROVIDERS
 from agent.runtime.config.overrides import (
-    resolve_agent_definition, resolve_workflow, resolve_escalation_map,
+    resolve_agent_definition, resolve_workflow, resolve_response_policy,
 )
 from agent.runtime.config.prompts import compose_system_prompt
 
@@ -127,7 +127,7 @@ class TestWorkflowOverride(DjangoTestCase):
         # the tests below. Runs inside the per-test savepoint — automatically
         # rolled back so real production rows survive.
         WorkflowConfig.objects.filter(event_type="new_case").delete()
-        EscalationRule.objects.all().delete()
+        ResponsePolicy.objects.all().delete()
 
     def test_workflow_override(self):
         sv.settings_workflow_save(_post({"event_type": "new_case", "enabled": "1", "dedupe_window": "90"}))
@@ -140,15 +140,36 @@ class TestWorkflowOverride(DjangoTestCase):
         enabled, _ = resolve_workflow("new_case", default_enabled=True, default_window=600)
         self.assertFalse(enabled)
 
-    def test_escalation_override(self):
-        sv.settings_escalation_save(_post({
-            "action_tp": "hold", "action_fp": "auto_close",
-            "action_inconclusive": "hold", "action_needs_investigation": "hold",
+    def test_response_policy_override(self):
+        sv.settings_response_policy_save(_post({
+            "action_tp__case": "resolve",
+            "action_fp__case": "resolve",
+            "action_needs_investigation__case": "investigate",
         }))
-        self.assertEqual(resolve_escalation_map()["tp"], "hold")
+        policy = resolve_response_policy()
+        self.assertEqual(policy[("tp", "case")], "resolve")
+        self.assertEqual(policy[("needs_investigation", "case")], "investigate")
 
-    def test_escalation_default_when_no_rows(self):
-        self.assertEqual(resolve_escalation_map()["tp"], "auto_escalate")
+    def test_response_policy_rejects_action_outside_the_cell_menu(self):
+        # `resolve` is not offerable for needs_investigation, and `escalate` was
+        # removed from that row entirely — neither may be persisted.
+        sv.settings_response_policy_save(_post({
+            "action_needs_investigation__case": "resolve",
+            "action_fp__alert": "escalate",
+        }))
+        from agent.runtime.response_policy import policy as matrix
+
+        resolved = resolve_response_policy()
+        self.assertEqual(resolved[("needs_investigation", "case")],
+                         matrix.default_action("needs_investigation", "case"))
+        self.assertEqual(resolved[("fp", "alert")], matrix.default_action("fp", "alert"))
+
+    def test_response_policy_falls_back_to_the_shipped_defaults(self):
+        from agent.runtime.response_policy import policy as matrix
+
+        resolved = resolve_response_policy()
+        for cell in matrix.cells():
+            self.assertEqual(resolved[cell], matrix.default_action(*cell), cell)
 
 
 class TestMCPProtections(DjangoTestCase):

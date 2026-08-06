@@ -21,6 +21,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from agent.models import AgentEvent, AgentRun
+from agent.runtime.response_policy.workflow import read_decision
 
 from .run_actions import (
     ACTIVE_STATES,
@@ -46,10 +47,11 @@ _SCAN_LIMIT = 500
 _DISPLAY_LIMIT = 200
 _RUNS_PER_PAGE = 25
 
-_ESCALATION_LABEL = {
-    "auto_close": "Auto-close",
-    "auto_escalate": "Auto-escalate",
-    "hold": "Hold for analyst",
+_RESPONSE_LABEL = {
+    "document": "Report documented",
+    "resolve": "Resolved",
+    "investigate": "Investigation launched",
+    "promote_case": "Promoted to case",
     "none": "",
 }
 
@@ -150,8 +152,8 @@ def _run_rows(seg: str, query: str = "", verdict: str = "") -> list[dict]:
     rows = []
     for r in runs:
         verdict_contract = r.verdict if isinstance(r.verdict, dict) else {}
-        escalation = (r.metadata or {}).get("escalation") or {}
-        action = escalation.get("action") or ""
+        decision = read_decision(r)
+        action = decision.get("action") or ""
         can_review = is_reviewable_workflow(r)
         is_live = is_orchestrator_session(r)
         if is_live:
@@ -173,8 +175,8 @@ def _run_rows(seg: str, query: str = "", verdict: str = "") -> list[dict]:
             "is_inferring": is_inferring(r),
             "verdict": _verdict_of(r, feedback_map),
             "recommended_action": verdict_contract.get("recommended_action") or "",
-            "escalation_label": _ESCALATION_LABEL.get(action, action),
-            "execution_error": escalation.get("execution_error") or "",
+            "response_label": _RESPONSE_LABEL.get(action, action),
+            "execution_error": decision.get("execution_error") or "",
             "age": _humanize_age(int((now - r.created_at).total_seconds())),
             "open_url": reverse("dashboard:session", args=[r.id]) if is_live else reverse("dashboard:run_detail", args=[r.id]),
             "open_tip": "Open chatbox" if is_live else "Open run",
@@ -237,7 +239,7 @@ def run_detail(request, run_id):
 def run_review(request, run_id):
     run = get_object_or_404(AgentRun, id=str(run_id))
     verdict = run.verdict if isinstance(run.verdict, dict) else {}
-    escalation = (run.metadata or {}).get("escalation") or {}
+    decision = read_decision(run)
     existing_session_id = ((run.metadata or {}).get("review") or {}).get("investigation_session_id")
     existing_session = None
     if existing_session_id:
@@ -247,7 +249,7 @@ def run_review(request, run_id):
     return render(request, "dashboard/run_review.html", {
         "run": run,
         "verdict": verdict,
-        "escalation": escalation,
+        "response": decision,
         "can_investigate": is_reviewable_workflow(run),
         "existing_session": existing_session,
     })

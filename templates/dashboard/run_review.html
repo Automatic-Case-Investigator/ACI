@@ -39,7 +39,7 @@
           <h3>Verdict</h3>
           <div class="settings-kv"><b>Value</b> {{ verdict.verdict|default:"—" }}</div>
           <div class="settings-kv"><b>Confidence</b> {{ verdict.confidence|default:"—" }}</div>
-          <div class="settings-kv"><b>Action</b> {{ escalation.action|default:"—" }}</div>
+          <div class="settings-kv"><b>Action</b> {{ response.action|default:"—" }}</div>
           {% if verdict.recommended_action %}
           <p class="muted">{{ verdict.recommended_action }}</p>
           {% endif %}

@@ -31,7 +31,7 @@ async def dispatch_trigger(
     dedupe_window_override: int | None = None,
     metadata_extra: dict | None = None,
 ):
-    """Resolve a trigger's binding and launch its run (with dedup + escalation).
+    """Resolve a trigger's binding and launch its run (with dedup + response policy).
 
     Returns the AgentRun (which may be a pre-existing one if deduplicated), or None
     if no enabled binding handles the event type. The single automatic entry point

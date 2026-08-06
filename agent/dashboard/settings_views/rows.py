@@ -12,7 +12,7 @@ from agent.models import (
     AgentConfig,
     BaselineSnapshot,
     BaselineSubjectConfig,
-    EscalationRule,
+    ResponsePolicy,
     MCPServerConfig,
     ModelProviderConfig,
     ProviderConfig,
@@ -376,18 +376,58 @@ def _workflow_trigger_rows(request) -> list[dict]:
     return rows
 
 
-def _escalation_rows() -> list[dict]:
-    """Verdict → action rows (effective), with the action choices for each select."""
-    from agent.runtime.config.overrides import resolve_escalation_map
+def _response_policy_rows() -> dict:
+    """The response matrix as a verdict-by-subject grid, plus its display state.
 
-    from agent.runtime.analysis.verdict import VERDICT_ORDER
+    Grouped by verdict rather than returned flat because the data IS a matrix —
+    rendering it as 12 independent rows made the operator reassemble the shape.
 
-    effective = resolve_escalation_map()
-    actions = [c[0] for c in EscalationRule.ACTION_CHOICES]
-    return [
-        {"verdict": v, "action": effective.get(v, "none"), "actions": actions}
-        for v in VERDICT_ORDER
-    ]
+    Each cell carries only the actions its policy entry offers, so the UI cannot
+    present a choice the resolver would discard. Every cell renders identically —
+    same control, no tint, no badge. The grid states what is configured; it does not
+    editorialise about how that differs from the shipped defaults.
+    """
+    from agent.runtime.config.overrides import resolve_response_policy
+    from agent.runtime.response_policy import policy
+
+    labels = dict(ResponsePolicy.ACTION_CHOICES)
+    subjects = dict(ResponsePolicy.SUBJECT_CHOICES)
+    effective = resolve_response_policy()
+
+    verdict_rows = []
+    for verdict in policy.POLICY_ROWS:
+        cells = []
+        for subject in policy.SUBJECT_ORDER:
+            allowed = policy.allowed_actions(verdict, subject)
+            action = effective.get(
+                (verdict, subject), policy.default_action(verdict, subject))
+            cells.append({
+                "subject": subject,
+                "subject_label": subjects.get(subject, subject),
+                "field": f"action_{verdict}__{subject}",
+                "action": action,
+                "action_label": labels.get(action, action),
+                # Named for screen readers: the column header alone does not say
+                # which verdict/subject pair a bare select belongs to.
+                "aria_label": (
+                    f"Response action for {policy.row_label(verdict).lower()} "
+                    f"on {subjects.get(subject, subject)}"
+                ),
+                "actions": [
+                    {"value": a, "label": labels.get(a, a)} for a in allowed
+                ],
+            })
+        verdict_rows.append({
+            "verdict": verdict,
+            "verdict_label": policy.row_label(verdict),
+            "is_fallback": verdict == policy.FAILURE_FALLBACK,
+            "cells": cells,
+        })
+
+    return {
+        "subject_headers": [subjects.get(s, s) for s in policy.SUBJECT_ORDER],
+        "rows": verdict_rows,
+    }
 
 
 def _baseline_adapter_name() -> str:

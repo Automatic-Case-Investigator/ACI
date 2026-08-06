@@ -12,7 +12,7 @@ from agent.models import (
     AgentConfig,
     BaselineSnapshot,
     BaselineSubjectConfig,
-    EscalationRule,
+    ResponsePolicy,
     MCPServerConfig,
     ModelProviderConfig,
     ProviderConfig,
@@ -167,17 +167,60 @@ def settings_trigger_delete(request):
 
 @csrf_exempt
 @require_POST
-def settings_escalation_save(request):
-    from agent.runtime.analysis.verdict import VERDICT_ORDER
+def settings_response_policy_reset(request):
+    """Drop every stored row so the matrix falls back to the shipped defaults.
+
+    Deleting rather than rewriting them to the default values keeps one source of
+    truth: with no rows, `resolve_response_policy` returns `DEFAULT_ACTIONS`, so a
+    later change to those defaults reaches a reverted deployment.
+    """
+    removed, _ = ResponsePolicy.objects.all().delete()
+    if removed:
+        messages.success(request, "Response policy reverted to defaults.")
+    else:
+        messages.info(request, "Response policy was already at defaults.")
+    return redirect("dashboard:settings")
+
+
+@csrf_exempt
+@require_POST
+def settings_response_policy_save(request):
+    """Persist the response matrix. Only cells the code matrix offers are accepted.
+
+    Reports what actually CHANGED rather than how many cells were submitted — the
+    latter is the same number every time and tells the operator nothing.
+    """
+    from agent.runtime.config.overrides import resolve_response_policy
+    from agent.runtime.response_policy import policy
 
     p = request.POST
-    valid_actions = {c[0] for c in EscalationRule.ACTION_CHOICES}
-    for verdict in VERDICT_ORDER:
-        action = p.get(f"action_{verdict}")
-        if action in valid_actions:
-            EscalationRule.objects.update_or_create(
-                verdict=verdict, defaults={"action": action}
+    before = resolve_response_policy()
+    labels = dict(ResponsePolicy.ACTION_CHOICES)
+    subjects = dict(ResponsePolicy.SUBJECT_CHOICES)
+
+    changes = []
+    for verdict, subject in policy.cells():
+        action = p.get(f"action_{verdict}__{subject}")
+        if not action or not policy.is_allowed(verdict, subject, action):
+            continue
+        previous = before.get((verdict, subject), policy.default_action(verdict, subject))
+        if previous != action:
+            # `row_label` covers the failure row too — no raw slug ever reaches the
+            # operator, in the grid or in the confirmation message.
+            changes.append(
+                f"{policy.row_label(verdict)} on {subjects.get(subject, subject)}: "
+                f"{labels.get(previous, previous)} → {labels.get(action, action)}"
             )
-    messages.success(request, "Escalation policy saved.")
+        ResponsePolicy.objects.update_or_create(
+            verdict=verdict, subject=subject, defaults={"action": action}
+        )
+
+    if changes:
+        detail = "; ".join(changes[:3])
+        if len(changes) > 3:
+            detail += f"; and {len(changes) - 3} more"
+        messages.success(request, f"Response policy updated — {detail}.")
+    else:
+        messages.info(request, "Response policy unchanged.")
     return redirect("dashboard:settings")
 
