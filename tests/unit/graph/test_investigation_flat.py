@@ -9,6 +9,7 @@ choosing the next tool call had never seen a raw event.
 Completion is decided by `interpret` alone. `assess` produces the task's report and
 findings but no longer votes, so it can never send a finished task back around.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -18,13 +19,20 @@ import unittest
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
 os.environ.setdefault("SECRET_KEY", "test")
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 sys.path.insert(0, project_root)
 import django  # noqa: E402
 
 django.setup()
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage  # noqa: E402
+from langchain_core.messages import (
+    AIMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)  # noqa: E402
 
 from agent.runtime.graph import nodes_loop  # noqa: E402
 from agent.runtime.graph.builder import _route_assess, _route_interpret  # noqa: E402
@@ -82,15 +90,20 @@ class CompletionIsInterpretsAloneTest(unittest.TestCase):
         # the task moves on to pivot (or finish when out of budget).
         state = {
             "status": "needs_more_work",
-            "steps": 1, "max_steps": 40,
-            "tool_calls_made": 5, "max_tool_calls": 60,
+            "steps": 1,
+            "max_steps": 40,
+            "tool_calls_made": 5,
+            "max_tool_calls": 60,
         }
         self.assertEqual(_route_assess(state), "pivot")
 
     def test_assess_still_finishes_when_out_of_budget(self):
         state = {
-            "status": "", "steps": 40, "max_steps": 40,
-            "tool_calls_made": 60, "max_tool_calls": 60,
+            "status": "",
+            "steps": 40,
+            "max_steps": 40,
+            "tool_calls_made": 60,
+            "max_tool_calls": 60,
         }
         self.assertEqual(_route_assess(state), "finish")
 
@@ -121,8 +134,12 @@ class SteeringIsTransientTest(unittest.IsolatedAsyncioTestCase):
         # An empty ledger contributes nothing; the live queue/board block still rides
         # along, because it changes every cycle and must not be baked into the anchor.
         state = {
-            "agent_name": "investigation", "task_ledger": {}, "messages": [],
-            "case_id": "~1", "run_id": "r1", "current_task": {"title": "t"},
+            "agent_name": "investigation",
+            "task_ledger": {},
+            "messages": [],
+            "case_id": "~1",
+            "run_id": "r1",
+            "current_task": {"title": "t"},
         }
         steering = await nodes_loop._cycle_steering(state, [])
         self.assertTrue(steering.startswith("# CONTEXT"))
@@ -136,7 +153,9 @@ class SteeringIsTransientTest(unittest.IsolatedAsyncioTestCase):
                 "forbidden_repeats": ["search agent.name=x"],
                 "remaining_gaps": ["no exec evidence"],
             },
-            "messages": [], "case_id": "~1", "run_id": "r1",
+            "messages": [],
+            "case_id": "~1",
+            "run_id": "r1",
             "current_task": {"title": "t"},
         }
         steering = await nodes_loop._cycle_steering(state, [])
@@ -148,9 +167,13 @@ class SteeringIsTransientTest(unittest.IsolatedAsyncioTestCase):
 class RoutingGuardsTest(unittest.TestCase):
     def test_interpret_is_the_only_node_that_concludes_a_task(self):
         grounded = {
-            "agent_name": "investigation", "status": "ready_to_assess",
+            "agent_name": "investigation",
+            "status": "ready_to_assess",
             "messages": [ToolMessage(content="{}", tool_call_id="c", name="search")],
-            "steps": 1, "max_steps": 40, "tool_calls_made": 5, "max_tool_calls": 60,
+            "steps": 1,
+            "max_steps": 40,
+            "tool_calls_made": 5,
+            "max_tool_calls": 60,
         }
         self.assertEqual(_route_interpret(grounded), "assess")
 

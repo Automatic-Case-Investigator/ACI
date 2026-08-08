@@ -12,6 +12,7 @@ tag parser below recognizes a few common shapes:
     "user:backup", "username=svc"            -> user
     "path:/var/spool/cron", "file:/etc/x"    -> path
 """
+
 from __future__ import annotations
 
 import re

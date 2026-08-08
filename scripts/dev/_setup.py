@@ -8,6 +8,7 @@ Import this first from any script in ``scripts/dev/``:
 It configures UTF-8 stdout (Windows cp1252 safety), puts the project root on
 ``sys.path``, points Django at ``aci.settings`` and calls ``django.setup()``.
 """
+
 from __future__ import annotations
 
 import os

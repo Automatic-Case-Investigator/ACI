@@ -6,6 +6,7 @@ resolvers merge the DB rows over the defaults and are read by the runtime
 (`run.py`, `dispatch_trigger`, `apply_response_policy`). All are defensive: a
 missing table (pre-migration / tests) degrades silently to the code defaults.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -32,12 +33,20 @@ def resolve_agent_definition(agent_def):
     budget = dataclasses.replace(
         agent_def.budget,
         max_steps=row.max_steps if row.max_steps else agent_def.budget.max_steps,
-        max_tool_calls=row.max_tool_calls if row.max_tool_calls else agent_def.budget.max_tool_calls,
+        max_tool_calls=(
+            row.max_tool_calls
+            if row.max_tool_calls
+            else agent_def.budget.max_tool_calls
+        ),
     )
     tool_policy = agent_def.tool_policy
     if isinstance(row.tool_policy, list) and row.tool_policy:
         tool_policy = list(row.tool_policy)
-    stream_intent = agent_def.stream_intent if row.stream_intent is None else bool(row.stream_intent)
+    stream_intent = (
+        agent_def.stream_intent
+        if row.stream_intent is None
+        else bool(row.stream_intent)
+    )
     vicinity_window_hours = (
         row.vicinity_window_hours
         if row.vicinity_window_hours

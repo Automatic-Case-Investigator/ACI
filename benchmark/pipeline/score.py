@@ -5,6 +5,7 @@ Walks a runs directory, and for every trial (a dir containing `report.md`) build
 `scoring.run_all`. Writes a `scorecard.json` next to each run and returns the cards.
 Decoupled from the runner so runs can be re-scored without re-running agents.
 """
+
 from __future__ import annotations
 
 import json
@@ -45,7 +46,9 @@ def _detail_columns(detail: dict) -> dict:
 def _iter_raw_session_events(obj: Any):
     if isinstance(obj, dict):
         source = obj.get("_source")
-        if isinstance(source, dict) and (source.get("@timestamp") or source.get("timestamp")):
+        if isinstance(source, dict) and (
+            source.get("@timestamp") or source.get("timestamp")
+        ):
             yield (
                 str(obj.get("_id") or ""),
                 source,
@@ -67,12 +70,17 @@ def _surface_session_text_rows(rows: list[dict[str, str]]) -> str:
             continue
         if kind != "note":
             continue
-        if summary.startswith("completed ") or summary == "interpret: stop_completed (ready_to_assess)":
+        if (
+            summary.startswith("completed ")
+            or summary == "interpret: stop_completed (ready_to_assess)"
+        ):
             parts.append(row.get("detail", "") or "")
     return "\n\n".join(part for part in parts if part)
 
 
-def _materialize_session_evidence_rows(rows: list[dict[str, str]]) -> tuple[str, list[tuple[str, datetime, str]]]:
+def _materialize_session_evidence_rows(
+    rows: list[dict[str, str]],
+) -> tuple[str, list[tuple[str, datetime, str]]]:
     surfaced_text = _surface_session_text_rows(rows)
     raw_events: list[tuple[str, datetime, str]] = []
     for row in rows:
@@ -90,7 +98,9 @@ def _materialize_session_evidence_rows(rows: list[dict[str, str]]) -> tuple[str,
     return surfaced_text, raw_events
 
 
-def _load_session_evidence_from_db(session_id: str, db_path: Path) -> tuple[str, list[tuple[str, datetime, str]]]:
+def _load_session_evidence_from_db(
+    session_id: str, db_path: Path
+) -> tuple[str, list[tuple[str, datetime, str]]]:
     if not session_id or not db_path.exists():
         return "", []
     con = sqlite3.connect(db_path)
@@ -105,7 +115,9 @@ def _load_session_evidence_from_db(session_id: str, db_path: Path) -> tuple[str,
     return _materialize_session_evidence_rows([dict(row) for row in rows])
 
 
-def _load_session_evidence(trial_dir: Path, meta: dict) -> tuple[str, list[tuple[str, datetime, str]]]:
+def _load_session_evidence(
+    trial_dir: Path, meta: dict
+) -> tuple[str, list[tuple[str, datetime, str]]]:
     artifact = _read(trial_dir / "session_evidence.json", {}) or {}
     surfaced_text = str(artifact.get("surfaced_text") or "")
     raw_events: list[tuple[str, datetime, str]] = []
@@ -115,11 +127,13 @@ def _load_session_evidence(trial_dir: Path, meta: dict) -> tuple[str, list[tuple
         timestamp = parse_iso(row.get("timestamp"))
         if timestamp is None:
             continue
-        raw_events.append((
-            str(row.get("event_id") or ""),
-            timestamp,
-            str(row.get("content") or ""),
-        ))
+        raw_events.append(
+            (
+                str(row.get("event_id") or ""),
+                timestamp,
+                str(row.get("content") or ""),
+            )
+        )
     if surfaced_text or raw_events:
         return surfaced_text, raw_events
     session_id = str(meta.get("session_id") or "")
@@ -145,20 +159,37 @@ def metric_rows(card: dict) -> list[dict]:
         value = result.get("value")
         if result.get("kind") == "per_key" and isinstance(value, dict):
             for key, key_value in sorted(value.items()):
-                rows.append({**metric_base, "key": key, "value": _flat_value(key_value), **detail})
+                rows.append(
+                    {
+                        **metric_base,
+                        "key": key,
+                        "value": _flat_value(key_value),
+                        **detail,
+                    }
+                )
         else:
-            rows.append({**metric_base, "key": "", "value": _flat_value(value), **detail})
+            rows.append(
+                {**metric_base, "key": "", "value": _flat_value(value), **detail}
+            )
     return rows
 
 
-def score_trial(trial_dir: Path, spec: ScenarioSpec, metrics: str | list[str] = "all") -> dict:
+def score_trial(
+    trial_dir: Path, spec: ScenarioSpec, metrics: str | list[str] = "all"
+) -> dict:
     report_text = _read(trial_dir / "report.md", "")
     verdict = _read(trial_dir / "verdict.json", {}) or {}
     meta = _read(trial_dir / "meta.json", {}) or {}
     surfaced_text, raw_events = _load_session_evidence(trial_dir, meta)
-    scored_text = report_text if not surfaced_text else f"{report_text}\n\n{surfaced_text}"
+    scored_text = (
+        report_text if not surfaced_text else f"{report_text}\n\n{surfaced_text}"
+    )
     ctx = ScoringContext.build(
-        spec, scored_text, entry_point=meta.get("entry_point", ""), verdict=verdict, meta=meta,
+        spec,
+        scored_text,
+        entry_point=meta.get("entry_point", ""),
+        verdict=verdict,
+        meta=meta,
         raw_events=raw_events,
     )
     results = [asdict(r) for r in scoring.run_all(ctx, metrics)]
@@ -174,11 +205,15 @@ def score_trial(trial_dir: Path, spec: ScenarioSpec, metrics: str | list[str] = 
         "results": results,
     }
     card["rows"] = metric_rows(card)
-    (trial_dir / "scorecard.json").write_text(json.dumps(card, indent=2), encoding="utf-8")
+    (trial_dir / "scorecard.json").write_text(
+        json.dumps(card, indent=2), encoding="utf-8"
+    )
     return card
 
 
-def run(run_dir: str | Path, scenario: str, metrics: str | list[str] = "all") -> list[dict]:
+def run(
+    run_dir: str | Path, scenario: str, metrics: str | list[str] = "all"
+) -> list[dict]:
     spec = ScenarioSpec.from_yaml(scenario_spec_path(scenario))
     run_path = Path(run_dir)
     scenario_path = run_path / scenario

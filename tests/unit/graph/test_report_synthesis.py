@@ -5,6 +5,7 @@ section headers (so a weak model cannot echo the how-to text into the header lin
 deterministic kill-chain phase scaffold for the Phase-by-Phase section. See the Report
 Readability refactor and project_siem_analyst_loop memory.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -13,7 +14,9 @@ import sys
 import unittest
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 sys.path.insert(0, project_root)
 import django  # noqa: E402
 
@@ -21,7 +24,10 @@ django.setup()
 
 from langchain_core.messages import AIMessage  # noqa: E402
 
-from agent.runtime.graph.synthesis import _phase_scaffold, _synthesize_analyst_report  # noqa: E402
+from agent.runtime.graph.synthesis import (
+    _phase_scaffold,
+    _synthesize_analyst_report,
+)  # noqa: E402
 
 
 def _run(coro):
@@ -58,17 +64,35 @@ class _CapturingModel:
 class ReportPromptStructureTest(unittest.TestCase):
     def _prompt(self) -> str:
         model = _CapturingModel()
-        state = {"case_id": "~c", "question": "what happened?", "agent_name": "investigation"}
-        _run(_synthesize_analyst_report(
-            model, state, key_findings=["- a finding"], facts=[], hypotheses=[],
-            completed=[], report_guardrails="- floor", phase_scaffold="- Execution: EVIDENCE PRESENT",
-        ))
+        state = {
+            "case_id": "~c",
+            "question": "what happened?",
+            "agent_name": "investigation",
+        }
+        _run(
+            _synthesize_analyst_report(
+                model,
+                state,
+                key_findings=["- a finding"],
+                facts=[],
+                hypotheses=[],
+                completed=[],
+                report_guardrails="- floor",
+                phase_scaffold="- Execution: EVIDENCE PRESENT",
+            )
+        )
         return model.prompt
 
     def test_prompt_lists_the_six_bare_altitude_headers(self):
         p = self._prompt()
-        for header in ("## Verdict", "## Executive Summary", "## Confirmed Timeline",
-                       "## Phase-by-Phase Findings", "## Open Gaps", "## Recommended Actions"):
+        for header in (
+            "## Verdict",
+            "## Executive Summary",
+            "## Confirmed Timeline",
+            "## Phase-by-Phase Findings",
+            "## Open Gaps",
+            "## Recommended Actions",
+        ):
             self.assertIn(header, p)
         # The old inline-instruction header form must be gone (the echo bug).
         self.assertNotIn("## Executive Summary — 2-4 sentences", p)

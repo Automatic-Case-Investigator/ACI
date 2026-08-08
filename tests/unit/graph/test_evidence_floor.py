@@ -11,6 +11,7 @@ reproduces the live failure on session e235b354 — tasks that called only `get_
 `get_board` / `search_patterns` / `ls` and were wrongly allowed to conclude — and pins
 the orientation-vs-evidence boundary so it cannot regress.
 """
+
 from __future__ import annotations
 
 import os
@@ -19,7 +20,9 @@ import unittest
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
 os.environ.setdefault("SECRET_KEY", "test")
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 sys.path.insert(0, project_root)
 import django  # noqa: E402
 
@@ -39,15 +42,29 @@ class CountEvidenceQueriesTest(unittest.TestCase):
     def test_orientation_only_history_counts_zero(self):
         # The exact orientation set the live zero-query tasks used.
         msgs = [
-            _tool("get_case"), _tool("list_case_alerts"), _tool("get_board"),
-            _tool("list_tasks"), _tool("search_patterns"), _tool("search_feedback"),
-            _tool("ls"), _tool("cat"), _tool("whoami"), _tool("home"),
+            _tool("get_case"),
+            _tool("list_case_alerts"),
+            _tool("get_board"),
+            _tool("list_tasks"),
+            _tool("search_patterns"),
+            _tool("search_feedback"),
+            _tool("ls"),
+            _tool("cat"),
+            _tool("whoami"),
+            _tool("home"),
         ]
         self.assertEqual(_count_evidence_queries(msgs), 0)
 
     def test_each_siem_tool_counts(self):
-        for name in ("search", "search_keyword", "profile_field", "get_event_volume",
-                     "correlate_entity", "correlate_techniques", "get_event"):
+        for name in (
+            "search",
+            "search_keyword",
+            "profile_field",
+            "get_event_volume",
+            "correlate_entity",
+            "correlate_techniques",
+            "get_event",
+        ):
             self.assertEqual(_count_evidence_queries([_tool(name)]), 1, name)
 
     def test_errored_evidence_result_is_not_credited(self):
@@ -58,7 +75,9 @@ class CountEvidenceQueriesTest(unittest.TestCase):
 
     def test_mixed_history_counts_only_evidence(self):
         msgs = [
-            _tool("get_case"), _tool("search_patterns"), _tool("ls"),
+            _tool("get_case"),
+            _tool("search_patterns"),
+            _tool("ls"),
             _tool("get_event_volume", '{"total": 100}'),
             _tool("search", '{"total": 5, "events": [{"_id": "e1"}]}'),
         ]
@@ -73,8 +92,10 @@ class RouteInterpretEvidenceFloorTest(unittest.TestCase):
             agent_name="investigation",
             status="ready_to_assess",
             messages=[_tool("search", '{"total": 3}')],
-            steps=5, max_steps=40,
-            tool_calls_made=10, max_tool_calls=60,
+            steps=5,
+            max_steps=40,
+            tool_calls_made=10,
+            max_tool_calls=60,
         )
         base.update(over)
         return base
@@ -92,7 +113,9 @@ class RouteInterpretEvidenceFloorTest(unittest.TestCase):
 
     def test_the_floor_never_initiates_completion(self):
         # Evidence present but interpret has NOT voted to conclude — stay in the loop.
-        self.assertEqual(_route_interpret(self._state(status="needs_more_work")), "think")
+        self.assertEqual(
+            _route_interpret(self._state(status="needs_more_work")), "think"
+        )
 
     def test_budget_exhaustion_still_wins_over_the_floor(self):
         # A run out of budget must finish, not loop back for evidence it cannot gather.

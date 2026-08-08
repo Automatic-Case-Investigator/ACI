@@ -7,7 +7,9 @@ from ...models import AgentRun
 log = logging.getLogger(__name__)
 
 
-def apply_specialist_run_to_session(session, run: AgentRun, *, reason: str = "updated") -> str | None:
+def apply_specialist_run_to_session(
+    session, run: AgentRun, *, reason: str = "updated"
+) -> str | None:
     """Mutate orchestrator session state from a completed specialist run.
 
     Returns the analyst-facing update text when the run should be surfaced as an
@@ -36,8 +38,12 @@ def apply_specialist_run_to_session(session, run: AgentRun, *, reason: str = "up
         )
 
     if run.agent_name == "triage":
-        session.last_triage_src_entity_id = run.case_id or session.last_triage_src_entity_id
-        session.last_triage_source_entity_type = source_entity_type or session.source_entity_type
+        session.last_triage_src_entity_id = (
+            run.case_id or session.last_triage_src_entity_id
+        )
+        session.last_triage_source_entity_type = (
+            source_entity_type or session.source_entity_type
+        )
         session.last_triage_run_id = str(run.id)
         session.last_triage_status = run.status
         if isinstance(run.verdict, dict):
@@ -56,7 +62,9 @@ def apply_specialist_run_to_session(session, run: AgentRun, *, reason: str = "up
     return None
 
 
-def transcript_entry_for_answer(answer: str, report_text: str = "", *, limit: int = 3000) -> str:
+def transcript_entry_for_answer(
+    answer: str, report_text: str = "", *, limit: int = 3000
+) -> str:
     if len(report_text or "") > limit:
         return (
             answer[:limit]
@@ -65,7 +73,9 @@ def transcript_entry_for_answer(answer: str, report_text: str = "", *, limit: in
     return answer
 
 
-async def propagate_verdict_to_current_session(verdict: dict | None, *, current_session_id: str | None) -> None:
+async def propagate_verdict_to_current_session(
+    verdict: dict | None, *, current_session_id: str | None
+) -> None:
     """Copy a durable specialist verdict onto the session row counted by dashboard stats."""
     if not isinstance(verdict, dict) or not current_session_id:
         return
@@ -74,4 +84,6 @@ async def propagate_verdict_to_current_session(verdict: dict | None, *, current_
         session_run.verdict = verdict
         await session_run.asave(update_fields=["verdict", "updated_at"])
     except Exception as exc:
-        log.warning("Could not propagate verdict to session %s: %s", current_session_id, exc)
+        log.warning(
+            "Could not propagate verdict to session %s: %s", current_session_id, exc
+        )

@@ -1,4 +1,5 @@
 """Deterministic artifact extraction from retrieved event payloads."""
+
 from __future__ import annotations
 
 import base64
@@ -65,7 +66,9 @@ _EVENT_ID_KEYS = ("_id", "event.id", "event_id")
 # Absolute file paths embedded in command strings (e.g. /var/spool/cron/crontabs/user).
 _PATH_RE = re.compile(r"/(?:[\w.+-]+/)+[\w.+-]+")
 # Bare IPv4/IPv6 literals embedded in command strings.
-_IP_IN_TEXT_RE = re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b|\b(?:[0-9a-fA-F]{1,4}:){2,7}[0-9a-fA-F]{1,4}\b")
+_IP_IN_TEXT_RE = re.compile(
+    r"\b\d{1,3}(?:\.\d{1,3}){3}\b|\b(?:[0-9a-fA-F]{1,4}:){2,7}[0-9a-fA-F]{1,4}\b"
+)
 # Cap how many embedded paths/IPs we mine from a single command to avoid flooding.
 _MAX_EMBEDDED_PER_COMMAND = 8
 _MAX_COMMAND_LEN = 512
@@ -184,7 +187,9 @@ def _looks_like_command(text: str) -> bool:
             arr = json.loads(stripped)
         except (TypeError, ValueError):
             return False
-        return bool(arr) and isinstance(arr, list) and all(isinstance(x, str) for x in arr)
+        return (
+            bool(arr) and isinstance(arr, list) and all(isinstance(x, str) for x in arr)
+        )
     return False
 
 
@@ -238,7 +243,9 @@ def _normalize(kind: str, value) -> str | None:
             return None
     if kind in _HASH_LENGTHS:
         compact = text.lower()
-        if len(compact) != _HASH_LENGTHS[kind] or not all(c in "0123456789abcdef" for c in compact):
+        if len(compact) != _HASH_LENGTHS[kind] or not all(
+            c in "0123456789abcdef" for c in compact
+        ):
             return None
         return compact
     if kind == "domain":
@@ -424,14 +431,18 @@ def extract_artifacts(raw: str) -> list[Artifact]:
                     if is_decoded:
                         base = f"[decoded] {base}"
                     for artifact in _mine_command(base, source):
-                        found.setdefault((artifact.kind, artifact.value.lower()), artifact)
+                        found.setdefault(
+                            (artifact.kind, artifact.value.lower()), artifact
+                        )
             kind = _artifact_kind(key)
             if not kind:
                 continue
             normalized = _normalize(kind, value)
             if normalized is None:
                 continue
-            found.setdefault((kind, normalized.lower()), Artifact(kind, normalized, source))
+            found.setdefault(
+                (kind, normalized.lower()), Artifact(kind, normalized, source)
+            )
     return list(found.values())
 
 

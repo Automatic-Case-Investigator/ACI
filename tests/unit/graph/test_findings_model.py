@@ -3,6 +3,7 @@
 Covers verdict parsing, fail-open behavior, classification → verified/rejected split,
 and the agent-facing feedback rendering.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -12,7 +13,9 @@ import sys
 import unittest
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 sys.path.insert(0, project_root)
 import django  # noqa: E402
 
@@ -40,6 +43,7 @@ class _StubModel:
 
         class _R:
             content = self._content
+
         return _R()
 
 
@@ -66,24 +70,39 @@ class ParseVerdictsTest(unittest.TestCase):
 
 class ToVerdictTest(unittest.TestCase):
     def test_confirmed_grounded_novel_is_verified(self):
-        v = _to_verdict({"text": "evt-1 shell", "status": "confirmed", "grounded": True, "novel": True})
+        v = _to_verdict(
+            {
+                "text": "evt-1 shell",
+                "status": "confirmed",
+                "grounded": True,
+                "novel": True,
+            }
+        )
         self.assertTrue(v.is_verified)
 
     def test_confirmed_but_not_grounded_is_not_verified(self):
-        v = _to_verdict({"text": "x", "status": "confirmed", "grounded": False, "novel": True})
+        v = _to_verdict(
+            {"text": "x", "status": "confirmed", "grounded": False, "novel": True}
+        )
         self.assertFalse(v.is_verified)
 
     def test_unknown_status_demoted_to_speculative(self):
-        v = _to_verdict({"text": "x", "status": "totally-made-up", "grounded": True, "novel": True})
+        v = _to_verdict(
+            {"text": "x", "status": "totally-made-up", "grounded": True, "novel": True}
+        )
         self.assertEqual(v.status, "speculative")
         self.assertFalse(v.is_verified)
 
 
 class VerifyFindingsModelTest(unittest.TestCase):
     def _kwargs(self, **over):
-        base = dict(findings_section="- evt-1 confirmed reverse shell.",
-                    evidence_digest="Event ids retrieved this task: evt-1",
-                    board_facts=[], current_task={"title": "t"}, agent_name="investigation")
+        base = dict(
+            findings_section="- evt-1 confirmed reverse shell.",
+            evidence_digest="Event ids retrieved this task: evt-1",
+            board_facts=[],
+            current_task={"title": "t"},
+            agent_name="investigation",
+        )
         base.update(over)
         return base
 
@@ -91,22 +110,51 @@ class VerifyFindingsModelTest(unittest.TestCase):
         self.assertIsNone(_run(verify_findings_model(None, **self._kwargs())))
 
     def test_empty_findings_returns_empty_verification_no_call(self):
-        v = _run(verify_findings_model(_StubModel("[]"), **self._kwargs(findings_section="")))
+        v = _run(
+            verify_findings_model(_StubModel("[]"), **self._kwargs(findings_section=""))
+        )
         self.assertIsNotNone(v)
         self.assertEqual(v.verified_count, 0)
 
     def test_exception_fails_open(self):
-        self.assertIsNone(_run(verify_findings_model(_StubModel(exc=RuntimeError("boom")), **self._kwargs())))
+        self.assertIsNone(
+            _run(
+                verify_findings_model(
+                    _StubModel(exc=RuntimeError("boom")), **self._kwargs()
+                )
+            )
+        )
 
     def test_unparseable_fails_open(self):
-        self.assertIsNone(_run(verify_findings_model(_StubModel("garbage"), **self._kwargs())))
+        self.assertIsNone(
+            _run(verify_findings_model(_StubModel("garbage"), **self._kwargs()))
+        )
 
     def test_classification_split(self):
-        content = json.dumps([
-            {"text": "evt-1 webshell call", "status": "confirmed", "grounded": True, "novel": True},
-            {"text": "scan from 1.2.3.4", "status": "restated", "grounded": True, "novel": False, "reason": "already a board fact"},
-            {"text": "phopkins escalated", "status": "ungrounded", "grounded": False, "novel": True, "reason": "event not retrieved"},
-        ])
+        content = json.dumps(
+            [
+                {
+                    "text": "evt-1 webshell call",
+                    "status": "confirmed",
+                    "grounded": True,
+                    "novel": True,
+                },
+                {
+                    "text": "scan from 1.2.3.4",
+                    "status": "restated",
+                    "grounded": True,
+                    "novel": False,
+                    "reason": "already a board fact",
+                },
+                {
+                    "text": "phopkins escalated",
+                    "status": "ungrounded",
+                    "grounded": False,
+                    "novel": True,
+                    "reason": "event not retrieved",
+                },
+            ]
+        )
         v = _run(verify_findings_model(_StubModel(content), **self._kwargs()))
         self.assertEqual(v.verified_count, 1)
         self.assertEqual(len(v.rejected), 2)
@@ -117,8 +165,16 @@ class FeedbackAndStateTest(unittest.TestCase):
         return FindingsVerification(
             verified=[FindingVerdict("evt-1 webshell", "confirmed", True, True, "")],
             rejected=[
-                FindingVerdict("scan from 1.2.3.4", "restated", True, False, "already a board fact"),
-                FindingVerdict("phopkins escalated", "ungrounded", False, True, "event not in retrieved evidence"),
+                FindingVerdict(
+                    "scan from 1.2.3.4", "restated", True, False, "already a board fact"
+                ),
+                FindingVerdict(
+                    "phopkins escalated",
+                    "ungrounded",
+                    False,
+                    True,
+                    "event not in retrieved evidence",
+                ),
             ],
         )
 
@@ -129,8 +185,13 @@ class FeedbackAndStateTest(unittest.TestCase):
         self.assertIn("1 verified finding", fb)
 
     def test_feedback_caps_items(self):
-        rejected = [FindingVerdict(f"b{i}", "speculative", False, True, "no cite") for i in range(10)]
-        fb = FindingsVerification(verified=[], rejected=rejected).to_feedback(max_items=3)
+        rejected = [
+            FindingVerdict(f"b{i}", "speculative", False, True, "no cite")
+            for i in range(10)
+        ]
+        fb = FindingsVerification(verified=[], rejected=rejected).to_feedback(
+            max_items=3
+        )
         self.assertIn("more rejected bullet", fb)
         self.assertEqual(fb.count("REJECTED"), 3)
 

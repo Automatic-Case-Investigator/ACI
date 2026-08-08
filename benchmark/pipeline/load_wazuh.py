@@ -22,6 +22,7 @@ Notes that shape the metric/teardown design:
     (from the scenario's `host_map`, e.g. fox.yaml's `27`/`1`/`18`) rather than dropping
     the index outright.
 """
+
 from __future__ import annotations
 
 import os
@@ -34,7 +35,6 @@ from pathlib import Path
 
 from ..progress import Progress
 
-
 _ELASTICDUMP_SENT_RE = re.compile(r"\bsent\s+(\d+)\s+objects?\b", re.IGNORECASE)
 
 
@@ -45,23 +45,33 @@ def _elasticdump_command(args: list[str]) -> list[str]:
         or shutil.which("elasticdump.bat")
     )
     if exe is None:
-        raise RuntimeError("elasticdump not found on PATH; install with `npm install -g elasticdump`")
+        raise RuntimeError(
+            "elasticdump not found on PATH; install with `npm install -g elasticdump`"
+        )
     if os.name == "nt" and os.path.splitext(exe)[1].lower() in {".cmd", ".bat"}:
         return [os.environ.get("COMSPEC", "cmd.exe"), "/c", exe, *args]
     return [exe, *args]
 
 
-def run(scenario: str, preprocessed_dir: str | Path, output_url: str,
-        progress: bool | None = None) -> dict:
+def run(
+    scenario: str,
+    preprocessed_dir: str | Path,
+    output_url: str,
+    progress: bool | None = None,
+) -> dict:
     infile = Path(preprocessed_dir) / f"{scenario}_wazuh.json"
     if not infile.exists():
         raise FileNotFoundError(infile)
-    cmd = _elasticdump_command(["--type=data", f"--input={infile}", f"--output={output_url}"])
+    cmd = _elasticdump_command(
+        ["--type=data", f"--input={infile}", f"--output={output_url}"]
+    )
     total = sum(1 for _ in infile.open("r", encoding="utf-8"))
     bar = Progress(f"load-wazuh {scenario}", total, enabled=progress)
     stdout_tail: deque[str] = deque(maxlen=80)
     sent = 0
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    proc = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+    )
     try:
         assert proc.stdout is not None
         for line in proc.stdout:
@@ -76,8 +86,13 @@ def run(scenario: str, preprocessed_dir: str | Path, output_url: str,
     stdout = "".join(stdout_tail)
     if returncode != 0:
         raise RuntimeError(f"elasticdump failed ({returncode}): {stdout[-2000:]}")
-    return {"scenario": scenario, "input": str(infile), "stdout_tail": stdout[-2000:],
-            "events": total, "sent": sent}
+    return {
+        "scenario": scenario,
+        "input": str(infile),
+        "stdout_tail": stdout[-2000:],
+        "events": total,
+        "sent": sent,
+    }
 
 
 def _retry_after_seconds(response) -> float | None:
@@ -90,10 +105,17 @@ def _retry_after_seconds(response) -> float | None:
         return None
 
 
-def teardown(base_url: str, scenario: str, index_pattern: str = "wazuh-alerts-*",
-             max_retries: int = 5, requests_per_second: int = -1,
-             scroll_size: int = 500, slices: str | int = "auto",
-             progress: bool | None = None, poll_interval: float = 1.0) -> dict:
+def teardown(
+    base_url: str,
+    scenario: str,
+    index_pattern: str = "wazuh-alerts-*",
+    max_retries: int = 5,
+    requests_per_second: int = -1,
+    scroll_size: int = 500,
+    slices: str | int = "auto",
+    progress: bool | None = None,
+    poll_interval: float = 1.0,
+) -> dict:
     """Delete only this scenario's events (by `agent.id`, from its host_map), scoped to
     `index_pattern`. Falls back to a whole-index delete (with a warning) if the scenario
     has no host_map to scope by. Returns the delete_by_query response / status."""
@@ -108,8 +130,11 @@ def teardown(base_url: str, scenario: str, index_pattern: str = "wazuh-alerts-*"
 
     if not agent_ids:
         r = httpx.delete(f"{base}/{index_pattern}", verify=False, timeout=60)
-        return {"mode": "whole_index_delete", "status_code": r.status_code, "warning":
-                f"scenario {scenario!r} has no host_map; deleted ALL of {index_pattern}"}
+        return {
+            "mode": "whole_index_delete",
+            "status_code": r.status_code,
+            "warning": f"scenario {scenario!r} has no host_map; deleted ALL of {index_pattern}",
+        }
 
     # ignore_unavailable / allow_no_indices: a teardown of not-yet-loaded data (no matching
     # index) is a success, not a 404 — so the "clean up first" step is safe on a fresh env.
@@ -158,10 +183,17 @@ def teardown(base_url: str, scenario: str, index_pattern: str = "wazuh-alerts-*"
     body = r.json()
     task_id = body.get("task")
     if not task_id:
-        return {"mode": "delete_by_query", "scenario": scenario, "agent_ids": agent_ids,
-                "deleted": body.get("deleted"), "failures": body.get("failures"),
-                "status_code": r.status_code, "attempts": attempts,
-                "requests_per_second": requests_per_second, "scroll_size": scroll_size}
+        return {
+            "mode": "delete_by_query",
+            "scenario": scenario,
+            "agent_ids": agent_ids,
+            "deleted": body.get("deleted"),
+            "failures": body.get("failures"),
+            "status_code": r.status_code,
+            "attempts": attempts,
+            "requests_per_second": requests_per_second,
+            "scroll_size": scroll_size,
+        }
 
     bar = Progress(f"teardown-wazuh {scenario}", enabled=progress)
     task_attempts = 0

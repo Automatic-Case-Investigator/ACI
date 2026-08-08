@@ -1,4 +1,5 @@
 """SQLite-backed TI result cache, keyed by (provider, kind, value, case_id)."""
+
 from __future__ import annotations
 
 import json

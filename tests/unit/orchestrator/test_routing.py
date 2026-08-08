@@ -5,7 +5,9 @@ import sys
 import tempfile
 import unittest
 
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, project_root)
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
 os.environ["SECRET_KEY"] = "test"
@@ -13,6 +15,7 @@ os.environ["TASKQUEUE_DB_PATH"] = tempfile.mktemp(suffix=".db")
 os.environ["BOARD_DB_PATH"] = tempfile.mktemp(suffix=".db")
 
 import django
+
 django.setup()
 
 from agent.runtime.orchestrator.driver import _triage_routing_target

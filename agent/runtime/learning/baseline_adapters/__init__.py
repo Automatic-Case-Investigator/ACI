@@ -3,6 +3,7 @@
 Importing this package registers the built-in adapters. To add a SIEM backend,
 create a module here that calls `register_adapter(...)` and import it below.
 """
+
 from . import wazuh  # noqa: F401  (registers the "wazuh" adapter)
 
 from .base import BaselineSIEMAdapter, FeatureResult

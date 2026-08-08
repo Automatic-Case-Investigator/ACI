@@ -1,4 +1,5 @@
 """Management command: compute behavioral baselines from Wazuh event data."""
+
 from django.core.management.base import BaseCommand, CommandError
 
 
@@ -37,5 +38,7 @@ class Command(BaseCommand):
             raise CommandError(f"Baseline computation failed: {exc}") from exc
 
         self.stdout.write(
-            self.style.SUCCESS(f"Done: {written} feature(s) written, {skipped} skipped.")
+            self.style.SUCCESS(
+                f"Done: {written} feature(s) written, {skipped} skipped."
+            )
         )

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from contextvars import ContextVar
 
-
 _AVFS_AGENT_ID: ContextVar[str | None] = ContextVar("avfs_agent_id", default=None)
 
 

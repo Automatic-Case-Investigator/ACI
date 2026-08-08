@@ -19,18 +19,28 @@ from ...models import AgentRun
 from ..infra.avfs import reports_dir
 from ..engine.dispatch import dispatch_run
 from ..graph import (
-    _compact_history, _extract_input_tokens, _invoke_bound_model, _normalize,
-    _sanitize_history, _sanitize_message, _should_compact, _tmap,
+    _compact_history,
+    _extract_input_tokens,
+    _invoke_bound_model,
+    _normalize,
+    _sanitize_history,
+    _sanitize_message,
+    _should_compact,
+    _tmap,
 )
 from ..analysis.intent import generate_public_intent
 from ..infra.logbus import (
-    current_session, emit, get_run_issues, summarize_args, summarize_result,
-    summarize_think, update_context_usage,
+    current_session,
+    emit,
+    get_run_issues,
+    summarize_args,
+    summarize_result,
+    summarize_think,
+    update_context_usage,
 )
 from ..engine.mcp_client import build_mcp_client, load_mcp_prompt_guidance
 from ..engine.model_client import build_model
 from ..config.prompts import compose_system_prompt
-
 
 
 def _serialize_messages(messages: list) -> list[dict]:
@@ -44,27 +54,39 @@ def _serialize_messages(messages: list) -> list[dict]:
         elif t == "system":
             out.append({"type": "system", "content": c})
         elif t == "ai":
-            out.append({
-                "type": "ai",
-                "content": c,
-                "tool_calls": getattr(msg, "tool_calls", []) or [],
-                "additional_kwargs": dict(getattr(msg, "additional_kwargs", {}) or {}),
-            })
+            out.append(
+                {
+                    "type": "ai",
+                    "content": c,
+                    "tool_calls": getattr(msg, "tool_calls", []) or [],
+                    "additional_kwargs": dict(
+                        getattr(msg, "additional_kwargs", {}) or {}
+                    ),
+                }
+            )
         elif t == "tool":
-            out.append({
-                "type": "tool",
-                "content": c,
-                "tool_call_id": getattr(msg, "tool_call_id", "") or "",
-                "name": getattr(msg, "name", "") or "",
-            })
+            out.append(
+                {
+                    "type": "tool",
+                    "content": c,
+                    "tool_call_id": getattr(msg, "tool_call_id", "") or "",
+                    "name": getattr(msg, "name", "") or "",
+                }
+            )
     return out
 
 
 def _deserialize_messages(data: list[dict]) -> list:
     """Restore LangChain message objects from serialized dicts."""
-    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+    from langchain_core.messages import (
+        AIMessage,
+        HumanMessage,
+        SystemMessage,
+        ToolMessage,
+    )
+
     out = []
-    for d in (data or []):
+    for d in data or []:
         t = d.get("type", "")
         c = d.get("content", "")
         try:
@@ -73,17 +95,21 @@ def _deserialize_messages(data: list[dict]) -> list:
             elif t == "system":
                 out.append(SystemMessage(content=c))
             elif t == "ai":
-                out.append(AIMessage(
-                    content=c,
-                    tool_calls=d.get("tool_calls") or [],
-                    additional_kwargs=d.get("additional_kwargs") or {},
-                ))
+                out.append(
+                    AIMessage(
+                        content=c,
+                        tool_calls=d.get("tool_calls") or [],
+                        additional_kwargs=d.get("additional_kwargs") or {},
+                    )
+                )
             elif t == "tool":
-                out.append(ToolMessage(
-                    content=c,
-                    tool_call_id=d.get("tool_call_id", ""),
-                    name=d.get("name", ""),
-                ))
+                out.append(
+                    ToolMessage(
+                        content=c,
+                        tool_call_id=d.get("tool_call_id", ""),
+                        name=d.get("name", ""),
+                    )
+                )
         except Exception:
             pass
     return out
@@ -97,9 +123,9 @@ def render_conversation(messages: list) -> str:
     orchestrator plumbing, not analyst dialogue.
     """
     lines: list[str] = []
-    for msg in (messages or []):
+    for msg in messages or []:
         t = getattr(msg, "type", None)
-        c = (getattr(msg, "content", "") or "")
+        c = getattr(msg, "content", "") or ""
         if not isinstance(c, str):
             c = str(c)
         c = c.strip()
@@ -182,16 +208,19 @@ async def _summarize_conversation(text: str) -> str:
     """
     try:
         model = await build_model()
-        resp = await model.ainvoke([
-            HumanMessage(content=(
-                "Concisely summarise the analyst conversation below. Preserve: case IDs, "
-                "host names, IPs, key findings, tool results still relevant, and any "
-                "context established so far. This replaces the prior history.\n\n"
-                f"{text}"
-            )),
-        ])
+        resp = await model.ainvoke(
+            [
+                HumanMessage(
+                    content=(
+                        "Concisely summarise the analyst conversation below. Preserve: case IDs, "
+                        "host names, IPs, key findings, tool results still relevant, and any "
+                        "context established so far. This replaces the prior history.\n\n"
+                        f"{text}"
+                    )
+                ),
+            ]
+        )
         summary = (getattr(resp, "content", "") or "").strip()
         return summary or text
     except Exception:
         return text
-

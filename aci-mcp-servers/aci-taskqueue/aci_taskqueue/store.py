@@ -3,6 +3,7 @@
 All operations use the standard library sqlite3 module. The database is
 created on first use at the path set by TASKQUEUE_DB_PATH.
 """
+
 from __future__ import annotations
 
 import json
@@ -14,10 +15,21 @@ from datetime import datetime, timezone
 from typing import Any
 
 _lock = threading.Lock()
-AGENT_VISIBLE_TASK_FIELDS = frozenset({
-    "id", "case_id", "run_id", "agent_name", "title", "description",
-    "priority", "status", "origin", "summary", "avfs_paths",
-})
+AGENT_VISIBLE_TASK_FIELDS = frozenset(
+    {
+        "id",
+        "case_id",
+        "run_id",
+        "agent_name",
+        "title",
+        "description",
+        "priority",
+        "status",
+        "origin",
+        "summary",
+        "avfs_paths",
+    }
+)
 
 
 def _now() -> str:
@@ -26,9 +38,12 @@ def _now() -> str:
 
 from contextlib import contextmanager
 
+
 @contextmanager
 def _conn():
-    conn = sqlite3.connect(os.environ.get("TASKQUEUE_DB_PATH", "taskqueue.db"), check_same_thread=False)
+    conn = sqlite3.connect(
+        os.environ.get("TASKQUEUE_DB_PATH", "taskqueue.db"), check_same_thread=False
+    )
     conn.row_factory = sqlite3.Row
     # The DB is shared between this process and the agent's MCP subprocess; wait
     # rather than fail immediately when the other side holds a write lock.
@@ -63,7 +78,9 @@ def init_db() -> None:
                 claimed_at TEXT
             )
         """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_queue ON tasks(case_id, run_id, agent_name, status, priority)")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_queue ON tasks(case_id, run_id, agent_name, status, priority)"
+        )
 
 
 def create_task(
@@ -83,7 +100,18 @@ def create_task(
                (id, case_id, run_id, agent_name, title, description,
                 priority, status, origin, created_at, updated_at)
                VALUES (?,?,?,?,?,?,?,'pending',?,?,?)""",
-            (task_id, case_id, run_id, agent_name, title, description, priority, origin, now, now),
+            (
+                task_id,
+                case_id,
+                run_id,
+                agent_name,
+                title,
+                description,
+                priority,
+                origin,
+                now,
+                now,
+            ),
         )
     return get_task(task_id)
 
@@ -157,7 +185,9 @@ def update_task(task_id: str, **fields) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
-def complete_task(task_id: str, summary: str, avfs_paths: list[str] | None = None) -> dict[str, Any] | None:
+def complete_task(
+    task_id: str, summary: str, avfs_paths: list[str] | None = None
+) -> dict[str, Any] | None:
     summary = (summary or "").strip()
     if not summary:
         raise ValueError("A non-empty completion summary is required")
@@ -188,7 +218,9 @@ def delete_task(task_id: str) -> bool:
         return cur.rowcount > 0
 
 
-def reorder(case_id: str, run_id: str, agent_name: str, ordered_ids: list[str]) -> list[dict[str, Any]]:
+def reorder(
+    case_id: str, run_id: str, agent_name: str, ordered_ids: list[str]
+) -> list[dict[str, Any]]:
     """Rewrite task priorities so the queue follows `ordered_ids`.
 
     `claim_next`/`list_tasks` order by priority DESC then created_at ASC, so to impose an

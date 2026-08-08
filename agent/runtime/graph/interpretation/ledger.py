@@ -1,10 +1,18 @@
 """Ledger field coercion + merge helpers: the durable per-task memory transforms."""
+
 from __future__ import annotations
 
 import json
 import re
 
-from ._const import _CONFIRMED_FINDINGS_KEEP, _DEFAULT_STOP_CONDITION, _JSON_OBJECT_RE, _QUERY_TRIALS_KEEP, _SECTION_LABELS, _STOP_STATE_RE
+from ._const import (
+    _CONFIRMED_FINDINGS_KEEP,
+    _DEFAULT_STOP_CONDITION,
+    _JSON_OBJECT_RE,
+    _QUERY_TRIALS_KEEP,
+    _SECTION_LABELS,
+    _STOP_STATE_RE,
+)
 
 
 def _default_ledger(task: dict | None) -> dict:
@@ -36,6 +44,8 @@ def _default_ledger(task: dict | None) -> dict:
         "why_current_pivot_failed": "",
         "query_trials": [],
     }
+
+
 def _parse_json_object(text: str) -> dict | None:
     raw = (text or "").strip()
     if not raw:
@@ -48,6 +58,8 @@ def _parse_json_object(text: str) -> dict | None:
     except (TypeError, ValueError):
         return None
     return obj if isinstance(obj, dict) else None
+
+
 def _extract_section(text: str, labels: tuple[str, ...]) -> str:
     lines = str(text or "").splitlines()
     label_positions: list[int] = []
@@ -61,9 +73,7 @@ def _extract_section(text: str, labels: tuple[str, ...]) -> str:
     start = label_positions[0] + 1
     end = len(lines)
     all_labels = {
-        label.lower()
-        for group in _SECTION_LABELS.values()
-        for label in group
+        label.lower() for group in _SECTION_LABELS.values() for label in group
     }
     for idx in range(start, len(lines)):
         lowered_line = lines[idx].strip().lower().strip(":")
@@ -72,6 +82,8 @@ def _extract_section(text: str, labels: tuple[str, ...]) -> str:
             break
     content = "\n".join(lines[start:end]).strip()
     return " ".join(content.split())[:1200]
+
+
 def _parse_interpretation_text(text: str) -> dict | None:
     raw = str(text or "").strip()
     if not raw:
@@ -94,6 +106,8 @@ def _parse_interpretation_text(text: str) -> dict | None:
     if advance:
         out["advanced_objective"] = advance.startswith("y") or "material" in advance
     return out
+
+
 def _coerce_string_list(value, *, limit: int = 12) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -103,17 +117,25 @@ def _coerce_string_list(value, *, limit: int = 12) -> list[str]:
         if text:
             out.append(text[:500])
     return out[:limit]
+
+
 def _merge_string_lists(existing, new, *, limit: int = 12) -> list[str]:
     merged: list[str] = []
     seen: set[str] = set()
-    for item in _coerce_string_list(existing, limit=limit) + _coerce_string_list(new, limit=limit):
+    for item in _coerce_string_list(existing, limit=limit) + _coerce_string_list(
+        new, limit=limit
+    ):
         key = item.lower()
         if key in seen:
             continue
         seen.add(key)
         merged.append(item)
     return merged[:limit]
-def _coerce_confirmed_findings(value, *, limit: int = _CONFIRMED_FINDINGS_KEEP) -> list[dict]:
+
+
+def _coerce_confirmed_findings(
+    value, *, limit: int = _CONFIRMED_FINDINGS_KEEP
+) -> list[dict]:
     if not isinstance(value, list):
         return []
     out: list[dict] = []
@@ -122,15 +144,17 @@ def _coerce_confirmed_findings(value, *, limit: int = _CONFIRMED_FINDINGS_KEEP) 
             summary = " ".join(item.split())
             if not summary:
                 continue
-            out.append({
-                "summary": summary[:800],
-                "event_ids": [],
-                "time_range": {},
-                "entities": [],
-                "kind": "confirmed_evidence",
-                "confidence": "medium",
-                "status": "confirmed",
-            })
+            out.append(
+                {
+                    "summary": summary[:800],
+                    "event_ids": [],
+                    "time_range": {},
+                    "entities": [],
+                    "kind": "confirmed_evidence",
+                    "confidence": "medium",
+                    "status": "confirmed",
+                }
+            )
             continue
         if not isinstance(item, dict):
             continue
@@ -139,36 +163,56 @@ def _coerce_confirmed_findings(value, *, limit: int = _CONFIRMED_FINDINGS_KEEP) 
             continue
         event_ids = _coerce_string_list(item.get("event_ids"), limit=8)
         entities = _coerce_string_list(item.get("entities"), limit=12)
-        time_range = item.get("time_range") if isinstance(item.get("time_range"), dict) else {}
+        time_range = (
+            item.get("time_range") if isinstance(item.get("time_range"), dict) else {}
+        )
         clean_range = {}
         for key in ("from", "to"):
             text = " ".join(str(time_range.get(key) or "").split())
             if text:
                 clean_range[key] = text[:80]
-        out.append({
-            "summary": summary[:800],
-            "event_ids": event_ids,
-            "time_range": clean_range,
-            "entities": entities,
-            "kind": " ".join(str(item.get("kind") or "confirmed_evidence").split())[:80],
-            "confidence": " ".join(str(item.get("confidence") or "medium").split())[:40],
-            "status": "confirmed",
-        })
+        out.append(
+            {
+                "summary": summary[:800],
+                "event_ids": event_ids,
+                "time_range": clean_range,
+                "entities": entities,
+                "kind": " ".join(str(item.get("kind") or "confirmed_evidence").split())[
+                    :80
+                ],
+                "confidence": " ".join(str(item.get("confidence") or "medium").split())[
+                    :40
+                ],
+                "status": "confirmed",
+            }
+        )
     return out[-limit:]
+
+
 def _finding_key(finding: dict) -> str:
-    event_ids = ",".join(sorted(str(e).lower() for e in (finding.get("event_ids") or [])))
+    event_ids = ",".join(
+        sorted(str(e).lower() for e in (finding.get("event_ids") or []))
+    )
     summary = re.sub(r"\s+", " ", str(finding.get("summary") or "").strip().lower())
     return event_ids or summary[:240]
-def _merge_confirmed_findings(existing, new, *, limit: int = _CONFIRMED_FINDINGS_KEEP) -> list[dict]:
+
+
+def _merge_confirmed_findings(
+    existing, new, *, limit: int = _CONFIRMED_FINDINGS_KEEP
+) -> list[dict]:
     merged: list[dict] = []
     seen: set[str] = set()
-    for item in _coerce_confirmed_findings(existing, limit=limit) + _coerce_confirmed_findings(new, limit=limit):
+    for item in _coerce_confirmed_findings(
+        existing, limit=limit
+    ) + _coerce_confirmed_findings(new, limit=limit):
         key = _finding_key(item)
         if not key or key in seen:
             continue
         seen.add(key)
         merged.append(item)
     return merged[-limit:]
+
+
 def _time_range_from_snapshots(snapshots: list[dict]) -> dict:
     values = [
         str(item.get("timestamp") or "").strip()
@@ -178,6 +222,8 @@ def _time_range_from_snapshots(snapshots: list[dict]) -> dict:
     if not values:
         return {}
     return {"from": min(values), "to": max(values)}
+
+
 def _entities_from_snapshots(snapshots: list[dict]) -> list[str]:
     entities: list[str] = []
     for item in snapshots:
@@ -188,16 +234,26 @@ def _entities_from_snapshots(snapshots: list[dict]) -> list[str]:
             if value:
                 entities.append(f"{field}={value[:160]}")
     return _merge_string_lists([], entities, limit=12)
-def _confirmed_findings_from_observation(observation: dict, parsed: dict | None = None) -> list[dict]:
+
+
+def _confirmed_findings_from_observation(
+    observation: dict, parsed: dict | None = None
+) -> list[dict]:
     parsed = parsed or {}
     parsed_advanced = parsed.get("advanced_objective")
     if isinstance(parsed_advanced, str):
         lowered = parsed_advanced.strip().lower()
-        parsed_advanced = lowered.startswith("y") or "material" in lowered or lowered == "true"
+        parsed_advanced = (
+            lowered.startswith("y") or "material" in lowered or lowered == "true"
+        )
     advanced = bool(parsed_advanced or observation.get("advanced_objective"))
     event_ids = _coerce_string_list(observation.get("event_ids"), limit=8)
-    snapshots = [s for s in (observation.get("evidence_snapshots") or []) if isinstance(s, dict)]
-    if not (advanced and (event_ids or snapshots or observation.get("evidence_markers"))):
+    snapshots = [
+        s for s in (observation.get("evidence_snapshots") or []) if isinstance(s, dict)
+    ]
+    if not (
+        advanced and (event_ids or snapshots or observation.get("evidence_markers"))
+    ):
         return []
 
     summaries = _coerce_string_list(parsed.get("evidence_found"), limit=6)
@@ -211,16 +267,20 @@ def _confirmed_findings_from_observation(observation: dict, parsed: dict | None 
 
     out: list[dict] = []
     for summary in summaries[:3]:
-        out.append({
-            "summary": summary,
-            "event_ids": event_ids,
-            "time_range": _time_range_from_snapshots(snapshots),
-            "entities": _entities_from_snapshots(snapshots),
-            "kind": "raw_event_evidence",
-            "confidence": "high" if event_ids or snapshots else "medium",
-            "status": "confirmed",
-        })
+        out.append(
+            {
+                "summary": summary,
+                "event_ids": event_ids,
+                "time_range": _time_range_from_snapshots(snapshots),
+                "entities": _entities_from_snapshots(snapshots),
+                "kind": "raw_event_evidence",
+                "confidence": "high" if event_ids or snapshots else "medium",
+                "status": "confirmed",
+            }
+        )
     return out
+
+
 def _coerce_trials(value, *, limit: int = _QUERY_TRIALS_KEEP) -> list[dict]:
     if not isinstance(value, list):
         return []
@@ -235,17 +295,24 @@ def _coerce_trials(value, *, limit: int = _QUERY_TRIALS_KEEP) -> list[dict]:
         rec = {
             "discriminator": disc[:500],
             "window": window[:120],
-            "outcome": " ".join(str(item.get("outcome") or "").split())[:40] or "unknown",
+            "outcome": " ".join(str(item.get("outcome") or "").split())[:40]
+            or "unknown",
             "count": max(1, int(item.get("count") or 1)),
         }
         if isinstance(item.get("hits"), int):
             rec["hits"] = item["hits"]
-        evidence = [" ".join(str(line).split()) for line in (item.get("evidence") or []) if line]
+        evidence = [
+            " ".join(str(line).split()) for line in (item.get("evidence") or []) if line
+        ]
         if evidence:
             rec["evidence"] = evidence[:3]
         out.append(rec)
     return out[-limit:]
-def _merge_query_trials(existing, new, *, limit: int = _QUERY_TRIALS_KEEP) -> list[dict]:
+
+
+def _merge_query_trials(
+    existing, new, *, limit: int = _QUERY_TRIALS_KEEP
+) -> list[dict]:
     """Accumulate this task's query trials. A repeated (discriminator, window) pair is not
     duplicated — its `count` is incremented and its latest outcome kept, so a dead shape
     shows as `… empty x14`, making the repetition glaring instead of scrolling past."""
@@ -267,6 +334,8 @@ def _merge_query_trials(existing, new, *, limit: int = _QUERY_TRIALS_KEEP) -> li
             index[key] = trial
             out.append(trial)
     return out[-limit:]
+
+
 def _render_query_trials(trials: list[dict]) -> str:
     lines: list[str] = []
     for trial in _coerce_trials(trials)[-12:]:

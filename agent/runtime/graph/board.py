@@ -2,10 +2,17 @@ from __future__ import annotations
 
 import json
 
-from .parsing import _FACT_BULLET_RE, _HYPOTHESES_RE, _is_none_bullet, _looks_like_lead, _normalize_fact_key, _section_body, _strip_markers
+from .parsing import (
+    _FACT_BULLET_RE,
+    _HYPOTHESES_RE,
+    _is_none_bullet,
+    _looks_like_lead,
+    _normalize_fact_key,
+    _section_body,
+    _strip_markers,
+)
 from .state import AgentState
 from .toolio import _is_error_tool_result
-
 
 
 def _format_board_context(raw: str) -> str:
@@ -56,7 +63,9 @@ def _format_board_context(raw: str) -> str:
         for e in correlations:
             lines.append(f"- {e['content']}")
     if facts:
-        lines.append("*Confirmed facts — treat as established unless contradicted by newer evidence:*")
+        lines.append(
+            "*Confirmed facts — treat as established unless contradicted by newer evidence:*"
+        )
         for e in facts:
             src = f" [{e['source']}]" if e.get("source") else ""
             lines.append(f"- {e['content']}{src}")
@@ -147,11 +156,14 @@ def _record_hypotheses_text(
     block = _section_body(text, match)
 
     from aci_board import store
+
     store.init_db()
     existing = [
-        e for e in store.list_entries(
+        e
+        for e in store.list_entries(
             state["case_id"], state["run_id"], state["agent_name"]
-        ) if e.get("kind") == "hypothesis"
+        )
+        if e.get("kind") == "hypothesis"
     ]
     by_key = {(e.get("dedup_key") or "").strip().lower(): e for e in existing}
 

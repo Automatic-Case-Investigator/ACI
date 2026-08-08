@@ -4,6 +4,7 @@ Public surface: the `Metric`/`MetricResult` contracts, the `ScoringContext` a me
 reads, and the registry (`register`, `selected`, `run_all`). Importing this package
 discovers all metric plugins under `metrics/`.
 """
+
 from .base import Metric, MetricResult, MetricKind  # noqa: F401
 from .context import ScenarioSpec, ScoringContext, ParsedReport, Phase  # noqa: F401
 from .registry import register, selected, available, run_all  # noqa: F401

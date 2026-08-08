@@ -5,7 +5,9 @@ import sys
 import unittest
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 sys.path.insert(0, project_root)
 import django  # noqa: E402
 
@@ -30,7 +32,10 @@ class OrchestratorTriageSummaryTest(unittest.TestCase):
         )
         summary = _agent_run_summary(agent_def, run)
         self.assertIn("status=incomplete_budget", summary)
-        self.assertIn("triage_report=(unavailable: triage did not complete with a durable report)", summary)
+        self.assertIn(
+            "triage_report=(unavailable: triage did not complete with a durable report)",
+            summary,
+        )
         self.assertNotIn("triage_report=triage complete.", summary)
 
 

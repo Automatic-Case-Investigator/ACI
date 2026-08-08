@@ -7,7 +7,9 @@ import unittest
 from unittest.mock import patch
 
 # Navigate from .claude/skills/run-aci-backend/tests/ up to project root (4 levels)
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, project_root)
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
 os.environ.setdefault("SECRET_KEY", "test")
@@ -42,11 +44,13 @@ class TestIntentOrdering(unittest.TestCase):
             "messages": [
                 AIMessage(
                     content="",
-                    tool_calls=[{
-                        "id": "call-1",
-                        "name": "search",
-                        "args": {"query": "host.name:test"},
-                    }],
+                    tool_calls=[
+                        {
+                            "id": "call-1",
+                            "name": "search",
+                            "args": {"query": "host.name:test"},
+                        }
+                    ],
                 )
             ],
             "tool_calls_made": 0,

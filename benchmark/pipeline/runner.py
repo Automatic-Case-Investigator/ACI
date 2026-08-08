@@ -13,6 +13,7 @@ Each trial's `meta.json` includes a `tokens` block (summed input/output tokens a
 calls) captured via a LangChain callback attached to the model — so a calibration run
 (`--trials 1`) yields an exact per-run token count for cost estimation.
 """
+
 from __future__ import annotations
 
 import json
@@ -30,6 +31,7 @@ from typing import Callable
 try:
     from langchain_core.callbacks import AsyncCallbackHandler
 except ModuleNotFoundError:  # keeps lightweight unit tests importable without LangChain
+
     class AsyncCallbackHandler:  # type: ignore[no-redef]
         pass
 
@@ -65,17 +67,31 @@ class _TokenUsage(AsyncCallbackHandler):
         for generations in getattr(response, "generations", None) or []:
             for gen in generations:
                 msg = getattr(gen, "message", None)
-                usage = getattr(msg, "usage_metadata", None) if msg is not None else None
-                if isinstance(usage, dict) and (usage.get("input_tokens") or usage.get("output_tokens")):
+                usage = (
+                    getattr(msg, "usage_metadata", None) if msg is not None else None
+                )
+                if isinstance(usage, dict) and (
+                    usage.get("input_tokens") or usage.get("output_tokens")
+                ):
                     input_tokens += int(usage.get("input_tokens") or 0)
                     output_tokens += int(usage.get("output_tokens") or 0)
                     calls += 1
                     counted = True
         if not counted:
-            token_usage = (getattr(response, "llm_output", None) or {}).get("token_usage") or {}
+            token_usage = (getattr(response, "llm_output", None) or {}).get(
+                "token_usage"
+            ) or {}
             if token_usage:
-                input_tokens += int(token_usage.get("prompt_tokens") or token_usage.get("input_tokens") or 0)
-                output_tokens += int(token_usage.get("completion_tokens") or token_usage.get("output_tokens") or 0)
+                input_tokens += int(
+                    token_usage.get("prompt_tokens")
+                    or token_usage.get("input_tokens")
+                    or 0
+                )
+                output_tokens += int(
+                    token_usage.get("completion_tokens")
+                    or token_usage.get("output_tokens")
+                    or 0
+                )
                 calls += 1
         if not calls:
             return
@@ -83,7 +99,9 @@ class _TokenUsage(AsyncCallbackHandler):
         self.output += output_tokens
         self.calls += calls
         if session_id:
-            bucket = self.by_session.setdefault(session_id, {"input": 0, "output": 0, "model_calls": 0})
+            bucket = self.by_session.setdefault(
+                session_id, {"input": 0, "output": 0, "model_calls": 0}
+            )
             bucket["input"] += input_tokens
             bucket["output"] += output_tokens
             bucket["model_calls"] += calls
@@ -131,7 +149,9 @@ def _capture_tokens():
         _orch_driver.build_model = originals[_orch_driver]
 
 
-def _question_for(entry_point, alert_id: str | None = None, anchor_iso: str | None = None) -> str:
+def _question_for(
+    entry_point, alert_id: str | None = None, anchor_iso: str | None = None
+) -> str:
     """Build the triage question from a resolved TheHive ALERT id only.
 
     A TheHive *Case* is not a reliable target: only one alert (Fox's recon) has ever
@@ -152,7 +172,9 @@ def _question_for(entry_point, alert_id: str | None = None, anchor_iso: str | No
     if alert_id:
         question = f"Triage and investigate alert {alert_id}."
         if anchor_iso:
-            question += f" The alert corresponds to activity observed around {anchor_iso}."
+            question += (
+                f" The alert corresponds to activity observed around {anchor_iso}."
+            )
         return question
     raise ValueError(
         f"entry point {entry_point.id!r}: no matching TheHive alert found for scenario "
@@ -177,7 +199,11 @@ def _format_elapsed(seconds: float) -> str:
 
 
 def stderr_logger(message: str) -> None:
-    print(f"[benchmark {datetime.now().strftime('%H:%M:%S')}] {message}", file=sys.stderr, flush=True)
+    print(
+        f"[benchmark {datetime.now().strftime('%H:%M:%S')}] {message}",
+        file=sys.stderr,
+        flush=True,
+    )
 
 
 @dataclass(frozen=True)
@@ -218,7 +244,9 @@ def _epoch_ms_to_iso(value) -> str | None:  # noqa: ANN001
         ms = int(value)
     except (TypeError, ValueError):
         return None
-    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
 
 
 def _resolve_anchor_iso(entry_point, alert_record: dict) -> str | None:
@@ -269,21 +297,25 @@ def _query_alert_records_by_tag(tag: str) -> list[dict]:
     records: list[dict] = []
     page = 0
     while True:
-        res = hive._query([
-            {"_name": "listAlert"},
-            {"_name": "filter", "_field": "tags", "_value": tag},
-            {"_name": "page", "from": page, "to": page + 500, "extraData": []},
-        ])
+        res = hive._query(
+            [
+                {"_name": "listAlert"},
+                {"_name": "filter", "_field": "tags", "_value": tag},
+                {"_name": "page", "from": page, "to": page + 500, "extraData": []},
+            ]
+        )
         if not res:
             break
         for alert in res:
-            records.append({
-                "id": alert.get("_id") or alert.get("id") or "",
-                "sourceRef": alert.get("sourceRef") or "",
-                "date": alert.get("date"),
-                "title": alert.get("title") or "",
-                "tags": alert.get("tags") or [],
-            })
+            records.append(
+                {
+                    "id": alert.get("_id") or alert.get("id") or "",
+                    "sourceRef": alert.get("sourceRef") or "",
+                    "date": alert.get("date"),
+                    "title": alert.get("title") or "",
+                    "tags": alert.get("tags") or [],
+                }
+            )
         if len(res) < 500:
             break
         page += 500
@@ -316,11 +348,13 @@ def _query_alert_records_for_entry(entry_point) -> list[dict]:
     records: list[dict] = []
     page = 0
     while True:
-        res = hive._query([
-            {"_name": "listAlert"},
-            {"_name": "filter", "_field": "tags", "_value": tag},
-            {"_name": "page", "from": page, "to": page + 500, "extraData": []},
-        ])
+        res = hive._query(
+            [
+                {"_name": "listAlert"},
+                {"_name": "filter", "_field": "tags", "_value": tag},
+                {"_name": "page", "from": page, "to": page + 500, "extraData": []},
+            ]
+        )
         if not res:
             break
         records.extend(_alert_record(alert) for alert in res)
@@ -347,7 +381,7 @@ def _tag_value(tags: list, prefix: str) -> str:
     for tag in tags or []:
         text = str(tag)
         if text.startswith(prefix):
-            return text[len(prefix):]
+            return text[len(prefix) :]
     return ""
 
 
@@ -463,7 +497,9 @@ def _terminal_statuses(AgentRun) -> set[str]:  # noqa: ANN001
     }
 
 
-def _wait_for_session(session_id: str, timeout_secs: int | float | None, *, AgentRun, is_processing) -> object:  # noqa: ANN001
+def _wait_for_session(
+    session_id: str, timeout_secs: int | float | None, *, AgentRun, is_processing
+) -> object:  # noqa: ANN001
     terminal = _terminal_statuses(AgentRun)
     started = time.monotonic()
     while True:
@@ -477,23 +513,35 @@ def _wait_for_session(session_id: str, timeout_secs: int | float | None, *, Agen
                 run.metadata = meta
                 run.status = AgentRun.STATUS_CANCELLED
                 run.save(update_fields=["status", "metadata", "updated_at"])
-            raise TimeoutError(f"benchmark session {session_id} timed out after {timeout_secs}s")
+            raise TimeoutError(
+                f"benchmark session {session_id} timed out after {timeout_secs}s"
+            )
         time.sleep(1.0)
 
 
 def _session_children(session_id: str, AgentRun) -> list:  # noqa: ANN001
     try:
-        return list(AgentRun.objects.filter(metadata__session_id=session_id).order_by("-updated_at", "-created_at"))
+        return list(
+            AgentRun.objects.filter(metadata__session_id=session_id).order_by(
+                "-updated_at", "-created_at"
+            )
+        )
     except Exception:
         return [
-            run for run in AgentRun.objects.exclude(agent_name="orchestrator").order_by("-updated_at")[:200]
+            run
+            for run in AgentRun.objects.exclude(agent_name="orchestrator").order_by(
+                "-updated_at"
+            )[:200]
             if (run.metadata or {}).get("session_id") == session_id
         ]
 
 
-def _report_run_for_session(session_run, children: list, agent_name: str):  # noqa: ANN001
+def _report_run_for_session(
+    session_run, children: list, agent_name: str
+):  # noqa: ANN001
     preferred = [
-        run for run in children
+        run
+        for run in children
         if run.agent_name == agent_name and (run.result or "").strip()
     ]
     if preferred:
@@ -558,7 +606,9 @@ def _prepare_trial_specs(
     for entry_point_id in entry_point_ids:
         entry = entries.get(entry_point_id)
         if entry is None:
-            raise KeyError(f"entry point {entry_point_id!r} not in scenario {scenario!r}")
+            raise KeyError(
+                f"entry point {entry_point_id!r} not in scenario {scenario!r}"
+            )
         alert_record = _resolve_entry_alert(entry, scenario, data_root)
         alert_id = str(alert_record.get("id") or "")
         anchor_iso = _resolve_anchor_iso(entry, alert_record)
@@ -573,17 +623,19 @@ def _prepare_trial_specs(
             log,
         )
         for trial in range(1, trials + 1):
-            prepared.append(_TrialSpec(
-                scenario=scenario,
-                entry_point_id=entry_point_id,
-                trial=trial,
-                trials=trials,
-                agent_name=agent_name,
-                question=question,
-                alert_record=alert_record,
-                anchor_iso=anchor_iso,
-                entry=entry,
-            ))
+            prepared.append(
+                _TrialSpec(
+                    scenario=scenario,
+                    entry_point_id=entry_point_id,
+                    trial=trial,
+                    trials=trials,
+                    agent_name=agent_name,
+                    question=question,
+                    alert_record=alert_record,
+                    anchor_iso=anchor_iso,
+                    entry=entry,
+                )
+            )
     return prepared
 
 
@@ -595,7 +647,8 @@ def _metadata_for_trial(spec: _TrialSpec) -> dict:
             "trial": spec.trial,
             "agent_name": spec.agent_name,
             "alert_id": spec.alert_record.get("id") or "",
-            "source_ref": spec.alert_record.get("sourceRef") or _entry_source_ref(spec.entry),
+            "source_ref": spec.alert_record.get("sourceRef")
+            or _entry_source_ref(spec.entry),
             "anchor_event_id": spec.entry.anchor_event_id or "",
             "anchor_source_ref": getattr(spec.entry, "anchor_source_ref", None) or "",
             "anchor_timestamp": spec.anchor_iso or "",
@@ -618,25 +671,40 @@ def _write_trial_artifacts(
     trial_dir.mkdir(parents=True, exist_ok=True)
     trial_valid = _trial_produced_result(target)
     (trial_dir / "report.md").write_text(report_run.result or "", encoding="utf-8")
-    (trial_dir / "verdict.json").write_text(json.dumps(report_run.verdict or {}), encoding="utf-8")
-    (trial_dir / "meta.json").write_text(json.dumps({
-        "run_id": str(report_run.id), "session_id": session_id,
-        "live_session_url": f"/dashboard/{session_id}/",
-        "scenario": spec.scenario, "entry_point": spec.entry_point_id,
-        # `status` reflects the REQUESTED agent's outcome, not a fallback's — so a failed
-        # investigation reads as failed, not as a completed low-recall trial.
-        "trial": spec.trial,
-        "status": getattr(target, "status", None) if target is not None else "missing",
-        "trial_valid": trial_valid,
-        "session_status": session_run.status,
-        "report_agent": report_run.agent_name, "requested_agent_name": spec.agent_name,
-        "alert_id": spec.alert_record.get("id") or "",
-        "source_ref": spec.alert_record.get("sourceRef") or _entry_source_ref(spec.entry),
-        "anchor_event_id": spec.entry.anchor_event_id or "",
-        "anchor_source_ref": getattr(spec.entry, "anchor_source_ref", None) or "",
-        "anchor_timestamp": spec.anchor_iso or "",
-        "tokens": tokens,
-    }, indent=2), encoding="utf-8")
+    (trial_dir / "verdict.json").write_text(
+        json.dumps(report_run.verdict or {}), encoding="utf-8"
+    )
+    (trial_dir / "meta.json").write_text(
+        json.dumps(
+            {
+                "run_id": str(report_run.id),
+                "session_id": session_id,
+                "live_session_url": f"/dashboard/{session_id}/",
+                "scenario": spec.scenario,
+                "entry_point": spec.entry_point_id,
+                # `status` reflects the REQUESTED agent's outcome, not a fallback's — so a failed
+                # investigation reads as failed, not as a completed low-recall trial.
+                "trial": spec.trial,
+                "status": (
+                    getattr(target, "status", None) if target is not None else "missing"
+                ),
+                "trial_valid": trial_valid,
+                "session_status": session_run.status,
+                "report_agent": report_run.agent_name,
+                "requested_agent_name": spec.agent_name,
+                "alert_id": spec.alert_record.get("id") or "",
+                "source_ref": spec.alert_record.get("sourceRef")
+                or _entry_source_ref(spec.entry),
+                "anchor_event_id": spec.entry.anchor_event_id or "",
+                "anchor_source_ref": getattr(spec.entry, "anchor_source_ref", None)
+                or "",
+                "anchor_timestamp": spec.anchor_iso or "",
+                "tokens": tokens,
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     return trial_dir
 
 
@@ -662,7 +730,9 @@ async def _run_trial(
         attempt = 0
         while True:
             attempt += 1
-            session_id = await asyncio.to_thread(start_session, spec.question, metadata=metadata)
+            session_id = await asyncio.to_thread(
+                start_session, spec.question, metadata=metadata
+            )
             session_run = await asyncio.to_thread(
                 _wait_for_session,
                 session_id,
@@ -674,8 +744,11 @@ async def _run_trial(
             target = _target_run(children, spec.agent_name)
             # Re-run only a transient infra failure of the requested agent; a valid
             # result, a non-transient failure, or exhausted retries all stop here.
-            if (_trial_produced_result(target) or attempt > _MAX_TRIAL_RETRIES
-                    or not _is_transient_failure(target)):
+            if (
+                _trial_produced_result(target)
+                or attempt > _MAX_TRIAL_RETRIES
+                or not _is_transient_failure(target)
+            ):
                 break
             _log(
                 f"retry scenario={spec.scenario} entry_point={spec.entry_point_id} "
@@ -684,7 +757,11 @@ async def _run_trial(
                 log,
             )
         report_run = _report_run_for_session(session_run, children, spec.agent_name)
-        tokens = usage.by_session.get(session_id) or {"input": 0, "output": 0, "model_calls": 0}
+        tokens = usage.by_session.get(session_id) or {
+            "input": 0,
+            "output": 0,
+            "model_calls": 0,
+        }
         trial_dir = await asyncio.to_thread(
             _write_trial_artifacts,
             spec,
@@ -718,51 +795,65 @@ async def _run_trials_async(
 ) -> list[_TrialResult]:
     semaphore = asyncio.Semaphore(max(1, concurrency))
     tasks = [
-        asyncio.create_task(_run_trial(spec, out_dir, timeout_secs, usage, semaphore, log))
+        asyncio.create_task(
+            _run_trial(spec, out_dir, timeout_secs, usage, semaphore, log)
+        )
         for spec in specs
     ]
     return await asyncio.gather(*tasks)
 
 
 def run_many(
-        scenario: str,
-        entry_point_ids: list[str],
-        trials: int,
-        out_dir: str | Path,
-        agent_name: str = "investigation",
-        log: Callable[[str], None] | None = None,
-        timeout_secs: int | float | None = None,
-        concurrency: int = 4) -> dict[str, list[str]]:
+    scenario: str,
+    entry_point_ids: list[str],
+    trials: int,
+    out_dir: str | Path,
+    agent_name: str = "investigation",
+    log: Callable[[str], None] | None = None,
+    timeout_secs: int | float | None = None,
+    concurrency: int = 4,
+) -> dict[str, list[str]]:
     _django_setup()
     from agent.dashboard.events import install as install_dashboard_events
 
     install_dashboard_events()
-    specs = _prepare_trial_specs(scenario, entry_point_ids, trials, out_dir, agent_name, log)
+    specs = _prepare_trial_specs(
+        scenario, entry_point_ids, trials, out_dir, agent_name, log
+    )
 
     with _capture_tokens() as usage:
-        results = asyncio.run(_run_trials_async(
-            specs,
-            out_dir,
-            timeout_secs,
-            concurrency,
-            usage,
-            log,
-        ))
+        results = asyncio.run(
+            _run_trials_async(
+                specs,
+                out_dir,
+                timeout_secs,
+                concurrency,
+                usage,
+                log,
+            )
+        )
 
     grouped: dict[str, list[tuple[int, str]]] = {ep: [] for ep in entry_point_ids}
     for result in results:
-        grouped.setdefault(result.entry_point_id, []).append((result.trial, result.session_id))
+        grouped.setdefault(result.entry_point_id, []).append(
+            (result.trial, result.session_id)
+        )
     return {
         ep: [session_id for _, session_id in sorted(items)]
         for ep, items in grouped.items()
     }
 
 
-def run(scenario: str, entry_point_id: str, trials: int, out_dir: str | Path,
-        agent_name: str = "investigation",
-        log: Callable[[str], None] | None = None,
-        timeout_secs: int | float | None = None,
-        concurrency: int = 4) -> list[str]:
+def run(
+    scenario: str,
+    entry_point_id: str,
+    trials: int,
+    out_dir: str | Path,
+    agent_name: str = "investigation",
+    log: Callable[[str], None] | None = None,
+    timeout_secs: int | float | None = None,
+    concurrency: int = 4,
+) -> list[str]:
     return run_many(
         scenario,
         [entry_point_id],

@@ -2,7 +2,6 @@ import uuid
 from django.db import models
 
 
-
 class FeedbackEntry(models.Model):
     """An analyst correction or confirmation of an agent verdict.
 
@@ -47,12 +46,16 @@ class PatternEntry(models.Model):
     CONFIDENCE_CHOICES = [("low", "Low"), ("medium", "Medium"), ("high", "High")]
 
     name = models.CharField(max_length=256)
-    verdict = models.CharField(max_length=8, choices=VERDICT_CHOICES, default=VERDICT_FP)
+    verdict = models.CharField(
+        max_length=8, choices=VERDICT_CHOICES, default=VERDICT_FP
+    )
     # conditions: {rule_ids: [], users: [], path_prefixes: [], time_window: "..."}
     conditions = models.JSONField(default=dict, blank=True)
     required_evidence = models.JSONField(default=list, blank=True)
     invalidators = models.JSONField(default=list, blank=True)
-    confidence = models.CharField(max_length=8, choices=CONFIDENCE_CHOICES, default="medium")
+    confidence = models.CharField(
+        max_length=8, choices=CONFIDENCE_CHOICES, default="medium"
+    )
     owner = models.CharField(max_length=128, blank=True)
     expires_at = models.DateTimeField(null=True, blank=True, default=None)
     enabled = models.BooleanField(default=True)
@@ -84,19 +87,35 @@ class PatternCandidate(models.Model):
     ]
 
     name = models.CharField(max_length=256)
-    verdict = models.CharField(max_length=8, choices=PatternEntry.VERDICT_CHOICES, default=PatternEntry.VERDICT_FP)
+    verdict = models.CharField(
+        max_length=8,
+        choices=PatternEntry.VERDICT_CHOICES,
+        default=PatternEntry.VERDICT_FP,
+    )
     conditions = models.JSONField(default=dict, blank=True)
     required_evidence = models.JSONField(default=list, blank=True)
     invalidators = models.JSONField(default=list, blank=True)
-    confidence = models.CharField(max_length=8, choices=PatternEntry.CONFIDENCE_CHOICES, default="medium")
-    source_feedback = models.ForeignKey(
-        FeedbackEntry, null=True, blank=True, on_delete=models.SET_NULL, related_name="candidates"
+    confidence = models.CharField(
+        max_length=8, choices=PatternEntry.CONFIDENCE_CHOICES, default="medium"
     )
-    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    source_feedback = models.ForeignKey(
+        FeedbackEntry,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="candidates",
+    )
+    status = models.CharField(
+        max_length=16, choices=STATUS_CHOICES, default=STATUS_PENDING
+    )
     reviewer = models.CharField(max_length=128, blank=True)
     reviewed_at = models.DateTimeField(null=True, blank=True, default=None)
     promoted_pattern = models.ForeignKey(
-        PatternEntry, null=True, blank=True, on_delete=models.SET_NULL, related_name="source_candidates"
+        PatternEntry,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="source_candidates",
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -139,7 +158,9 @@ class BaselineSnapshot(models.Model):
     feature = models.CharField(max_length=64)
     value = models.JSONField(default=dict, blank=True)
     window_days = models.PositiveIntegerField(default=30)
-    health = models.CharField(max_length=16, choices=HEALTH_CHOICES, default=HEALTH_FRESH)
+    health = models.CharField(
+        max_length=16, choices=HEALTH_CHOICES, default=HEALTH_FRESH
+    )
     computed_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -161,7 +182,9 @@ class BaselineComputeConfig(models.Model):
 
     SINGLETON_ID = 1
 
-    id = models.PositiveSmallIntegerField(primary_key=True, default=SINGLETON_ID, editable=False)
+    id = models.PositiveSmallIntegerField(
+        primary_key=True, default=SINGLETON_ID, editable=False
+    )
     window_days = models.PositiveIntegerField(default=30)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -194,5 +217,6 @@ class BaselineSubjectConfig(models.Model):
         unique_together = [("subject_type", "subject_id")]
 
     def __str__(self):
-        return f"{self.subject_type}:{self.subject_id} ({'on' if self.enabled else 'off'})"
-
+        return (
+            f"{self.subject_type}:{self.subject_id} ({'on' if self.enabled else 'off'})"
+        )

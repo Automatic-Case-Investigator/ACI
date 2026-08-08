@@ -1,10 +1,16 @@
 """Pivot state machine: candidate scoring, selection, broadening, and update."""
+
 from __future__ import annotations
 
 from ..parsing import _PIVOT_CONF_SCORE, _PIVOT_ROLE_SCORE, _PIVOT_SOURCE_SCORE
 from ..timeutil import _pivot_key
 
-from ._const import _ADJACENCY_KEYS, _CONTINUE_ACTIONS, _PIVOT_FAILURE_SIGNALS, _PIVOT_KEYS
+from ._const import (
+    _ADJACENCY_KEYS,
+    _CONTINUE_ACTIONS,
+    _PIVOT_FAILURE_SIGNALS,
+    _PIVOT_KEYS,
+)
 
 
 def _coerce_adjacency(value) -> dict:
@@ -16,6 +22,8 @@ def _coerce_adjacency(value) -> dict:
         if text:
             out[key] = text[:300]
     return out
+
+
 def _coerce_pivot(value) -> dict:
     if not isinstance(value, dict):
         return {}
@@ -36,6 +44,8 @@ def _coerce_pivot(value) -> dict:
     out.setdefault("failure_count", 0)
     out.setdefault("last_failure_reason", "")
     return out if out.get("field") and out.get("value") else {}
+
+
 def _coerce_pivots(value, *, limit: int = 12) -> list[dict]:
     if not isinstance(value, list):
         return []
@@ -45,12 +55,18 @@ def _coerce_pivots(value, *, limit: int = 12) -> list[dict]:
         if pivot:
             out.append(pivot)
     return out[:limit]
+
+
 def _pivot_dict_key(pivot: dict) -> str:
     """Dedup key for a pivot held as a dict — unwraps to the shared ``_pivot_key``."""
     return _pivot_key(pivot.get("field") or "", pivot.get("value") or "")
+
+
 def _merge_pivots(existing, new, *, limit: int = 12) -> list[dict]:
     merged: dict[str, dict] = {}
-    for pivot in _coerce_pivots(existing, limit=limit) + _coerce_pivots(new, limit=limit):
+    for pivot in _coerce_pivots(existing, limit=limit) + _coerce_pivots(
+        new, limit=limit
+    ):
         key = _pivot_dict_key(pivot)
         if not key:
             continue
@@ -67,7 +83,9 @@ def _merge_pivots(existing, new, *, limit: int = 12) -> list[dict]:
                 int(pivot.get("failure_count") or 0),
             )
             replacement["last_failure_reason"] = (
-                pivot.get("last_failure_reason") or current.get("last_failure_reason") or ""
+                pivot.get("last_failure_reason")
+                or current.get("last_failure_reason")
+                or ""
             )
             merged[key] = replacement
         else:
@@ -75,18 +93,27 @@ def _merge_pivots(existing, new, *, limit: int = 12) -> list[dict]:
                 int(current.get("failure_count") or 0),
                 int(pivot.get("failure_count") or 0),
             )
-            if not current.get("broader_alternative") and pivot.get("broader_alternative"):
+            if not current.get("broader_alternative") and pivot.get(
+                "broader_alternative"
+            ):
                 current["broader_alternative"] = pivot.get("broader_alternative")
     return list(merged.values())[:limit]
+
+
 def _pivot_score(pivot: dict) -> tuple[int, int, int, int]:
     status = str(pivot.get("status") or "active")
-    status_score = {"confirmed": 3, "active": 2, "demoted": 1, "exhausted": 0}.get(status, 1)
+    status_score = {"confirmed": 3, "active": 2, "demoted": 1, "exhausted": 0}.get(
+        status, 1
+    )
     return (
         status_score,
         _PIVOT_SOURCE_SCORE.get(str(pivot.get("source_level") or ""), 0),
         _PIVOT_ROLE_SCORE.get(str(pivot.get("role") or ""), 0),
-        _PIVOT_CONF_SCORE.get(str(pivot.get("confidence") or ""), 0) - int(pivot.get("failure_count") or 0),
+        _PIVOT_CONF_SCORE.get(str(pivot.get("confidence") or ""), 0)
+        - int(pivot.get("failure_count") or 0),
     )
+
+
 def _select_primary_pivot(pivots: list[dict]) -> dict:
     if not pivots:
         return {}
@@ -95,12 +122,16 @@ def _select_primary_pivot(pivots: list[dict]) -> dict:
         if str(pivot.get("status") or "active") != "exhausted":
             return pivot
     return ranked[0] if ranked else {}
+
+
 def _observation_failure_reason(observation: dict) -> str:
     signals = set(observation.get("signals") or [])
     for signal, reason in _PIVOT_FAILURE_SIGNALS:
         if signal in signals:
             return reason
     return ""
+
+
 def _broadened_pivot(pivot: dict) -> dict:
     broader = " ".join(str(pivot.get("broader_alternative") or "").split())
     if not broader or broader == str(pivot.get("value") or "").strip():
@@ -108,22 +139,37 @@ def _broadened_pivot(pivot: dict) -> dict:
     return {
         "field": str(pivot.get("field") or "").strip(),
         "value": broader[:320],
-        "source_level": str(pivot.get("source_level") or "").strip() or "board_inference",
-        "role": "hypothesis" if str(pivot.get("role") or "") == "exemplar" else "anchor",
+        "source_level": str(pivot.get("source_level") or "").strip()
+        or "board_inference",
+        "role": (
+            "hypothesis" if str(pivot.get("role") or "") == "exemplar" else "anchor"
+        ),
         "confidence": "medium",
         "status": "active",
         "failure_count": 0,
         "last_failure_reason": "",
         "broader_alternative": "",
     }
-def _update_pivot_state(ledger: dict, observation: dict, action: str, *, parsed: dict | None = None) -> tuple[list[dict], dict, str, str]:
-    pivots = _merge_pivots(ledger.get("active_pivots"), observation.get("pivot_candidates"))
-    primary = _coerce_pivot((parsed or {}).get("primary_pivot")) or _coerce_pivot(ledger.get("primary_pivot"))
+
+
+def _update_pivot_state(
+    ledger: dict, observation: dict, action: str, *, parsed: dict | None = None
+) -> tuple[list[dict], dict, str, str]:
+    pivots = _merge_pivots(
+        ledger.get("active_pivots"), observation.get("pivot_candidates")
+    )
+    primary = _coerce_pivot((parsed or {}).get("primary_pivot")) or _coerce_pivot(
+        ledger.get("primary_pivot")
+    )
     if primary:
         pivots = _merge_pivots(pivots, [primary])
     primary = _select_primary_pivot([primary] + pivots if primary else pivots)
-    strategy = str((parsed or {}).get("next_pivot_strategy") or "keep").strip() or "keep"
-    why_failed = " ".join(str((parsed or {}).get("why_current_pivot_failed") or "").split())
+    strategy = (
+        str((parsed or {}).get("next_pivot_strategy") or "keep").strip() or "keep"
+    )
+    why_failed = " ".join(
+        str((parsed or {}).get("why_current_pivot_failed") or "").split()
+    )
     failure_reason = _observation_failure_reason(observation)
 
     if primary:
@@ -141,10 +187,16 @@ def _update_pivot_state(ledger: dict, observation: dict, action: str, *, parsed:
             primary["last_failure_reason"] = failure_reason
             if not why_failed:
                 why_failed = f"Current pivot failed because the latest batch was {failure_reason.replace('_', ' ')}."
-        elif observation.get("advanced_objective") and str(primary.get("status") or "") != "exhausted":
+        elif (
+            observation.get("advanced_objective")
+            and str(primary.get("status") or "") != "exhausted"
+        ):
             primary["status"] = "confirmed"
 
-        if int(primary.get("failure_count") or 0) >= 2 and str(primary.get("broader_alternative") or "").strip():
+        if (
+            int(primary.get("failure_count") or 0) >= 2
+            and str(primary.get("broader_alternative") or "").strip()
+        ):
             primary["status"] = "exhausted"
             broader = _broadened_pivot(primary)
             if broader:
@@ -157,10 +209,14 @@ def _update_pivot_state(ledger: dict, observation: dict, action: str, *, parsed:
                         "the broader behavior/entity pivot instead of the exact artifact."
                     )
         elif should_penalize and not why_failed:
-            why_failed = "The current pivot did not materially narrow to the evidence needed."
+            why_failed = (
+                "The current pivot did not materially narrow to the evidence needed."
+            )
 
     pivots = _merge_pivots(pivots, [primary] if primary else [])
     return pivots, primary, strategy, why_failed[:320]
+
+
 def _pivot_instruction_fragment(ledger: dict) -> str:
     pivot = _coerce_pivot(ledger.get("primary_pivot"))
     if not pivot:

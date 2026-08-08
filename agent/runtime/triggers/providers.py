@@ -4,11 +4,11 @@ This registry is intentionally separate from MCP providers. A system can receive
 events from TheHive or Wazuh even if the corresponding MCP connector is disabled,
 and adding another trigger source should only require registering it here.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Callable
-
 
 PayloadParser = Callable[[str, dict], tuple[str | None, str | None]]
 
@@ -25,8 +25,14 @@ def _parse_thehive(event_type: str, body: dict) -> tuple[str | None, str | None]
     object_type = str(body.get("objectType") or body.get("object_type") or "").lower()
     operation = str(body.get("operation") or body.get("action") or "").lower()
     obj = body.get("object") or body.get("details") or {}
-    case_id = obj.get("_id") or obj.get("id") or body.get("rootId") or body.get("case_id")
-    expected = "case" if event_type == "new_case" else "alert" if event_type == "new_alert" else ""
+    case_id = (
+        obj.get("_id") or obj.get("id") or body.get("rootId") or body.get("case_id")
+    )
+    expected = (
+        "case"
+        if event_type == "new_case"
+        else "alert" if event_type == "new_alert" else ""
+    )
 
     if expected and object_type and object_type != expected:
         return None, f"payload objectType {object_type!r} does not match {event_type}"
@@ -86,7 +92,9 @@ def is_supported_trigger_provider(provider_key: str) -> bool:
     return get_trigger_provider(provider_key) is not None
 
 
-def parse_trigger_payload(provider_key: str, event_type: str, body: dict) -> tuple[str | None, str | None]:
+def parse_trigger_payload(
+    provider_key: str, event_type: str, body: dict
+) -> tuple[str | None, str | None]:
     provider = get_trigger_provider(provider_key)
     if provider is None:
         return None, f"unsupported trigger provider {provider_key!r}"

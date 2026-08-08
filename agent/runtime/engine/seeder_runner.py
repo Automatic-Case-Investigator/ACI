@@ -54,16 +54,52 @@ _CONDITIONAL_TITLE_RE = re.compile(
 # Explicit per-item priority stated in the triage report, e.g. "- Priority: 85"
 # (the triage `## Investigation Plan` format mandates a Priority line per item).
 # Anchored on the word "priority" so a bare pivot number (rule.id=31151) can't match.
-_EXPLICIT_PRIORITY_RE = re.compile(r"\bpriorit(?:y|ies)\b\s*[:=]?\s*\(?\s*(\d{1,3})\b", re.IGNORECASE)
+_EXPLICIT_PRIORITY_RE = re.compile(
+    r"\bpriorit(?:y|ies)\b\s*[:=]?\s*\(?\s*(\d{1,3})\b", re.IGNORECASE
+)
 
 # Priority keyword mapping — checked in order; first match wins.
 _PRIORITY_RULES: list[tuple[int, list[str]]] = [
-    (95, ["webshell", "reverse shell", "privilege escalation", "sudo", "command execution",
-          "decoded", "payload", "encoded", "credential"]),
-    (90, ["initial access", "successful login", "remote login", "ssh session", "pam session"]),
+    (
+        95,
+        [
+            "webshell",
+            "reverse shell",
+            "privilege escalation",
+            "sudo",
+            "command execution",
+            "decoded",
+            "payload",
+            "encoded",
+            "credential",
+        ],
+    ),
+    (
+        90,
+        [
+            "initial access",
+            "successful login",
+            "remote login",
+            "ssh session",
+            "pam session",
+        ],
+    ),
     (80, ["c2", "callback", "attacker-controlled", "attacker controlled"]),
-    (75, ["persistence", "crontab", "cron", "startup", "scheduled task", "authorized_key",
-          "syscheck", "fim", "file-integrity", "file integrity"]),
+    (
+        75,
+        [
+            "persistence",
+            "crontab",
+            "cron",
+            "startup",
+            "scheduled task",
+            "authorized_key",
+            "syscheck",
+            "fim",
+            "file-integrity",
+            "file integrity",
+        ],
+    ),
     (60, ["correlate", "session context", "privilege", "scope", "disposition"]),
 ]
 
@@ -89,10 +125,14 @@ _SRC = src_label("seeder")
 
 # Timeline decomposition (Phase 1.5): cap how many candidates we surface, and their band.
 _MAX_TIMELINE_SEGMENTS = 6
-_TIMELINE_COVERAGE_PRIORITY = 70  # transition/scoping band — below confirmed-forward leads
+_TIMELINE_COVERAGE_PRIORITY = (
+    70  # transition/scoping band — below confirmed-forward leads
+)
 
 # Absolute ISO-8601 timestamps the triage handoff cites, used to bound the incident span.
-_ISO_TS_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})")
+_ISO_TS_RE = re.compile(
+    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})"
+)
 
 
 def _parse_iso_dt(text: str) -> datetime | None:
@@ -107,12 +147,18 @@ def _incident_window(*texts: str) -> tuple[str, str] | None:
     """Bound the incident span [earliest, latest] from ISO timestamps cited across the
     triage handoff. Returns None when fewer than two distinct instants appear — there is
     nothing to decompose."""
-    parsed = {d for t in texts for m in _ISO_TS_RE.finditer(t or "")
-              if (d := _parse_iso_dt(m.group(0))) is not None}
+    parsed = {
+        d
+        for t in texts
+        for m in _ISO_TS_RE.finditer(t or "")
+        if (d := _parse_iso_dt(m.group(0))) is not None
+    }
     if len(parsed) < 2:
         return None
+
     def _iso(d: datetime) -> str:
         return d.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
     return _iso(min(parsed)), _iso(max(parsed))
 
 
@@ -129,7 +175,9 @@ async def _timeline_segment_specs(tmap: dict, window: tuple[str, str]) -> list[d
         return []
     start, end = window
     try:
-        raw = await _call(vol_fn, {"start_time": start, "end_time": end, "bins": 48}, _dbg=_SRC)
+        raw = await _call(
+            vol_fn, {"start_time": start, "end_time": end, "bins": 48}, _dbg=_SRC
+        )
         data = json.loads(raw) if isinstance(raw, str) else raw
     except Exception:
         return []
@@ -138,7 +186,9 @@ async def _timeline_segment_specs(tmap: dict, window: tuple[str, str]) -> list[d
     bursts = [b for b in (data.get("bursts") or []) if b.get("start") and b.get("end")]
     if len(bursts) < 2:
         return []
-    return [{"start": b["start"], "end": b["end"]} for b in bursts[:_MAX_TIMELINE_SEGMENTS]]
+    return [
+        {"start": b["start"], "end": b["end"]} for b in bursts[:_MAX_TIMELINE_SEGMENTS]
+    ]
 
 
 def _timeline_coverage_description(segments: list[dict]) -> str:
@@ -153,13 +203,15 @@ def _timeline_coverage_description(segments: list[dict]) -> str:
     ]
     for idx, seg in enumerate(segments, 1):
         lines.append(f"{idx}. {seg['start']} to {seg['end']}")
-    lines.extend([
-        "",
-        "Consolidate redundant side windows when they share the same objective, but preserve "
-        "the candidate list and state the disposition for every window. Done when: every "
-        "candidate above has a disposition with a supporting event/probe result, or an "
-        "evidence-backed lead remains queued for the unresolved part.",
-    ])
+    lines.extend(
+        [
+            "",
+            "Consolidate redundant side windows when they share the same objective, but preserve "
+            "the candidate list and state the disposition for every window. Done when: every "
+            "candidate above has a disposition with a supporting event/probe result, or an "
+            "evidence-backed lead remains queued for the unresolved part.",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -250,6 +302,7 @@ def _widen_unjustified_window(item: str, vicinity_hours: int) -> str:
         anchor - timedelta(hours=vicinity_hours),
         anchor + timedelta(hours=vicinity_hours),
     )
+
     def _iso(d):
         return d.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -327,19 +380,34 @@ async def run_seeder(
         priority = _item_priority(item)
         description = _widen_unjustified_window(item, vicinity_hours)
         description = _augment_temporal_method(description, vicinity_hours)
-        result = await _call(create_fn, {
-            "title": title,
-            "description": description,
-            "priority": priority,
-        }, _dbg=_SRC)
+        result = await _call(
+            create_fn,
+            {
+                "title": title,
+                "description": description,
+                "priority": priority,
+            },
+            _dbg=_SRC,
+        )
         direct_creates += 1
         if _is_error_tool_result(result):
-            emit(_SRC, "error", f"seeder: create_task failed for '{title}'", detail=result)
+            emit(
+                _SRC,
+                "error",
+                f"seeder: create_task failed for '{title}'",
+                detail=result,
+            )
         else:
             emit(_SRC, "note", f"seeder: created '{title}' (P{priority})")
-            created_refs.append(_task_ref({
-                "title": title, "description": description, "status": "pending",
-            }))
+            created_refs.append(
+                _task_ref(
+                    {
+                        "title": title,
+                        "description": description,
+                        "status": "pending",
+                    }
+                )
+            )
 
     # ── Phase 1.5: deterministic timeline decomposition ─────────────────────────
     # The agent reliably covers the burst adjacent to its anchor but walks the rest of
@@ -348,30 +416,54 @@ async def run_seeder(
     # making temporal coverage systematic rather than opportunistic. Code localizes the
     # bursts (deterministic); the model names each burst's phase (semantic). Fail-open —
     # no window or no multi-burst structure simply seeds nothing here.
-    window = _incident_window(handoff.triage_report or "", handoff.analyst_request or "")
+    window = _incident_window(
+        handoff.triage_report or "", handoff.analyst_request or ""
+    )
     segments = await _timeline_segment_specs(tmap, window) if window else []
     if segments:
         title = "Account for timeline coverage candidates across the incident window"
         description = _timeline_coverage_description(segments)
-        result = await _call(create_fn, {
-            "title": title, "description": description, "priority": _TIMELINE_COVERAGE_PRIORITY,
-        }, _dbg=_SRC)
+        result = await _call(
+            create_fn,
+            {
+                "title": title,
+                "description": description,
+                "priority": _TIMELINE_COVERAGE_PRIORITY,
+            },
+            _dbg=_SRC,
+        )
         if _is_error_tool_result(result):
-            emit(_SRC, "error", "seeder: timeline coverage create_task failed", detail=result)
+            emit(
+                _SRC,
+                "error",
+                "seeder: timeline coverage create_task failed",
+                detail=result,
+            )
         else:
-            emit(_SRC, "note",
-                 f"seeder: timeline coverage map with {len(segments)} candidate(s) "
-                 f"(P{_TIMELINE_COVERAGE_PRIORITY})")
-            created_refs.append(_task_ref({
-                "title": title, "description": description, "status": "pending",
-            }))
+            emit(
+                _SRC,
+                "note",
+                f"seeder: timeline coverage map with {len(segments)} candidate(s) "
+                f"(P{_TIMELINE_COVERAGE_PRIORITY})",
+            )
+            created_refs.append(
+                _task_ref(
+                    {
+                        "title": title,
+                        "description": description,
+                        "status": "pending",
+                    }
+                )
+            )
 
     # ── Phase 2: model pass for mandatory supplementary tasks ───────────────────
     # The model checks for mandatory tasks not covered by the plan (C2 destination
     # pivots, initial-access vector) and verifies completeness via list_tasks.
     # If the plan section was missing entirely, the model creates all tasks.
     system_prompt = compose_system_prompt(seeder_def.prompt_layers, {})
-    human_content = _build_model_input(handoff, plan_items, direct_creates, vicinity_hours, segments)
+    human_content = _build_model_input(
+        handoff, plan_items, direct_creates, vicinity_hours, segments
+    )
 
     messages = [
         SystemMessage(content=system_prompt),
@@ -406,33 +498,50 @@ async def run_seeder(
             if tool is None:
                 content = f"Error: tool '{name}' is not available to the seeder."
                 emit(_SRC, "error", f"seeder: unknown tool '{name}'")
-            elif name == "create_task" and (dup := duplicate_existing_task(
-                LeadCandidate(
-                    title=str(args.get("title") or ""), pivots="",
-                    evidence=str(args.get("description") or ""), priority=0,
-                ),
-                created_refs,
-            )):
+            elif name == "create_task" and (
+                dup := duplicate_existing_task(
+                    LeadCandidate(
+                        title=str(args.get("title") or ""),
+                        pivots="",
+                        evidence=str(args.get("description") or ""),
+                        priority=0,
+                    ),
+                    created_refs,
+                )
+            ):
                 content = f"Skipped: {dup} — not created."
-                emit(_SRC, "note", f"seeder: skipped duplicate '{args.get('title', '')}' ({dup})")
+                emit(
+                    _SRC,
+                    "note",
+                    f"seeder: skipped duplicate '{args.get('title', '')}' ({dup})",
+                )
             else:
                 content = await _call(tool, args, _dbg=_SRC)
                 tool_calls_made += 1
                 if name == "create_task" and not _is_error_tool_result(content):
-                    created_refs.append(_task_ref({
-                        "title": str(args.get("title") or ""),
-                        "description": str(args.get("description") or ""),
-                        "status": "pending",
-                    }))
-            messages.append(ToolMessage(
-                content=str(content),
-                tool_call_id=tc["id"],
-                name=name,
-            ))
+                    created_refs.append(
+                        _task_ref(
+                            {
+                                "title": str(args.get("title") or ""),
+                                "description": str(args.get("description") or ""),
+                                "status": "pending",
+                            }
+                        )
+                    )
+            messages.append(
+                ToolMessage(
+                    content=str(content),
+                    tool_call_id=tc["id"],
+                    name=name,
+                )
+            )
 
-    emit(_SRC, "note",
-         f"seeder: finished — {direct_creates} direct + "
-         f"{tool_calls_made - direct_creates} model tool call(s)")
+    emit(
+        _SRC,
+        "note",
+        f"seeder: finished — {direct_creates} direct + "
+        f"{tool_calls_made - direct_creates} model tool call(s)",
+    )
 
 
 def _build_model_input(
@@ -491,7 +600,9 @@ def _build_model_input(
         for i, item in enumerate(plan_items, 1):
             parts.append(f"{i}. {_item_title(item)}")
         if timeline_segments:
-            parts.append(f"{len(plan_items) + 1}. Account for timeline coverage candidates across the incident window")
+            parts.append(
+                f"{len(plan_items) + 1}. Account for timeline coverage candidates across the incident window"
+            )
         parts.append("")
         parts.append(
             "## Your job\n"

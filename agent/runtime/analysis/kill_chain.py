@@ -6,6 +6,7 @@ which are gaps. This module turns a `correlate_techniques` result (techniques gr
 by `rule.mitre.id`, each carrying tactic(s)) into a kill-chain-ordered narrative plus
 an explicit list of core phases with no evidence, which become investigative leads.
 """
+
 from __future__ import annotations
 
 import json
@@ -48,22 +49,22 @@ _CORE_PHASES = [
 # rule it out. Linux-centric, aligned with the Wazuh playbooks in the MCP guidance.
 TACTIC_PIVOTS = {
     "Initial Access": "first successful remote login — rule.groups authentication_success "
-                      "(rule.id 5715) from an external data.srcip; correlate that srcip's auth trail",
+    "(rule.id 5715) from an external data.srcip; correlate that srcip's auth trail",
     "Execution": "audit exec rule.id 80792; data.audit.command / data.audit.exe; decode "
-                 "data.audit.proctitle (hex); full_log 'sh -i' / 'bash -i' / '/dev/tcp'",
+    "data.audit.proctitle (hex); full_log 'sh -i' / 'bash -i' / '/dev/tcp'",
     "Persistence": "cron rule.id 2830-2834 with syscheck.diff; pam session rule.id 5501; "
-                   "syscheck.path for crontabs / authorized_keys / systemd units",
+    "syscheck.path for crontabs / authorized_keys / systemd units",
     "Privilege Escalation": "sudo rule.id 5401-5404; rule.groups sudo; unexpected uid=0 / "
-                            "data.audit.euid=0 transitions",
+    "data.audit.euid=0 transitions",
     "Credential Access": "brute force rule.id 5710-5716 / rule.groups authentication_failed; "
-                         "access to /etc/shadow; reused or harvested credentials",
+    "access to /etc/shadow; reused or harvested credentials",
     "Lateral Movement": "same data.srcuser on a DIFFERENT agent.name; outbound ssh; "
-                        "authentication_success on other hosts",
+    "authentication_success on other hosts",
     "Command and Control": "full_log '/dev/tcp' / reverse-shell strings; external data.dstip; "
-                           "beaconing cadence via get_event_volume",
+    "beaconing cadence via get_event_volume",
     "Exfiltration": "large data.bytes_out; external (non-RFC1918) data.dstip; bulk file reads",
     "Impact": "file deletion rule.id 553 with syscheck.event=deleted; service stop; "
-              "encryption / ransomware indicators",
+    "encryption / ransomware indicators",
 }
 
 # Gap-lead priority per tactic. A gap lead is, by definition, speculative coverage
@@ -138,7 +139,8 @@ def drop_covered_specs(specs: list[dict], existing_tasks: list[dict]) -> list[di
     if not specs or not existing_tasks:
         return specs
     haystack = " \n ".join(
-        f"{t.get('title', '')} {t.get('description', '')}".lower() for t in existing_tasks
+        f"{t.get('title', '')} {t.get('description', '')}".lower()
+        for t in existing_tasks
     )
     kept = []
     for spec in specs:
@@ -164,32 +166,38 @@ def gap_lead_specs(
     observed_orders = [_order_key(t) for t in (observed or [])]
     specs: list[dict] = []
     for tactic in gaps:
-        pivots = pivots_for_tactic(tactic) or "search the relevant rule families and fields"
+        pivots = (
+            pivots_for_tactic(tactic) or "search the relevant rule families and fields"
+        )
         # Forward trace: some confirmed phase precedes this gap in the kill chain.
         if any(o < _order_key(tactic) for o in observed_orders):
-            specs.append({
-                "tactic": tactic,
-                "priority": _FORWARD_TRACE_PRIORITY,
-                "title": f"Trace forward to {tactic} on {host}",
-                "description": (
-                    f"The kill chain for `{host}` has CONFIRMED activity in an earlier phase but "
-                    f"NO evidence of **{tactic}**, the adjacent forward phase. A confirmed foothold "
-                    f"is a starting point, not a conclusion — establish what the actor did next on "
-                    f"this host (query {tactic}'s behaviour class), or record a confirmed negative "
-                    f"with a capable search. Pivots: {pivots}. {window_hint}"
-                ).strip(),
-            })
+            specs.append(
+                {
+                    "tactic": tactic,
+                    "priority": _FORWARD_TRACE_PRIORITY,
+                    "title": f"Trace forward to {tactic} on {host}",
+                    "description": (
+                        f"The kill chain for `{host}` has CONFIRMED activity in an earlier phase but "
+                        f"NO evidence of **{tactic}**, the adjacent forward phase. A confirmed foothold "
+                        f"is a starting point, not a conclusion — establish what the actor did next on "
+                        f"this host (query {tactic}'s behaviour class), or record a confirmed negative "
+                        f"with a capable search. Pivots: {pivots}. {window_hint}"
+                    ).strip(),
+                }
+            )
         else:
-            specs.append({
-                "tactic": tactic,
-                "priority": TACTIC_PRIORITY.get(tactic, 60),
-                "title": f"Establish or rule out {tactic} on {host}",
-                "description": (
-                    f"The MITRE ATT&CK kill chain for `{host}` shows NO evidence of **{tactic}**, "
-                    f"a core attack phase. Confirm whether it occurred or record a confirmed "
-                    f"negative (telemetry searched, none found). Pivots: {pivots}. {window_hint}"
-                ).strip(),
-            })
+            specs.append(
+                {
+                    "tactic": tactic,
+                    "priority": TACTIC_PRIORITY.get(tactic, 60),
+                    "title": f"Establish or rule out {tactic} on {host}",
+                    "description": (
+                        f"The MITRE ATT&CK kill chain for `{host}` shows NO evidence of **{tactic}**, "
+                        f"a core attack phase. Confirm whether it occurred or record a confirmed "
+                        f"negative (telemetry searched, none found). Pivots: {pivots}. {window_hint}"
+                    ).strip(),
+                }
+            )
     specs.sort(key=lambda s: -s["priority"])
     return specs[:MAX_GAP_LEADS]
 
@@ -220,8 +228,11 @@ def summarize_kill_chain(result_raw) -> tuple[str, list[str], list[str]]:
 
     techniques = (r or {}).get("techniques") or []
     if not techniques:
-        return ("kill-chain: no MITRE ATT&CK-tagged events found in window",
-                [], list(_CORE_PHASES))
+        return (
+            "kill-chain: no MITRE ATT&CK-tagged events found in window",
+            [],
+            list(_CORE_PHASES),
+        )
 
     by_tactic: dict[str, list[str]] = {}
     for t in techniques:
@@ -233,7 +244,7 @@ def summarize_kill_chain(result_raw) -> tuple[str, list[str], list[str]]:
         ids = t.get("event_ids") or []
         if ids:
             label += f"[{ids[0]}]"
-        for tactic in (t.get("tactics") or ["(untagged)"]):
+        for tactic in t.get("tactics") or ["(untagged)"]:
             by_tactic.setdefault(tactic, []).append(label)
 
     ordered_tactics = sorted(by_tactic, key=_order_key)
@@ -243,6 +254,8 @@ def summarize_kill_chain(result_raw) -> tuple[str, list[str], list[str]]:
 
     content = f"kill-chain ({len(techniques)} techniques): " + "; ".join(parts)
     if gaps:
-        content += (" || GAPS (core phases with no evidence — investigate or rule out): "
-                    + ", ".join(gaps))
+        content += (
+            " || GAPS (core phases with no evidence — investigate or rule out): "
+            + ", ".join(gaps)
+        )
     return content[:1400], observed, gaps

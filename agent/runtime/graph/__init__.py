@@ -11,14 +11,41 @@ can be split into a sub-package without touching a single import site or test.
 Contributor rule: the submodules own the names; each ``__init__`` only re-exports
 them — never define new behavior in an ``__init__``.
 """
+
 from . import (
-    state, sanitize, parsing, timeutil, toolio, board, validation, synthesis, leads,
-    lead_model, observation, interpretation, nodes_loop, nodes_flow, builder,
+    state,
+    sanitize,
+    parsing,
+    timeutil,
+    toolio,
+    board,
+    validation,
+    synthesis,
+    leads,
+    lead_model,
+    observation,
+    interpretation,
+    nodes_loop,
+    nodes_flow,
+    builder,
 )
 
 _submodules = [
-    state, sanitize, parsing, timeutil, toolio, board, validation, synthesis, leads,
-    lead_model, observation, interpretation, nodes_loop, nodes_flow, builder,
+    state,
+    sanitize,
+    parsing,
+    timeutil,
+    toolio,
+    board,
+    validation,
+    synthesis,
+    leads,
+    lead_model,
+    observation,
+    interpretation,
+    nodes_loop,
+    nodes_flow,
+    builder,
 ]
 for _m in _submodules:
     for _n in dir(_m):

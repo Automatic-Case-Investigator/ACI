@@ -7,9 +7,35 @@ from langchain_core.messages import ToolMessage
 
 from ..infra.logbus import emit, src_label
 
-from .parsing import _ACTIVE_COMPROMISE_INDICATORS_RE, _ANTI_FORENSIC_RE, _BRUTE_FORCE_RE, _COMMAND_LITERAL_PATTERNS, _DOMAIN_LITERAL_RE, _EVENT_ID_TOKEN_RE, _FACT_BULLET_RE, _FINDINGS_RE, _HASH_LITERAL_RE, _IP_LITERAL_RE, _JSON_EVENT_ID_RE, _LONG_HEX_RE, _NEGATED_EVIDENCE_RE, _NEW_LEADS_HEADER_RE, _PATH_LITERAL_RE, _PERSISTENCE_RE, _REVERSE_SHELL_RE, _SOURCE_REF_RE, _TROJAN_RE, _ascii_dashes, _extract_source_refs, _has_positive_pattern, _is_none_bullet, _lines_with_ips, _section_body, _strip_markers
+from .parsing import (
+    _ACTIVE_COMPROMISE_INDICATORS_RE,
+    _ANTI_FORENSIC_RE,
+    _BRUTE_FORCE_RE,
+    _COMMAND_LITERAL_PATTERNS,
+    _DOMAIN_LITERAL_RE,
+    _EVENT_ID_TOKEN_RE,
+    _FACT_BULLET_RE,
+    _FINDINGS_RE,
+    _HASH_LITERAL_RE,
+    _IP_LITERAL_RE,
+    _JSON_EVENT_ID_RE,
+    _LONG_HEX_RE,
+    _NEGATED_EVIDENCE_RE,
+    _NEW_LEADS_HEADER_RE,
+    _PATH_LITERAL_RE,
+    _PERSISTENCE_RE,
+    _REVERSE_SHELL_RE,
+    _SOURCE_REF_RE,
+    _TROJAN_RE,
+    _ascii_dashes,
+    _extract_source_refs,
+    _has_positive_pattern,
+    _is_none_bullet,
+    _lines_with_ips,
+    _section_body,
+    _strip_markers,
+)
 from .state import AgentState
-
 
 
 def _collect_escalation_facts(text: str) -> list[str]:
@@ -30,9 +56,8 @@ def _collect_escalation_facts(text: str) -> list[str]:
             continue
         if _NEGATED_EVIDENCE_RE.search(content):
             continue
-        if (
-            _ACTIVE_COMPROMISE_INDICATORS_RE.search(content)
-            and _extract_source_refs(content)
+        if _ACTIVE_COMPROMISE_INDICATORS_RE.search(content) and _extract_source_refs(
+            content
         ):
             results.append(content)
     return results
@@ -82,10 +107,16 @@ def _board_compromise_facts(state: AgentState) -> list[str]:
         if entry.get("kind") not in ("artifact", "fact"):
             continue
         content = (entry.get("content") or "").strip()
-        if not content or _is_none_bullet(content) or _NEGATED_EVIDENCE_RE.search(content):
+        if (
+            not content
+            or _is_none_bullet(content)
+            or _NEGATED_EVIDENCE_RE.search(content)
+        ):
             continue
         is_decoded_command = bool(_DECODED_COMMAND_MARKER_RE.search(content))
-        if not is_decoded_command and not _ACTIVE_COMPROMISE_INDICATORS_RE.search(content):
+        if not is_decoded_command and not _ACTIVE_COMPROMISE_INDICATORS_RE.search(
+            content
+        ):
             continue
         key = content.lower()
         if key in seen:
@@ -155,9 +186,13 @@ def _artifact_literals_in(text: str) -> set[str]:
         ref = (backtick or evid).strip()
         # Require at least one digit so field names (data.srcip, connect, socket)
         # don't get extracted as event IDs when backtick-wrapped.
-        if (ref and "/" not in ref and " " not in ref
-                and any(ch.isdigit() for ch in ref)
-                and _EVENT_ID_TOKEN_RE.match(ref)):
+        if (
+            ref
+            and "/" not in ref
+            and " " not in ref
+            and any(ch.isdigit() for ch in ref)
+            and _EVENT_ID_TOKEN_RE.match(ref)
+        ):
             artifacts.add(f"event:{ref.lower()}")
     for ref in _JSON_EVENT_ID_RE.findall(raw):
         ref = ref.strip()
@@ -217,9 +252,16 @@ def _board_entries_for_validation(state: AgentState) -> list[dict]:
         from aci_board import store
 
         store.init_db()
-        return store.list_entries(state["case_id"], state["run_id"], state["agent_name"])
+        return store.list_entries(
+            state["case_id"], state["run_id"], state["agent_name"]
+        )
     except Exception as exc:
-        emit(src_label(state["agent_name"]), "warning", "validation: board read failed", detail=str(exc))
+        emit(
+            src_label(state["agent_name"]),
+            "warning",
+            "validation: board read failed",
+            detail=str(exc),
+        )
         return []
 
 
@@ -231,7 +273,9 @@ def _trusted_artifacts_for_validation(state: AgentState, messages: list) -> set[
 
     for message in messages or []:
         if isinstance(message, ToolMessage):
-            allowed.update(_positive_artifact_literals(getattr(message, "content", "") or ""))
+            allowed.update(
+                _positive_artifact_literals(getattr(message, "content", "") or "")
+            )
 
     for entry in _board_entries_for_validation(state):
         kind = entry.get("kind")
@@ -242,14 +286,16 @@ def _trusted_artifacts_for_validation(state: AgentState, messages: list) -> set[
 
     handoff = state.get("handoff") or {}
     if isinstance(handoff, dict):
-        allowed.update(_artifact_literals_in("\n".join(_iter_leaf_strings(handoff.get("artifacts") or {}))))
+        allowed.update(
+            _artifact_literals_in(
+                "\n".join(_iter_leaf_strings(handoff.get("artifacts") or {}))
+            )
+        )
     return allowed
 
 
 def _artifact_display(token: str) -> str:
     return token.split(":", 1)[1] if ":" in token else token
-
-
 
 
 def _derive_report_guardrails(

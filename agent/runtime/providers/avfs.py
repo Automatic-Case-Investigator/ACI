@@ -1,4 +1,5 @@
 """AVFS filesystem provider (streamable HTTP)."""
+
 from __future__ import annotations
 
 import asyncio
@@ -57,16 +58,20 @@ def resolved_agent_id() -> str:
 
     from ..config import resolve_settings
 
-    return cache_agent_id(resolve_settings("avfs", _defaults()).get("agent_id") or settings.AVFS_AGENT_ID)
+    return cache_agent_id(
+        resolve_settings("avfs", _defaults()).get("agent_id") or settings.AVFS_AGENT_ID
+    )
 
 
-register(MCPProvider(
-    key="avfs",
-    kind=KIND_FILESYSTEM,
-    setting_defaults=_defaults,
-    build_config=_build,
-    capabilities={
-        "workspace_read_write": ("whoami", "ls", "read", "cat", "mkdir", "write"),
-    },
-    instructions_required=False,
-))
+register(
+    MCPProvider(
+        key="avfs",
+        kind=KIND_FILESYSTEM,
+        setting_defaults=_defaults,
+        build_config=_build,
+        capabilities={
+            "workspace_read_write": ("whoami", "ls", "read", "cat", "mkdir", "write"),
+        },
+        instructions_required=False,
+    )
+)

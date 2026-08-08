@@ -1,6 +1,7 @@
 """Metric plugins. Every module here is auto-imported so its `@register` runs —
 adding a metric is a matter of dropping a new file in this package, nothing else.
 """
+
 import importlib
 import pkgutil
 

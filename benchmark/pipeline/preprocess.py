@@ -13,6 +13,7 @@ The envelope `_id` is randomized per run by `make_id()`; since load_wazuh uses e
 Making `_id` deterministic to anchor ground-truth event markers is a change to the
 vendored `wrap()` — see the scenario spec's marker note.
 """
+
 from __future__ import annotations
 
 import os

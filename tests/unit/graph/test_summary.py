@@ -1,19 +1,30 @@
 """Offline test of _build_investigation_summary using a real completed run."""
+
 import sys, os
-sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
 # Navigate from .claude/skills/run-aci-backend/tests/ up to project root (4 levels)
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, project_root)
-import django; django.setup()
+import django
+
+django.setup()
 
 from agent.models import AgentRun
 from aci_taskqueue import store as tq_store
 from aci_board import store as board_store
 
+
 def main():
     # Find a completed investigation run with tasks
-    runs = list(AgentRun.objects.filter(agent_name="investigation", status="completed").order_by("-created_at")[:5])
+    runs = list(
+        AgentRun.objects.filter(
+            agent_name="investigation", status="completed"
+        ).order_by("-created_at")[:5]
+    )
     if not runs:
         print("No completed investigation runs found")
         return 0
@@ -29,10 +40,18 @@ def main():
 
     # Simulate what _build_investigation_summary would produce
     SEED_TITLE = "populate investigation queue"
-    completed = [t for t in tasks if t.get("status") == "completed"
-                 and SEED_TITLE not in (t.get("title") or "").lower()]
-    incomplete = [t for t in tasks if t.get("status") not in ("completed", "dismissed")
-                  and SEED_TITLE not in (t.get("title") or "").lower()]
+    completed = [
+        t
+        for t in tasks
+        if t.get("status") == "completed"
+        and SEED_TITLE not in (t.get("title") or "").lower()
+    ]
+    incomplete = [
+        t
+        for t in tasks
+        if t.get("status") not in ("completed", "dismissed")
+        and SEED_TITLE not in (t.get("title") or "").lower()
+    ]
     facts = [e["content"] for e in entries if e.get("kind") == "fact"]
     hypotheses = [e["content"] for e in entries if e.get("kind") == "hypothesis"]
 
@@ -67,9 +86,9 @@ def main():
     if not completed and not facts:
         lines.append("No tasks completed and no facts confirmed.")
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("\n".join(lines))
-    print("="*60)
+    print("=" * 60)
     print(f"\nSummary length: {len(chr(10).join(lines))} chars")
     return 0
 

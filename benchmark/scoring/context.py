@@ -6,6 +6,7 @@ report into citable evidence — happens here, so a metric is a thin reader of t
 object and never re-implements parsing. Pure stdlib + pyyaml; no Django import, so
 metrics stay offline-testable.
 """
+
 from __future__ import annotations
 
 import re
@@ -63,9 +64,15 @@ class Phase:
     start: datetime
     end: datetime
     agent_id: str | None = None
-    scorable: bool = True                                     # False → no distinguishing event exists; excluded from recall
-    marker_rules: set[str] = field(default_factory=set)       # documentation of the real detecting rule(s)
-    marker_event_ids: set[str] = field(default_factory=set)   # legacy-only; phase_recall does not score by ids
+    scorable: bool = (
+        True  # False → no distinguishing event exists; excluded from recall
+    )
+    marker_rules: set[str] = field(
+        default_factory=set
+    )  # documentation of the real detecting rule(s)
+    marker_event_ids: set[str] = field(
+        default_factory=set
+    )  # legacy-only; phase_recall does not score by ids
     content_signature: dict[str, list[str]] = field(default_factory=dict)
 
 
@@ -108,7 +115,9 @@ class ScenarioSpec:
                 marker_rules={str(r) for r in (p.get("marker_rules") or [])},
                 marker_event_ids={str(e) for e in (p.get("marker_event_ids") or [])},
                 content_signature={
-                    key: [str(v) for v in (p.get("content_signature") or {}).get(key, [])]
+                    key: [
+                        str(v) for v in (p.get("content_signature") or {}).get(key, [])
+                    ]
                     for key in ("all", "any", "none")
                     if (p.get("content_signature") or {}).get(key)
                 },
@@ -123,8 +132,16 @@ class ScenarioSpec:
                 anchor_event_id=e.get("anchor_event_id"),
                 anchor_source_ref=e.get("anchor_source_ref"),
                 anchor_timestamp=_as_text(e.get("anchor_timestamp")),
-                anchor_rule_id=str(e["anchor_rule_id"]) if e.get("anchor_rule_id") is not None else None,
-                anchor_agent_id=str(e["anchor_agent_id"]) if e.get("anchor_agent_id") is not None else None,
+                anchor_rule_id=(
+                    str(e["anchor_rule_id"])
+                    if e.get("anchor_rule_id") is not None
+                    else None
+                ),
+                anchor_agent_id=(
+                    str(e["anchor_agent_id"])
+                    if e.get("anchor_agent_id") is not None
+                    else None
+                ),
             )
             for e in d.get("entry_points", [])
         ]
@@ -161,8 +178,12 @@ _CASE_ID_RE = re.compile(r"^~\d+$")
 
 def _cited_event_ids(text: str) -> set[str]:
     """Every native event id the report cites — in backtick OR square-bracket form."""
-    ids = {tok for m in _BACKTICK_RE.finditer(text)
-           for tok in [m.group(1).strip()] if _looks_like_event_id(tok)}
+    ids = {
+        tok
+        for m in _BACKTICK_RE.finditer(text)
+        for tok in [m.group(1).strip()]
+        if _looks_like_event_id(tok)
+    }
     for m in _BRACKET_RE.finditer(text):
         for tok in re.split(r"[,\s]+", m.group(1)):
             tok = tok.strip().strip("`'\"")
@@ -179,7 +200,9 @@ def _looks_like_event_id(token: str) -> bool:
     return bool(_OPAQUE_ID_RE.match(t)) and not _ISO_RE.fullmatch(t)
 
 
-def _signature_matches(signature: dict[str, list[str]] | None, content: str | None) -> bool:
+def _signature_matches(
+    signature: dict[str, list[str]] | None, content: str | None
+) -> bool:
     """Whether event/report content satisfies an optional phase-specific signature.
 
     Phase recall is intentionally timestamp-window-based with a textual signature gate.
@@ -223,7 +246,9 @@ def _decode_wp_meta_tokens(content: str) -> str:
         try:
             unquoted = unquote(token)
             padded = unquoted + ("=" * ((4 - len(unquoted) % 4) % 4))
-            decoded = base64.b64decode(padded, validate=False).decode("utf-8", errors="ignore")
+            decoded = base64.b64decode(padded, validate=False).decode(
+                "utf-8", errors="ignore"
+            )
             if decoded.strip():
                 decoded_parts.append(decoded)
         except Exception:
@@ -245,11 +270,13 @@ def _is_artifact_line(line: str) -> bool:
     They often contain session-local event ids, IPs, files, or commands without any
     interpretive claim, so using them for phase credit over-counts unrelated phases.
     """
-    return bool(re.match(
-        r"^\s*-\s*(?:ip|file|command|url|host|user|domain|hash|process|pid|srcip|dstip):\s",
-        line.strip(),
-        flags=re.IGNORECASE,
-    ))
+    return bool(
+        re.match(
+            r"^\s*-\s*(?:ip|file|command|url|host|user|domain|hash|process|pid|srcip|dstip):\s",
+            line.strip(),
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 @dataclass
@@ -274,11 +301,15 @@ class ParsedReport:
     event_content: dict[str, str] = field(default_factory=dict)
 
     @classmethod
-    def from_text(cls, text: str, anchor_iso: str | None = None,
-                  event_times: dict[str, datetime] | None = None,
-                  event_agents: dict[str, str] | None = None,
-                  event_content: dict[str, str] | None = None,
-                  raw_events: list[tuple[str, datetime, str]] | None = None) -> "ParsedReport":
+    def from_text(
+        cls,
+        text: str,
+        anchor_iso: str | None = None,
+        event_times: dict[str, datetime] | None = None,
+        event_agents: dict[str, str] | None = None,
+        event_content: dict[str, str] | None = None,
+        raw_events: list[tuple[str, datetime, str]] | None = None,
+    ) -> "ParsedReport":
         """Reduce the report to citable evidence.
 
         `anchor_iso` is the incident timestamp the benchmark harness hands the agent in
@@ -314,10 +345,16 @@ class ParsedReport:
                 if anchor_dt is not None and dt == anchor_dt and not line_has_event_id:
                     continue
                 timestamps.append((dt, None, line))
-        return cls(text=text, lines=lines, timestamps=timestamps, event_ids=_cited_event_ids(text),
-                   raw_events=raw_events or [],
-                   event_times=event_times or {}, event_agents=event_agents or {},
-                   event_content=event_content or {})
+        return cls(
+            text=text,
+            lines=lines,
+            timestamps=timestamps,
+            event_ids=_cited_event_ids(text),
+            raw_events=raw_events or [],
+            event_times=event_times or {},
+            event_agents=event_agents or {},
+            event_content=event_content or {},
+        )
 
     def covers(self, phase: Phase) -> bool:
         """Deterministic 'phase reached' test.
@@ -342,12 +379,14 @@ class ParsedReport:
         candidates = [
             (event_id, ts, content)
             for event_id, ts, content in self.raw_events
-            if phase.start <= ts <= phase.end and _signature_matches(phase.content_signature, content)
+            if phase.start <= ts <= phase.end
+            and _signature_matches(phase.content_signature, content)
         ]
         return bool(candidates)
 
 
 # ─────────────────────────────── scoring context ───────────────────────────────
+
 
 @dataclass
 class ScoringContext:
@@ -356,10 +395,10 @@ class ScoringContext:
     scenario: ScenarioSpec
     report: ParsedReport
     entry_point: str = ""
-    verdict: dict = field(default_factory=dict)   # parsed diagnosis verdict block
-    events: list = field(default_factory=list)    # AgentEvents (cost, termination)
-    meta: dict = field(default_factory=dict)      # run metadata (status, tokens, run_id)
-    judge: Any = None                             # LLMJudge, supplied only if a metric needs it
+    verdict: dict = field(default_factory=dict)  # parsed diagnosis verdict block
+    events: list = field(default_factory=list)  # AgentEvents (cost, termination)
+    meta: dict = field(default_factory=dict)  # run metadata (status, tokens, run_id)
+    judge: Any = None  # LLMJudge, supplied only if a metric needs it
 
     @classmethod
     def build(
@@ -405,8 +444,11 @@ class ScoringContext:
         return cls(
             scenario=scenario,
             report=ParsedReport.from_text(
-                report_text, anchor_iso=(meta or {}).get("anchor_timestamp"),
-                event_times=times, event_agents=agents, event_content=content,
+                report_text,
+                anchor_iso=(meta or {}).get("anchor_timestamp"),
+                event_times=times,
+                event_agents=agents,
+                event_content=content,
                 raw_events=raw_events,
             ),
             entry_point=entry_point,

@@ -19,13 +19,24 @@ from ...models import AgentRun
 from ..infra.avfs import reports_dir
 from ..engine.dispatch import dispatch_run
 from ..graph import (
-    _compact_history, _extract_input_tokens, _invoke_bound_model, _normalize,
-    _sanitize_history, _sanitize_message, _should_compact, _tmap,
+    _compact_history,
+    _extract_input_tokens,
+    _invoke_bound_model,
+    _normalize,
+    _sanitize_history,
+    _sanitize_message,
+    _should_compact,
+    _tmap,
 )
 from ..analysis.intent import generate_public_intent
 from ..infra.logbus import (
-    current_session, emit, get_run_issues, summarize_args, summarize_result,
-    summarize_think, update_context_usage,
+    current_session,
+    emit,
+    get_run_issues,
+    summarize_args,
+    summarize_result,
+    summarize_think,
+    update_context_usage,
 )
 from ..engine.mcp_client import build_mcp_client, load_mcp_prompt_guidance
 from ..engine.model_client import build_model
@@ -35,8 +46,6 @@ from .messages import _append_visible
 from .prompts import _ORCHESTRATOR_TOOL_POLICY, _orchestrator_system_prompt
 from .session import OrchestratorSession
 from .tools import _make_tools
-
-
 
 _INV_NEG_RE = re.compile(
     r"(?:don'?t|do\s+not|without|no)\s+invest",
@@ -79,12 +88,16 @@ _TRIAGE_CASE_INQUIRY_RE = re.compile(
 )
 # Extracts the first TheHive case ID (~digits or bare digits) from a string.
 _CASE_ID_RE = re.compile(r"(~\d+|\b\d{7,}\b)")
-_ALERT_ID_RE = re.compile(r"\balert\s+([A-Za-z0-9][A-Za-z0-9_.:\-~]{2,})", re.IGNORECASE)
+_ALERT_ID_RE = re.compile(
+    r"\balert\s+([A-Za-z0-9][A-Za-z0-9_.:\-~]{2,})", re.IGNORECASE
+)
 _CASE_WORD_RE = re.compile(r"\bcase\b", re.IGNORECASE)
 _ALERT_WORD_RE = re.compile(r"\balert\b", re.IGNORECASE)
 
 
-def _extract_triage_src_entity_id(question: str, session_src_entity_id: str | None) -> str | None:
+def _extract_triage_src_entity_id(
+    question: str, session_src_entity_id: str | None
+) -> str | None:
     """Return an entity ID if the question is a triage request, else None.
 
     Does not match opt-outs ("triage only" is fine, "don't triage" is not).
@@ -128,7 +141,9 @@ def _source_entity_type_from_question(question: str | None) -> str:
     return "unknown"
 
 
-def _triage_routing_target(question: str, session_src_entity_id: str | None) -> tuple[str | None, str]:
+def _triage_routing_target(
+    question: str, session_src_entity_id: str | None
+) -> tuple[str | None, str]:
     """Return the triage target id and source type, with explicit alert wording first."""
     alert_id = _extract_triage_alert_id(question)
     if alert_id:
@@ -157,7 +172,9 @@ def _analyst_requested_investigation(question: str | None) -> bool:
     return bool(_INV_IMPERATIVE_RE.search(q))
 
 
-async def run_orchestrator(session: OrchestratorSession, question: str, max_rounds: int = 12) -> str:
+async def run_orchestrator(
+    session: OrchestratorSession, question: str, max_rounds: int = 12
+) -> str:
     """Handle one analyst question, maintaining conversation history across calls."""
     try:
         return await _run_orchestrator_impl(session, question, max_rounds)
@@ -169,7 +186,11 @@ async def run_orchestrator(session: OrchestratorSession, question: str, max_roun
 
 def _format_triage_answer(session: OrchestratorSession) -> str:
     report = (session.last_triage_report or "").strip()
-    verdict = session.last_triage_verdict if isinstance(session.last_triage_verdict, dict) else None
+    verdict = (
+        session.last_triage_verdict
+        if isinstance(session.last_triage_verdict, dict)
+        else None
+    )
     if session.last_triage_status and session.last_triage_status != "completed":
         prefix = (
             f"Triage did not complete successfully (status: {session.last_triage_status}). "
@@ -188,7 +209,9 @@ def _format_triage_answer(session: OrchestratorSession) -> str:
     return prefix + (f"\n\n{report}" if report else "")
 
 
-async def _run_orchestrator_impl(session: OrchestratorSession, question: str, max_rounds: int = 12) -> str:
+async def _run_orchestrator_impl(
+    session: OrchestratorSession, question: str, max_rounds: int = 12
+) -> str:
     """Implementation of orchestrator with full state management."""
     # Load MCP tools (TheHive, Wazuh, AVFS) fresh per turn so the
     # subprocesses live within this event loop. Triage/investigation are added as
@@ -206,10 +229,16 @@ async def _run_orchestrator_impl(session: OrchestratorSession, question: str, ma
     # Gate case-write tools: only expose them when the analyst's message
     # contains an explicit write directive. Without this gate the model follows
     # MCP server instructions and posts reports after every investigation.
-    _CASE_WRITE_TOOLS = frozenset({
-        "post_case_report", "update_case", "close_case",
-        "resolve_case", "add_case_comment", "post_case_comment",
-    })
+    _CASE_WRITE_TOOLS = frozenset(
+        {
+            "post_case_report",
+            "update_case",
+            "close_case",
+            "resolve_case",
+            "add_case_comment",
+            "post_case_comment",
+        }
+    )
     _WRITE_PHRASES = re.compile(
         r"\b(post|write|submit|send|publish|add|create)\b.{0,40}"
         r"\b(report|page|comment|note|findings?)\b"
@@ -219,13 +248,17 @@ async def _run_orchestrator_impl(session: OrchestratorSession, question: str, ma
     )
     write_authorized = bool(_WRITE_PHRASES.search(question))
     if not write_authorized:
-        tools_for_model = [t for t in tools if getattr(t, "name", "") not in _CASE_WRITE_TOOLS]
+        tools_for_model = [
+            t for t in tools if getattr(t, "name", "") not in _CASE_WRITE_TOOLS
+        ]
     else:
         tools_for_model = tools
     bound = model.bind_tools(tools_for_model)
 
     # Build from existing history (multi-turn) or start fresh, with updated system prompt.
-    sys_msg = SystemMessage(content=_orchestrator_system_prompt(session, tool_names, mcp_prompt_guidance))
+    sys_msg = SystemMessage(
+        content=_orchestrator_system_prompt(session, tool_names, mcp_prompt_guidance)
+    )
     if session.messages:
         prior = [m for m in session.messages if not isinstance(m, SystemMessage)]
         messages = [sys_msg] + prior + [HumanMessage(content=question)]
@@ -236,8 +269,15 @@ async def _run_orchestrator_impl(session: OrchestratorSession, question: str, ma
     # Inject a hard routing directive when the question is a triage request and
     # triage has not already run this session.  This overrides the intent model's
     # tendency to answer case-inquiry questions with inline raw-tool calls.
-    triage_src_entity_id, triage_source_type = _triage_routing_target(question, session.src_entity_id)
-    if triage_src_entity_id and triage_source_type != "alert" and not session.last_triage_report and "triage" in tmap:
+    triage_src_entity_id, triage_source_type = _triage_routing_target(
+        question, session.src_entity_id
+    )
+    if (
+        triage_src_entity_id
+        and triage_source_type != "alert"
+        and not session.last_triage_report
+        and "triage" in tmap
+    ):
         session.src_entity_id = triage_src_entity_id
         session.source_entity_type = triage_source_type
         directive = (
@@ -250,7 +290,12 @@ async def _run_orchestrator_impl(session: OrchestratorSession, question: str, ma
         )
         messages.append(HumanMessage(content=directive))
         emit("orch", "note", f"routing directive: triage({triage_src_entity_id})")
-    if triage_src_entity_id and triage_source_type == "alert" and not session.last_triage_report and "triage" in tmap:
+    if (
+        triage_src_entity_id
+        and triage_source_type == "alert"
+        and not session.last_triage_report
+        and "triage" in tmap
+    ):
         session.src_entity_id = triage_src_entity_id
         session.source_entity_type = "alert"
         directive = (
@@ -280,7 +325,9 @@ async def _run_orchestrator_impl(session: OrchestratorSession, question: str, ma
         )
     )
     if is_investigation_consent:
-        inv_src_entity_id = session.last_triage_src_entity_id or session.src_entity_id or ""
+        inv_src_entity_id = (
+            session.last_triage_src_entity_id or session.src_entity_id or ""
+        )
         directive = (
             f"[Routing directive — follow exactly] "
             f"The analyst has confirmed investigation for {inv_src_entity_id}. "
@@ -318,11 +365,19 @@ async def _run_orchestrator_impl(session: OrchestratorSession, question: str, ma
             f"investigation sub-agent to use, not for you."
         )
         messages.append(HumanMessage(content=directive))
-        emit("orch", "note", f"routing directive: investigation resume({resume_src_entity_id})")
+        emit(
+            "orch",
+            "note",
+            f"routing directive: investigation resume({resume_src_entity_id})",
+        )
 
     for _ in range(max_rounds):
         if _should_compact(session.ctx_tokens):
-            emit("orch", "note", f"context compaction triggered ({session.ctx_tokens:,} tokens)")
+            emit(
+                "orch",
+                "note",
+                f"context compaction triggered ({session.ctx_tokens:,} tokens)",
+            )
             messages = await _compact_history(messages, bound, "orchestrator")
             session.ctx_tokens = 0  # reset; updated from next response
 
@@ -338,24 +393,32 @@ async def _run_orchestrator_impl(session: OrchestratorSession, question: str, ma
         session.model_calls_made += 1
         current_intent = intent_result.text
         if current_intent:
-            messages.append(HumanMessage(content=(
-                "[Public intent already shown to the analyst]\n"
-                f"{current_intent}\n\n"
-                "Perform that action now. Return tool calls to execute the planned "
-                "action. Only respond with text when all tool calls are complete and "
-                "you have results to report to the analyst."
-            )))
+            messages.append(
+                HumanMessage(
+                    content=(
+                        "[Public intent already shown to the analyst]\n"
+                        f"{current_intent}\n\n"
+                        "Perform that action now. Return tool calls to execute the planned "
+                        "action. Only respond with text when all tool calls are complete and "
+                        "you have results to report to the analyst."
+                    )
+                )
+            )
 
         session.thinking = True
         try:
             messages = _sanitize_history(messages)
             call_messages = messages
             if call_messages and isinstance(call_messages[-1], ToolMessage):
-                call_messages = call_messages + [HumanMessage(content=(
-                    "Tool results received. Continue your investigation: make more tool calls "
-                    "to gather additional data, or write your findings as plain text if you "
-                    "have enough to answer the analyst's question."
-                ))]
+                call_messages = call_messages + [
+                    HumanMessage(
+                        content=(
+                            "Tool results received. Continue your investigation: make more tool calls "
+                            "to gather additional data, or write your findings as plain text if you "
+                            "have enough to answer the analyst's question."
+                        )
+                    )
+                ]
             response = await _invoke_bound_model(bound, call_messages, "orchestrator")
         finally:
             session.thinking = False
@@ -384,13 +447,20 @@ async def _run_orchestrator_impl(session: OrchestratorSession, question: str, ma
             session.thinking = True
             try:
                 retry_msgs = _sanitize_history(
-                    messages + [HumanMessage(content=(
-                        "Write your response to the analyst as plain text now. "
-                        "Use the tool results above to answer their question directly. "
-                        "Do not call any tools. State what you found and your conclusion."
-                    ))]
+                    messages
+                    + [
+                        HumanMessage(
+                            content=(
+                                "Write your response to the analyst as plain text now. "
+                                "Use the tool results above to answer their question directly. "
+                                "Do not call any tools. State what you found and your conclusion."
+                            )
+                        )
+                    ]
                 )
-                retry_resp = await _invoke_bound_model(text_only_bound, retry_msgs, "orchestrator")
+                retry_resp = await _invoke_bound_model(
+                    text_only_bound, retry_msgs, "orchestrator"
+                )
             finally:
                 session.thinking = False
             _sanitize_message(retry_resp)
@@ -422,12 +492,20 @@ async def _run_orchestrator_impl(session: OrchestratorSession, question: str, ma
             # don't lose context. Any tool that mentions a case_id/src_entity_id
             # (TheHive lookups, sub-agent calls) updates the session.
             raw_cid_val = args.get("case_id") or args.get("src_entity_id")
-            if not session.src_entity_id and isinstance(raw_cid_val, str) and raw_cid_val:
+            if (
+                not session.src_entity_id
+                and isinstance(raw_cid_val, str)
+                and raw_cid_val
+            ):
                 raw_cid = raw_cid_val
                 # TheHive case IDs require the ~ prefix; normalise only bare
                 # numeric case IDs. Opaque alert IDs are valid as-is.
                 session.src_entity_id = f"~{raw_cid}" if raw_cid.isdigit() else raw_cid
-            if tc["name"] in {"triage", "investigation"} and isinstance(raw_cid_val, str) and raw_cid_val:
+            if (
+                tc["name"] in {"triage", "investigation"}
+                and isinstance(raw_cid_val, str)
+                and raw_cid_val
+            ):
                 inferred_type = _source_entity_type_from_question(question)
                 if inferred_type != "unknown":
                     session.source_entity_type = inferred_type
@@ -440,63 +518,92 @@ async def _run_orchestrator_impl(session: OrchestratorSession, question: str, ma
                 )
                 emit("orch", "error", f"unknown tool '{tc['name']}'", detail=content)
             else:
-                emit("orch", "call", f"{tc['name']}({summarize_args(args)})",
-                     detail=json.dumps(args, indent=2, default=str),
-                     metadata=(
-                         {"intent_sequence": session.intent_sequence}
-                         if current_intent else {}
-                     ))
+                emit(
+                    "orch",
+                    "call",
+                    f"{tc['name']}({summarize_args(args)})",
+                    detail=json.dumps(args, indent=2, default=str),
+                    metadata=(
+                        {"intent_sequence": session.intent_sequence}
+                        if current_intent
+                        else {}
+                    ),
+                )
                 try:
                     content = await tool.ainvoke(tc["args"])
                     if not isinstance(content, str):
                         content = _normalize(content)
-                    emit("orch", "result", f"{tc['name']}: {summarize_result(tc['name'], content)}", detail=content)
+                    emit(
+                        "orch",
+                        "result",
+                        f"{tc['name']}: {summarize_result(tc['name'], content)}",
+                        detail=content,
+                    )
                 except asyncio.CancelledError:
                     # Subagent was cancelled by the analyst (stop request). Record this state
                     # and save session before re-raising so follow-ups have context.
                     content = "[Tool execution cancelled by analyst]"
                     emit("orch", "result", f"{tc['name']}: [cancelled]", detail=content)
                     session.messages = messages
-                    session.messages.append(ToolMessage(content=content, tool_call_id=tc["id"], name=tc["name"]))
+                    session.messages.append(
+                        ToolMessage(
+                            content=content, tool_call_id=tc["id"], name=tc["name"]
+                        )
+                    )
                     raise
                 adef = get_agent(tc["name"])
                 if adef is not None and adef.produces_handoff:
                     produces_handoff_ran = True
                 if adef is not None and adef.consumes_handoff:
                     consumes_handoff_ran = True
-            messages.append(ToolMessage(content=content, tool_call_id=tc["id"], name=tc["name"]))
+            messages.append(
+                ToolMessage(content=content, tool_call_id=tc["id"], name=tc["name"])
+            )
 
         # Auto-trigger investigation when triage just completed AND the analyst
         # explicitly requested investigation in the original question.
         # This prevents the model from returning the triage report prematurely
         # instead of following through on the analyst's request.
-        if (produces_handoff_ran and session.last_triage_report
-                and _analyst_requested_investigation(question)):
+        if (
+            produces_handoff_ran
+            and session.last_triage_report
+            and _analyst_requested_investigation(question)
+        ):
             invest_tool = tmap.get("investigation")
             if invest_tool is not None:
-                emit("orch", "note", "auto-triggering investigation per analyst request")
+                emit(
+                    "orch", "note", "auto-triggering investigation per analyst request"
+                )
                 invest_args = {
                     "src_entity_id": session.src_entity_id or "",
                     "question": question,
                     "triage_report": session.last_triage_report,
                 }
-                emit("orch", "call",
-                     f"investigation({summarize_args(invest_args)})",
-                     detail=json.dumps(invest_args, indent=2, default=str))
+                emit(
+                    "orch",
+                    "call",
+                    f"investigation({summarize_args(invest_args)})",
+                    detail=json.dumps(invest_args, indent=2, default=str),
+                )
                 try:
                     inv_content = await invest_tool.ainvoke(invest_args)
                     if not isinstance(inv_content, str):
                         inv_content = _normalize(inv_content)
-                    emit("orch", "result",
-                         f"investigation: {summarize_result('investigation', inv_content)}",
-                         detail=inv_content)
+                    emit(
+                        "orch",
+                        "result",
+                        f"investigation: {summarize_result('investigation', inv_content)}",
+                        detail=inv_content,
+                    )
                 except asyncio.CancelledError:
                     raise
                 # Do NOT append a ToolMessage — there is no matching tool_call_id in the
                 # preceding AIMessage, so the OpenAI API rejects it on history replay.
                 # The result is captured in session.last_investigation_report by the tool;
                 # add it as a HumanMessage so the text-only fallback can reference it too.
-                messages.append(HumanMessage(content=f"[investigation result]\n{inv_content}"))
+                messages.append(
+                    HumanMessage(content=f"[investigation result]\n{inv_content}")
+                )
                 produces_handoff_ran = False
                 consumes_handoff_ran = True
 
@@ -544,12 +651,19 @@ async def _run_orchestrator_impl(session: OrchestratorSession, question: str, ma
             try:
                 agent_label = "Triage" if produces_handoff_ran else "Investigation"
                 final_messages = _sanitize_history(
-                    messages + [HumanMessage(content=(
-                        f"{agent_label} is complete. Present the result from the tool result above "
-                        "to the analyst. Write plain text only — no tool calls."
-                    ))]
+                    messages
+                    + [
+                        HumanMessage(
+                            content=(
+                                f"{agent_label} is complete. Present the result from the tool result above "
+                                "to the analyst. Write plain text only — no tool calls."
+                            )
+                        )
+                    ]
                 )
-                final_response = await _invoke_bound_model(text_only_bound, final_messages, "orchestrator")
+                final_response = await _invoke_bound_model(
+                    text_only_bound, final_messages, "orchestrator"
+                )
             finally:
                 session.thinking = False
             _sanitize_message(final_response)
@@ -561,22 +675,34 @@ async def _run_orchestrator_impl(session: OrchestratorSession, question: str, ma
             session.messages = messages
             # Triage fallback: return the captured triage report if the model emits nothing.
             # Investigation fallback: never substitute the triage report for an investigation summary.
-            fallback = session.last_triage_report if produces_handoff_ran else "(no answer)"
+            fallback = (
+                session.last_triage_report if produces_handoff_ran else "(no answer)"
+            )
             answer = (final_response.content or "").strip() or fallback
             _append_visible(session.visible_transcript, "assistant", answer)
             return answer
 
     # Budget exhausted — summarise work-so-far and yield with a resumable note (A4).
-    emit("orch", "note", f"round budget reached ({max_rounds}) — ask a follow-up to continue",
-         detail="resumable", expand=True)
+    emit(
+        "orch",
+        "note",
+        f"round budget reached ({max_rounds}) — ask a follow-up to continue",
+        detail="resumable",
+        expand=True,
+    )
     session.thinking = True
     try:
         final_messages = _sanitize_history(
-            messages + [HumanMessage(content=(
-                "You have reached the round budget for this turn. Summarise what was "
-                "accomplished and what remains, in 2-3 sentences, so the analyst can "
-                "continue with a follow-up."
-            ))]
+            messages
+            + [
+                HumanMessage(
+                    content=(
+                        "You have reached the round budget for this turn. Summarise what was "
+                        "accomplished and what remains, in 2-3 sentences, so the analyst can "
+                        "continue with a follow-up."
+                    )
+                )
+            ]
         )
         final = await _invoke_bound_model(bound, final_messages, "orchestrator")
     finally:

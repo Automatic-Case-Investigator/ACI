@@ -1,9 +1,13 @@
 """Diagnose why test polling might fail."""
+
 import os, sys, time, requests, django
-sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-os.environ['DJANGO_SETTINGS_MODULE'] = 'aci.settings'
+
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+os.environ["DJANGO_SETTINGS_MODULE"] = "aci.settings"
 # Navigate from .claude/skills/run-aci-backend/tests/ up to project root (4 levels)
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, project_root)
 django.setup()
 from agent.models import AgentEvent
@@ -11,10 +15,15 @@ from agent.dashboard.runner import send_message, is_processing
 
 BASE = "http://localhost:8000"
 
+
 def main():
     # Step 1: Create a test session
     print("Creating test session...", flush=True)
-    r = requests.post(f"{BASE}/dashboard/ask", data={"question": "Quick test: what is ACI?"}, allow_redirects=False)
+    r = requests.post(
+        f"{BASE}/dashboard/ask",
+        data={"question": "Quick test: what is ACI?"},
+        allow_redirects=False,
+    )
     print(f"POST status: {r.status_code}", flush=True)
     session_id = r.headers["Location"].rstrip("/").split("/")[-1]
     print(f"Session ID: {session_id}", flush=True)
@@ -25,10 +34,17 @@ def main():
     last_id = 0
     found = False
     while time.time() < deadline:
-        events = list(AgentEvent.objects.filter(session_id=session_id, id__gt=last_id).order_by("id"))
+        events = list(
+            AgentEvent.objects.filter(session_id=session_id, id__gt=last_id).order_by(
+                "id"
+            )
+        )
         for ev in events:
             last_id = ev.id
-            print(f"  Found event: [{ev.id}] kind={ev.kind} source={ev.source}", flush=True)
+            print(
+                f"  Found event: [{ev.id}] kind={ev.kind} source={ev.source}",
+                flush=True,
+            )
             if ev.kind == "answer":
                 print(f"  ANSWER: {(ev.detail or '')[:200]}", flush=True)
                 found = True
@@ -55,10 +71,17 @@ def main():
     last_id = last_id_before
     found2 = False
     while time.time() < deadline:
-        events = list(AgentEvent.objects.filter(session_id=session_id, id__gt=last_id).order_by("id"))
+        events = list(
+            AgentEvent.objects.filter(session_id=session_id, id__gt=last_id).order_by(
+                "id"
+            )
+        )
         for ev in events:
             last_id = ev.id
-            print(f"  New event: [{ev.id}] kind={ev.kind} source={ev.source} | {(ev.summary or '')[:60]}", flush=True)
+            print(
+                f"  New event: [{ev.id}] kind={ev.kind} source={ev.source} | {(ev.summary or '')[:60]}",
+                flush=True,
+            )
             if ev.kind == "answer":
                 print(f"  ROUND 2 ANSWER: {(ev.detail or '')[:200]}", flush=True)
                 found2 = True
@@ -69,7 +92,10 @@ def main():
 
     if not found2:
         print("No Round 2 answer in 60 seconds", flush=True)
-        print("This means send_message from test process is NOT working as expected", flush=True)
+        print(
+            "This means send_message from test process is NOT working as expected",
+            flush=True,
+        )
         return 1
 
     print("Round 2 PASS: send_message works from test process", flush=True)

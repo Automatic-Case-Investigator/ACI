@@ -4,6 +4,7 @@ Offline test: workflow dedup + response policy.
 Run from project root with:
     python .claude/skills/run-aci-backend/tests/test_workflow.py -v
 """
+
 from __future__ import annotations
 
 import os
@@ -11,12 +12,15 @@ import sys
 import unittest
 from datetime import datetime, timedelta, timezone
 
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, project_root)
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
 os.environ.setdefault("SECRET_KEY", "test")
 
 import django
+
 django.setup()
 
 from agent.models import AgentRun
@@ -47,7 +51,9 @@ class TestDedup(unittest.TestCase):
 
     def test_finds_active_run_in_window(self):
         AgentRun.objects.create(
-            case_id=MARK + "1", agent_name="triage", question="q",
+            case_id=MARK + "1",
+            agent_name="triage",
+            question="q",
             status=AgentRun.STATUS_RUNNING,
         )
         dup = find_duplicate_run(MARK + "1", "triage", 600)
@@ -55,21 +61,27 @@ class TestDedup(unittest.TestCase):
 
     def test_ignores_other_agent(self):
         AgentRun.objects.create(
-            case_id=MARK + "2", agent_name="triage", question="q",
+            case_id=MARK + "2",
+            agent_name="triage",
+            question="q",
             status=AgentRun.STATUS_RUNNING,
         )
         self.assertIsNone(find_duplicate_run(MARK + "2", "investigation", 600))
 
     def test_ignores_completed_run(self):
         AgentRun.objects.create(
-            case_id=MARK + "3", agent_name="triage", question="q",
+            case_id=MARK + "3",
+            agent_name="triage",
+            question="q",
             status=AgentRun.STATUS_COMPLETED,
         )
         self.assertIsNone(find_duplicate_run(MARK + "3", "triage", 600))
 
     def test_ignores_run_outside_window(self):
         run = AgentRun.objects.create(
-            case_id=MARK + "4", agent_name="triage", question="q",
+            case_id=MARK + "4",
+            agent_name="triage",
+            question="q",
             status=AgentRun.STATUS_RUNNING,
         )
         old = datetime.now(timezone.utc) - timedelta(seconds=1200)
@@ -78,7 +90,9 @@ class TestDedup(unittest.TestCase):
 
     def test_window_zero_disables(self):
         AgentRun.objects.create(
-            case_id=MARK + "5", agent_name="triage", question="q",
+            case_id=MARK + "5",
+            agent_name="triage",
+            question="q",
             status=AgentRun.STATUS_RUNNING,
         )
         self.assertIsNone(find_duplicate_run(MARK + "5", "triage", 0))
@@ -97,7 +111,9 @@ class TestResponsePolicy(DjangoTestCase):
 
     def _run(self, **over):
         fields = dict(
-            case_id=MARK + "esc", agent_name="triage", question="q",
+            case_id=MARK + "esc",
+            agent_name="triage",
+            question="q",
             status=AgentRun.STATUS_COMPLETED,
             verdict={"verdict": "fp", "confidence": "high"},
             metadata={"source_entity_type": "case"},
@@ -112,28 +128,35 @@ class TestResponsePolicy(DjangoTestCase):
     def test_subject_split_reads_the_trigger_provider(self):
         case = self._run(metadata={"source_entity_type": "case"})
         soar = self._run(metadata={"source_entity_type": "alert"})
-        siem = self._run(metadata={"source_entity_type": "alert",
-                                   "trigger_provider": "wazuh"})
+        siem = self._run(
+            metadata={"source_entity_type": "alert", "trigger_provider": "wazuh"}
+        )
         self.assertEqual(policy.subject_for_run(case), policy.CASE)
         # SOAR and SIEM alerts share one subject — the provider is not consulted.
         self.assertEqual(policy.subject_for_run(soar), policy.ALERT)
         self.assertEqual(policy.subject_for_run(siem), policy.ALERT)
 
     def test_configured_resolve_fires_on_a_clean_run(self):
-        ResponsePolicy.objects.create(verdict="fp", subject="case", action=policy.RESOLVE)
-        run = self._run(verdict={
-            "verdict": "fp", "confidence": "high",
-            "classification_basis": "benign_evidence",
-            "supporting_evidence": ["approved change ticket"],
-            "nonblocking_gaps": ["no packet capture available"],
-        })
+        ResponsePolicy.objects.create(
+            verdict="fp", subject="case", action=policy.RESOLVE
+        )
+        run = self._run(
+            verdict={
+                "verdict": "fp",
+                "confidence": "high",
+                "classification_basis": "benign_evidence",
+                "supporting_evidence": ["approved change ticket"],
+                "nonblocking_gaps": ["no packet capture available"],
+            }
+        )
         decision = apply_response_policy(run)
         self.assertEqual(decision["action"], policy.RESOLVE)
         self.assertNotIn("withheld_reason", decision)
 
     def test_promote_case_is_a_normal_executable_decision(self):
         ResponsePolicy.objects.create(
-            verdict="tp", subject="alert", action=policy.PROMOTE_CASE)
+            verdict="tp", subject="alert", action=policy.PROMOTE_CASE
+        )
         run = self._run(
             verdict={"verdict": "tp", "confidence": "high"},
             metadata={"source_entity_type": "alert"},

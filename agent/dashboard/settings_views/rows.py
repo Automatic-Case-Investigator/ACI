@@ -22,7 +22,6 @@ from agent.models import (
 )
 from django.http import JsonResponse
 
-
 # Built-in connector connection forms. Each field's value lives in
 # `ProviderConfig.settings` (key below), which the runtime already injects into the
 # provider's MCP subprocess on launch — so saving here reconfigures the live tools.
@@ -31,33 +30,66 @@ from django.http import JsonResponse
 # submitting a blank secret clears it.
 _CONNECTION_SCHEMA = {
     "aci-wazuh": {
-        "label": "Wazuh", "kind": "SIEM", "category": "SIEM",
+        "label": "Wazuh",
+        "kind": "SIEM",
+        "category": "SIEM",
         "fields": [
-            {"name": "url", "label": "Indexer Base URL", "type": "text", "placeholder": "https://wazuh:9200"},
-            {"name": "index_pattern", "label": "Index pattern", "type": "text", "placeholder": "wazuh-alerts-*"},
+            {
+                "name": "url",
+                "label": "Indexer Base URL",
+                "type": "text",
+                "placeholder": "https://wazuh:9200",
+            },
+            {
+                "name": "index_pattern",
+                "label": "Index pattern",
+                "type": "text",
+                "placeholder": "wazuh-alerts-*",
+            },
             {"name": "user", "label": "User", "type": "text", "placeholder": "admin"},
             {"name": "password", "label": "Password", "type": "secret"},
             {"name": "verify_tls", "label": "Verify TLS", "type": "bool"},
         ],
     },
     "aci-thehive": {
-        "label": "TheHive", "kind": "SOAR", "category": "SOAR",
+        "label": "TheHive",
+        "kind": "SOAR",
+        "category": "SOAR",
         "fields": [
-            {"name": "base_url", "label": "API Base URL", "type": "text", "placeholder": "http://thehive:9000"},
+            {
+                "name": "base_url",
+                "label": "API Base URL",
+                "type": "text",
+                "placeholder": "http://thehive:9000",
+            },
             {"name": "api_key", "label": "API key", "type": "secret"},
             {"name": "verify_tls", "label": "Verify TLS", "type": "bool"},
         ],
     },
     "aci-ti": {
-        "label": "VirusTotal (TI)", "kind": "TI", "category": "TI",
+        "label": "VirusTotal (TI)",
+        "kind": "TI",
+        "category": "TI",
         "fields": [
-            {"name": "api_key", "label": "API key", "type": "secret",
-             "pattern": r"^[0-9a-fA-F]{64}$",
-             "pattern_hint": "a 64-character hexadecimal string"},
-            {"name": "base_url", "label": "API Base URL", "type": "text",
-             "placeholder": "https://www.virustotal.com"},
-            {"name": "calls_per_minute", "label": "Rate limit (calls/min)", "type": "text",
-             "placeholder": "4"},
+            {
+                "name": "api_key",
+                "label": "API key",
+                "type": "secret",
+                "pattern": r"^[0-9a-fA-F]{64}$",
+                "pattern_hint": "a 64-character hexadecimal string",
+            },
+            {
+                "name": "base_url",
+                "label": "API Base URL",
+                "type": "text",
+                "placeholder": "https://www.virustotal.com",
+            },
+            {
+                "name": "calls_per_minute",
+                "label": "Rate limit (calls/min)",
+                "type": "text",
+                "placeholder": "4",
+            },
         ],
     },
 }
@@ -78,15 +110,21 @@ def _connection_fields(schema, stored: dict) -> list[dict]:
     for f in schema["fields"]:
         value = stored.get(f["name"], "")
         is_secret = f["type"] == "secret"
-        fields.append({
-            "name": f["name"],
-            "label": f["label"],
-            "type": f["type"],
-            "placeholder": f.get("placeholder", ""),
-            "value": str("" if value is None else value),
-            "secret_set": bool(value) if is_secret else False,
-            "checked": str(value).strip().lower() == "true" if f["type"] == "bool" else False,
-        })
+        fields.append(
+            {
+                "name": f["name"],
+                "label": f["label"],
+                "type": f["type"],
+                "placeholder": f.get("placeholder", ""),
+                "value": str("" if value is None else value),
+                "secret_set": bool(value) if is_secret else False,
+                "checked": (
+                    str(value).strip().lower() == "true"
+                    if f["type"] == "bool"
+                    else False
+                ),
+            }
+        )
     return fields
 
 
@@ -129,37 +167,55 @@ def _integration_rows() -> list[dict]:
                 "show_ti_cache": False,
             }
         schema_fields = [
-            {"name": f["name"], "label": f["label"], "type": f["type"],
-             "placeholder": f.get("placeholder", "")}
+            {
+                "name": f["name"],
+                "label": f["label"],
+                "type": f["type"],
+                "placeholder": f.get("placeholder", ""),
+            }
             for f in schema["fields"]
         ]
-        grp["providers"].append({
-            "provider_key": key,
-            "label": schema["label"],
-            "schema_fields": schema_fields,
-            "enabled": is_enabled(key, provider.default_enabled if provider else True),
-            "mcp_managed": key in mcp_keys,
-            "internal": provider_category(key) == "internal",
-        })
+        grp["providers"].append(
+            {
+                "provider_key": key,
+                "label": schema["label"],
+                "schema_fields": schema_fields,
+                "enabled": is_enabled(
+                    key, provider.default_enabled if provider else True
+                ),
+                "mcp_managed": key in mcp_keys,
+                "internal": provider_category(key) == "internal",
+            }
+        )
         if key == "aci-ti":
             grp["show_ti_cache"] = True
         for c in conns_by_provider.get(key, []):
-            fields = _connection_fields(schema, c.settings if isinstance(c.settings, dict) else {})
+            fields = _connection_fields(
+                schema, c.settings if isinstance(c.settings, dict) else {}
+            )
             summary = next(
-                (f["value"] for f in fields if f["name"] in ("base_url", "url") and f["value"]),
+                (
+                    f["value"]
+                    for f in fields
+                    if f["name"] in ("base_url", "url") and f["value"]
+                ),
                 "",
             )
-            grp["connections"].append({
-                "id": str(c.id),
-                "name": c.name,
-                "is_active": c.is_active,
-                "provider_key": key,
-                "provider_label": schema["label"],
-                "fields": fields,
-                "summary": summary,
-            })
+            grp["connections"].append(
+                {
+                    "id": str(c.id),
+                    "name": c.name,
+                    "is_active": c.is_active,
+                    "provider_key": key,
+                    "provider_label": schema["label"],
+                    "fields": fields,
+                    "summary": summary,
+                }
+            )
 
-    ordered = sorted(groups.values(), key=lambda g: _INTEGRATION_KIND_ORDER.get(g["kind"], 99))
+    ordered = sorted(
+        groups.values(), key=lambda g: _INTEGRATION_KIND_ORDER.get(g["kind"], 99)
+    )
     for g in ordered:
         g["connection_count"] = len(g["connections"])
         # Active connections first, then alphabetical by name.
@@ -181,9 +237,16 @@ def _test_connection(key: str, s: dict) -> tuple[bool, str]:
 
     try:
         if key == "aci-wazuh":
-            base = (s.get("url") or f"https://{s.get('host')}:{s.get('port') or 9200}").rstrip("/")
+            base = (
+                s.get("url") or f"https://{s.get('host')}:{s.get('port') or 9200}"
+            ).rstrip("/")
             verify = str(s.get("verify_tls", "false")).strip().lower() == "true"
-            r = httpx.get(f"{base}/_cluster/health", auth=(s.get("user") or "admin", s.get("password") or ""), verify=verify, timeout=10)
+            r = httpx.get(
+                f"{base}/_cluster/health",
+                auth=(s.get("user") or "admin", s.get("password") or ""),
+                verify=verify,
+                timeout=10,
+            )
             r.raise_for_status()
             return True, f"reachable (cluster {r.json().get('status', 'ok')})"
         if key == "aci-thehive":
@@ -194,20 +257,41 @@ def _test_connection(key: str, s: dict) -> tuple[bool, str]:
             if base and not base.startswith(("http://", "https://")):
                 base = f"http://{base}"
             verify = str(s.get("verify_tls", "true")).strip().lower() == "true"
-            r = httpx.get(f"{base}/api/case", params={"range": "0-1"}, headers={"Authorization": f"Bearer {s.get('api_key', '')}"}, verify=verify, timeout=10)
+            r = httpx.get(
+                f"{base}/api/case",
+                params={"range": "0-1"},
+                headers={"Authorization": f"Bearer {s.get('api_key', '')}"},
+                verify=verify,
+                timeout=10,
+            )
             r.raise_for_status()
             return True, "authenticated"
         if key == "avfs":
             base = (s.get("url") or "").rstrip("/")
-            r = httpx.get(base, headers={"Authorization": f"Bearer {s.get('auth_token', '')}"}, timeout=10)
+            r = httpx.get(
+                base,
+                headers={"Authorization": f"Bearer {s.get('auth_token', '')}"},
+                timeout=10,
+            )
             return True, f"reachable (HTTP {r.status_code})"
         if key == "aci-ti":
             from django.conf import settings as dj_settings
-            api_key = (s.get("api_key") or getattr(dj_settings, "VT_API_KEY", "") or "").strip()
+
+            api_key = (
+                s.get("api_key") or getattr(dj_settings, "VT_API_KEY", "") or ""
+            ).strip()
             if not api_key:
                 return False, "no API key set"
-            base = (s.get("base_url") or getattr(dj_settings, "VT_BASE_URL", "") or "https://www.virustotal.com").rstrip("/")
-            r = httpx.get(f"{base}/api/v3/ip_addresses/8.8.8.8", headers={"x-apikey": api_key}, timeout=10)
+            base = (
+                s.get("base_url")
+                or getattr(dj_settings, "VT_BASE_URL", "")
+                or "https://www.virustotal.com"
+            ).rstrip("/")
+            r = httpx.get(
+                f"{base}/api/v3/ip_addresses/8.8.8.8",
+                headers={"x-apikey": api_key},
+                timeout=10,
+            )
             if r.status_code == 401:
                 return False, "invalid API key (HTTP 401)"
             if r.status_code == 429:
@@ -231,14 +315,16 @@ def _provider_rows() -> list[dict]:
     rows = []
     for p in sorted(list_providers(), key=lambda x: x.key):
         category = provider_category(p.key)
-        rows.append({
-            "key": p.key,
-            "kind": p.kind,
-            "category": category,
-            "enabled": is_enabled(p.key, p.default_enabled),
-            "locked": category == "internal",   # no toggle / no delete
-            "deletable": False,                  # built-ins are never deletable
-        })
+        rows.append(
+            {
+                "key": p.key,
+                "kind": p.kind,
+                "category": category,
+                "enabled": is_enabled(p.key, p.default_enabled),
+                "locked": category == "internal",  # no toggle / no delete
+                "deletable": False,  # built-ins are never deletable
+            }
+        )
     return rows
 
 
@@ -248,15 +334,17 @@ def _custom_mcp_rows() -> list[dict]:
 
     rows = []
     for s in MCPServerConfig.objects.all():
-        rows.append({
-            "id": s.id,
-            "name": s.name,
-            "transport": s.transport,
-            "command_or_url": s.command_or_url,
-            "enabled": s.enabled,
-            "health_status": s.health_status,
-            "allowed_agents": s.allowed_agents,
-        })
+        rows.append(
+            {
+                "id": s.id,
+                "name": s.name,
+                "transport": s.transport,
+                "command_or_url": s.command_or_url,
+                "enabled": s.enabled,
+                "health_status": s.health_status,
+                "allowed_agents": s.allowed_agents,
+            }
+        )
     return rows
 
 
@@ -278,24 +366,28 @@ def _agent_rows() -> list[dict]:
             continue
         row = AgentConfig.objects.filter(agent_name=name).first()
         a = resolve_agent_definition(base)
-        rows.append({
-            "name": a.name,
-            "description": a.description,
-            "tool_policy": a.tool_policy,
-            "available_providers": [
-                {"key": k, "on": k in a.tool_policy} for k in available
-            ],
-            "max_steps": a.budget.max_steps,
-            "max_tool_calls": a.budget.max_tool_calls,
-            "produces_handoff": a.produces_handoff,
-            "consumes_handoff": a.consumes_handoff,
-            "stream_intent": getattr(a, "stream_intent", True),
-            "inherited_vicinity_window_hours": base.default_vicinity_window_hours,
-            "default_vicinity_window_hours": a.default_vicinity_window_hours,
-            "vicinity_window_hours_override": (
-                row.vicinity_window_hours if row and row.vicinity_window_hours else ""
-            ),
-        })
+        rows.append(
+            {
+                "name": a.name,
+                "description": a.description,
+                "tool_policy": a.tool_policy,
+                "available_providers": [
+                    {"key": k, "on": k in a.tool_policy} for k in available
+                ],
+                "max_steps": a.budget.max_steps,
+                "max_tool_calls": a.budget.max_tool_calls,
+                "produces_handoff": a.produces_handoff,
+                "consumes_handoff": a.consumes_handoff,
+                "stream_intent": getattr(a, "stream_intent", True),
+                "inherited_vicinity_window_hours": base.default_vicinity_window_hours,
+                "default_vicinity_window_hours": a.default_vicinity_window_hours,
+                "vicinity_window_hours_override": (
+                    row.vicinity_window_hours
+                    if row and row.vicinity_window_hours
+                    else ""
+                ),
+            }
+        )
     return rows
 
 
@@ -309,12 +401,14 @@ def _workflow_rows() -> list[dict]:
         enabled, window = resolve_workflow(
             b.event_type, default_enabled=b.enabled, default_window=b.dedupe_window
         )
-        rows.append({
-            "event_type": b.event_type,
-            "agent_name": b.agent_name,
-            "enabled": enabled,
-            "dedupe_window": window,
-        })
+        rows.append(
+            {
+                "event_type": b.event_type,
+                "agent_name": b.agent_name,
+                "enabled": enabled,
+                "dedupe_window": window,
+            }
+        )
     return rows
 
 
@@ -327,7 +421,9 @@ def _workflow_event_options() -> list[dict]:
         for b in list_bindings()
     ]
     preferred = {"new_case": 0, "new_alert": 1}
-    return sorted(rows, key=lambda row: (preferred.get(row["event_type"], 99), row["event_type"]))
+    return sorted(
+        rows, key=lambda row: (preferred.get(row["event_type"], 99), row["event_type"])
+    )
 
 
 def _provider_options() -> list[dict]:
@@ -353,26 +449,31 @@ def _webhook_url(request, trigger_id: str) -> str:
 
 def _workflow_trigger_rows(request) -> list[dict]:
     """Operator-configured webhook triggers."""
-    from agent.runtime.triggers.providers import get_trigger_provider, normalize_provider_key
+    from agent.runtime.triggers.providers import (
+        get_trigger_provider,
+        normalize_provider_key,
+    )
 
     bindings = {b["event_type"]: b for b in _workflow_event_options()}
     rows = []
     for t in WorkflowTriggerConfig.objects.all():
         binding = bindings.get(t.event_type)
         provider = get_trigger_provider(t.provider_key)
-        rows.append({
-            "id": t.id,
-            "name": t.name,
-            "webhook_url": _webhook_url(request, t.id),
-            "provider_key": normalize_provider_key(t.provider_key),
-            "provider_label": provider.label if provider else t.provider_key,
-            "event_type": t.event_type,
-            "target": binding["agent_name"] if binding else "unregistered",
-            "enabled": t.enabled,
-            "dedupe_window": t.dedupe_window,
-            "secret_set": bool(t.secret),
-            "updated_at": t.updated_at,
-        })
+        rows.append(
+            {
+                "id": t.id,
+                "name": t.name,
+                "webhook_url": _webhook_url(request, t.id),
+                "provider_key": normalize_provider_key(t.provider_key),
+                "provider_label": provider.label if provider else t.provider_key,
+                "event_type": t.event_type,
+                "target": binding["agent_name"] if binding else "unregistered",
+                "enabled": t.enabled,
+                "dedupe_window": t.dedupe_window,
+                "secret_set": bool(t.secret),
+                "updated_at": t.updated_at,
+            }
+        )
     return rows
 
 
@@ -400,29 +501,34 @@ def _response_policy_rows() -> dict:
         for subject in policy.SUBJECT_ORDER:
             allowed = policy.allowed_actions(verdict, subject)
             action = effective.get(
-                (verdict, subject), policy.default_action(verdict, subject))
-            cells.append({
-                "subject": subject,
-                "subject_label": subjects.get(subject, subject),
-                "field": f"action_{verdict}__{subject}",
-                "action": action,
-                "action_label": labels.get(action, action),
-                # Named for screen readers: the column header alone does not say
-                # which verdict/subject pair a bare select belongs to.
-                "aria_label": (
-                    f"Response action for {policy.row_label(verdict).lower()} "
-                    f"on {subjects.get(subject, subject)}"
-                ),
-                "actions": [
-                    {"value": a, "label": labels.get(a, a)} for a in allowed
-                ],
-            })
-        verdict_rows.append({
-            "verdict": verdict,
-            "verdict_label": policy.row_label(verdict),
-            "is_fallback": verdict == policy.FAILURE_FALLBACK,
-            "cells": cells,
-        })
+                (verdict, subject), policy.default_action(verdict, subject)
+            )
+            cells.append(
+                {
+                    "subject": subject,
+                    "subject_label": subjects.get(subject, subject),
+                    "field": f"action_{verdict}__{subject}",
+                    "action": action,
+                    "action_label": labels.get(action, action),
+                    # Named for screen readers: the column header alone does not say
+                    # which verdict/subject pair a bare select belongs to.
+                    "aria_label": (
+                        f"Response action for {policy.row_label(verdict).lower()} "
+                        f"on {subjects.get(subject, subject)}"
+                    ),
+                    "actions": [
+                        {"value": a, "label": labels.get(a, a)} for a in allowed
+                    ],
+                }
+            )
+        verdict_rows.append(
+            {
+                "verdict": verdict,
+                "verdict_label": policy.row_label(verdict),
+                "is_fallback": verdict == policy.FAILURE_FALLBACK,
+                "cells": cells,
+            }
+        )
 
     return {
         "subject_headers": [subjects.get(s, s) for s in policy.SUBJECT_ORDER],
@@ -446,7 +552,10 @@ def _baseline_window_days() -> int:
 
 def _baseline_subject_hint() -> str:
     """SIEM-specific guidance on how to phrase a subject ID, from the adapter."""
-    from agent.runtime.learning.baseline_adapters import active_adapter_name, adapter_meta
+    from agent.runtime.learning.baseline_adapters import (
+        active_adapter_name,
+        adapter_meta,
+    )
 
     hint = adapter_meta(active_adapter_name()).get("subject_id_hint", "")
     return hint or (
@@ -480,25 +589,33 @@ def _baseline_vis(feature: str, value: dict) -> dict:
 
     if feature == "active_hours":
         counts = value.get("counts", {})
-        return _bars([
-            {"label": f"{h:02d}:00", "count": counts.get(str(h), 0)}
-            for h in range(24)
-        ])
+        return _bars(
+            [
+                {"label": f"{h:02d}:00", "count": counts.get(str(h), 0)}
+                for h in range(24)
+            ]
+        )
 
     if feature == "common_rules":
-        return _bars([
-            {"label": f"rule {x['rule_id']}", "count": x["count"]}
-            for x in value.get("top_rules", [])
-        ])
+        return _bars(
+            [
+                {"label": f"rule {x['rule_id']}", "count": x["count"]}
+                for x in value.get("top_rules", [])
+            ]
+        )
 
     if feature == "common_users":
-        return _bars([
-            {"label": x["user"], "count": x["count"]}
-            for x in value.get("top_users", [])
-        ])
+        return _bars(
+            [
+                {"label": x["user"], "count": x["count"]}
+                for x in value.get("top_users", [])
+            ]
+        )
 
     if feature == "source_ips":
-        items = [{"label": x["ip"], "count": x["count"]} for x in value.get("top_ips", [])]
+        items = [
+            {"label": x["ip"], "count": x["count"]} for x in value.get("top_ips", [])
+        ]
         if not items:
             return {"type": "empty", "msg": "no source IPs recorded"}
         return _bars(items)
@@ -509,8 +626,14 @@ def _baseline_vis(feature: str, value: dict) -> dict:
             "items": [
                 {"label": "daily mean", "value": str(value.get("daily_mean", 0))},
                 {"label": "std dev", "value": str(value.get("daily_std", 0))},
-                {"label": "p5 / p95", "value": f"{value.get('p5', 0)} / {value.get('p95', 0)}"},
-                {"label": "days observed", "value": str(value.get("total_days_observed", 0))},
+                {
+                    "label": "p5 / p95",
+                    "value": f"{value.get('p5', 0)} / {value.get('p95', 0)}",
+                },
+                {
+                    "label": "days observed",
+                    "value": str(value.get("total_days_observed", 0)),
+                },
             ],
         }
 
@@ -523,10 +646,16 @@ def _baseline_vis(feature: str, value: dict) -> dict:
             "type": "rate",
             "rate_pct": f"{round(rate * 100, 1)}%",
             "bars": [
-                {"label": "success", "count": success,
-                 "pct": round(success / total * 100) if total else 0},
-                {"label": "failed", "count": failed,
-                 "pct": round(failed / total * 100) if total else 0},
+                {
+                    "label": "success",
+                    "count": success,
+                    "pct": round(success / total * 100) if total else 0,
+                },
+                {
+                    "label": "failed",
+                    "count": failed,
+                    "pct": round(failed / total * 100) if total else 0,
+                },
             ],
         }
 
@@ -546,14 +675,18 @@ def _baseline_snapshot_rows() -> list[dict]:
                 "features": [],
                 "computed_at": b.computed_at,
             }
-        grp["features"].append({
-            "feature": b.feature,
-            "health": b.health,
-            "window_days": b.window_days,
-            "vis": _baseline_vis(b.feature, b.value),
-            "computed_at": b.computed_at,
-        })
-        if b.computed_at and (grp["computed_at"] is None or b.computed_at > grp["computed_at"]):
+        grp["features"].append(
+            {
+                "feature": b.feature,
+                "health": b.health,
+                "window_days": b.window_days,
+                "vis": _baseline_vis(b.feature, b.value),
+                "computed_at": b.computed_at,
+            }
+        )
+        if b.computed_at and (
+            grp["computed_at"] is None or b.computed_at > grp["computed_at"]
+        ):
             grp["computed_at"] = b.computed_at
     return sorted(grouped.values(), key=lambda g: (g["subject_type"], g["subject_id"]))
 
@@ -576,4 +709,3 @@ def _runtime_context() -> dict:
         "debug_mode": debug_mode(),
         "ti_cache_ttl_hours": ti_cache_ttl_hours(),
     }
-

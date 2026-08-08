@@ -59,23 +59,19 @@ LEGACY_SUBJECTS = {"soar_alert": ALERT, "siem_alert": ALERT}
 # (verdict, subject) -> offerable actions, most-active first so the select reads
 # as a severity ramp and `none` is always last.
 ALLOWED_ACTIONS: dict[tuple[str, str], tuple[str, ...]] = {
-    ("tp", CASE):                        (RESOLVE, DOCUMENT, NONE),
-    ("tp", ALERT):                       (PROMOTE_CASE, NONE),
-
-    ("fp", CASE):                        (RESOLVE, DOCUMENT, NONE),
-    ("fp", ALERT):                       (NONE,),
-
-    ("inconclusive", CASE):              (INVESTIGATE, DOCUMENT, NONE),
-    ("inconclusive", ALERT):             (PROMOTE_CASE, INVESTIGATE, NONE),
-
-    ("needs_investigation", CASE):       (INVESTIGATE, DOCUMENT, NONE),
-    ("needs_investigation", ALERT):      (INVESTIGATE, PROMOTE_CASE, NONE),
-
+    ("tp", CASE): (RESOLVE, DOCUMENT, NONE),
+    ("tp", ALERT): (PROMOTE_CASE, NONE),
+    ("fp", CASE): (RESOLVE, DOCUMENT, NONE),
+    ("fp", ALERT): (NONE,),
+    ("inconclusive", CASE): (INVESTIGATE, DOCUMENT, NONE),
+    ("inconclusive", ALERT): (PROMOTE_CASE, INVESTIGATE, NONE),
+    ("needs_investigation", CASE): (INVESTIGATE, DOCUMENT, NONE),
+    ("needs_investigation", ALERT): (INVESTIGATE, PROMOTE_CASE, NONE),
     # No state-changing action is offerable here: a run that produced nothing has
     # earned nothing, so resolving or promoting off the back of it would assert a
     # conclusion that was never reached.
-    (FAILURE_FALLBACK, CASE):            (INVESTIGATE, DOCUMENT, NONE),
-    (FAILURE_FALLBACK, ALERT):           (INVESTIGATE, NONE),
+    (FAILURE_FALLBACK, CASE): (INVESTIGATE, DOCUMENT, NONE),
+    (FAILURE_FALLBACK, ALERT): (INVESTIGATE, NONE),
 }
 
 # Shipped defaults, stated per cell rather than derived. The shape is intentional and
@@ -83,21 +79,18 @@ ALLOWED_ACTIONS: dict[tuple[str, str], tuple[str, ...]] = {
 # becomes a case, and anything unresolved is handed to the investigation agent.
 # "Revert to defaults" in the settings UI restores exactly this table.
 DEFAULT_ACTIONS: dict[tuple[str, str], str] = {
-    ("tp", CASE):                        DOCUMENT,
-    ("tp", ALERT):                       PROMOTE_CASE,
-
-    ("fp", CASE):                        DOCUMENT,
-    ("fp", ALERT):                       NONE,
-
-    ("inconclusive", CASE):              DOCUMENT,
-    ("inconclusive", ALERT):             PROMOTE_CASE,
-
-    ("needs_investigation", CASE):       INVESTIGATE,
-    ("needs_investigation", ALERT):      INVESTIGATE,
-
-    (FAILURE_FALLBACK, CASE):            DOCUMENT,
-    (FAILURE_FALLBACK, ALERT):           NONE,
+    ("tp", CASE): DOCUMENT,
+    ("tp", ALERT): PROMOTE_CASE,
+    ("fp", CASE): DOCUMENT,
+    ("fp", ALERT): NONE,
+    ("inconclusive", CASE): DOCUMENT,
+    ("inconclusive", ALERT): PROMOTE_CASE,
+    ("needs_investigation", CASE): INVESTIGATE,
+    ("needs_investigation", ALERT): INVESTIGATE,
+    (FAILURE_FALLBACK, CASE): DOCUMENT,
+    (FAILURE_FALLBACK, ALERT): NONE,
 }
+
 
 def cells() -> list[tuple[str, str]]:
     """Every (row, subject) pair in display order — verdict rows plus the failure row."""
@@ -132,5 +125,7 @@ def subject_for_run(run) -> str:
     Which system raised the alert does not change what can be done with it, so the
     trigger provider is deliberately not consulted here.
     """
-    meta = (getattr(run, "metadata", None) or {})
-    return CASE if str(meta.get("source_entity_type") or "").lower() == "case" else ALERT
+    meta = getattr(run, "metadata", None) or {}
+    return (
+        CASE if str(meta.get("source_entity_type") or "").lower() == "case" else ALERT
+    )

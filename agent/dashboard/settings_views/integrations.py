@@ -25,7 +25,6 @@ from django.http import JsonResponse
 from .rows import _CONNECTION_SCHEMA, _test_connection
 
 
-
 @csrf_exempt
 @require_POST
 def settings_model_save(request):
@@ -41,7 +40,9 @@ def settings_model_save(request):
     timeout = (p.get("timeout") or "").strip()
     defaults["timeout"] = int(timeout) if timeout.isdigit() else None
     context_length = (p.get("context_length") or "").strip()
-    defaults["context_length"] = int(context_length) if context_length.isdigit() else None
+    defaults["context_length"] = (
+        int(context_length) if context_length.isdigit() else None
+    )
 
     sampling = {}
     temperature = (p.get("temperature") or "").strip()
@@ -106,7 +107,9 @@ def settings_mcp_save(request):
         messages.error(request, f"'{server_id}' is a reserved built-in provider key.")
         return redirect("dashboard:settings")
 
-    allowed = [a.strip() for a in (p.get("allowed_agents") or "").split(",") if a.strip()]
+    allowed = [
+        a.strip() for a in (p.get("allowed_agents") or "").split(",") if a.strip()
+    ]
     MCPServerConfig.objects.update_or_create(
         id=server_id,
         defaults={
@@ -131,7 +134,9 @@ def settings_mcp_delete(request):
     if not server_id:
         return redirect("dashboard:settings")
     if provider_category(server_id) in ("internal", "default"):
-        messages.error(request, f"'{server_id}' is a built-in provider and cannot be deleted.")
+        messages.error(
+            request, f"'{server_id}' is a built-in provider and cannot be deleted."
+        )
         return redirect("dashboard:settings")
 
     deleted, _ = MCPServerConfig.objects.filter(id=server_id).delete()
@@ -212,9 +217,14 @@ def settings_connection_save(request):
         conn.save(update_fields=["name", "settings", "updated_at"])
         messages.success(request, f"Connection '{name}' saved.")
     else:
-        first_for_provider = not IntegrationConnection.objects.filter(provider_key=key).exists()
+        first_for_provider = not IntegrationConnection.objects.filter(
+            provider_key=key
+        ).exists()
         IntegrationConnection.objects.create(
-            name=name, provider_key=key, settings=new_settings, is_active=first_for_provider,
+            name=name,
+            provider_key=key,
+            settings=new_settings,
+            is_active=first_for_provider,
         )
         note = " and set active" if first_for_provider else ""
         messages.success(request, f"{schema['label']} connection '{name}' added{note}.")
@@ -236,7 +246,9 @@ def settings_connection_activate(request):
         return redirect("dashboard:settings")
 
     with transaction.atomic():
-        IntegrationConnection.objects.filter(provider_key=conn.provider_key).update(is_active=False)
+        IntegrationConnection.objects.filter(provider_key=conn.provider_key).update(
+            is_active=False
+        )
         IntegrationConnection.objects.filter(id=conn.id).update(is_active=True)
     messages.success(request, f"'{conn.name}' is now the active connection.")
     return redirect("dashboard:settings")
@@ -267,10 +279,16 @@ def settings_connection_delete(request):
     IntegrationConnection.objects.filter(id__in=[c.id for c in conns]).delete()
 
     for provider_key in active_removed:
-        if not IntegrationConnection.objects.filter(provider_key=provider_key, is_active=True).exists():
-            sibling = IntegrationConnection.objects.filter(provider_key=provider_key).first()
+        if not IntegrationConnection.objects.filter(
+            provider_key=provider_key, is_active=True
+        ).exists():
+            sibling = IntegrationConnection.objects.filter(
+                provider_key=provider_key
+            ).first()
             if sibling:
-                IntegrationConnection.objects.filter(id=sibling.id).update(is_active=True)
+                IntegrationConnection.objects.filter(id=sibling.id).update(
+                    is_active=True
+                )
 
     if len(names) == 1:
         messages.success(request, f"Connection '{names[0]}' deleted.")
@@ -337,22 +355,33 @@ def settings_runtime_save(request):
     if section == "workflows":
         row.workflows_enabled = request.POST.get("workflows_enabled") == "1"
         row.save()
-        messages.success(request, f"Automatic workflows {'enabled' if row.workflows_enabled else 'disabled'}.")
+        messages.success(
+            request,
+            f"Automatic workflows {'enabled' if row.workflows_enabled else 'disabled'}.",
+        )
     elif section == "baseline":
-        row.baseline_siem_adapter = (request.POST.get("baseline_siem_adapter") or "").strip()
+        row.baseline_siem_adapter = (
+            request.POST.get("baseline_siem_adapter") or ""
+        ).strip()
         iv = (request.POST.get("baseline_interval_hours") or "").strip()
         row.baseline_interval_hours = int(iv) if iv.isdigit() and int(iv) > 0 else None
         row.save()
-        messages.success(request, "Baseline runtime settings saved (interval applies on next restart).")
+        messages.success(
+            request,
+            "Baseline runtime settings saved (interval applies on next restart).",
+        )
     elif section == "debug":
         row.debug_mode = request.POST.get("debug_mode") == "1"
         row.save()
-        messages.success(request, f"Debug mode {'enabled' if row.debug_mode else 'disabled'}.")
+        messages.success(
+            request, f"Debug mode {'enabled' if row.debug_mode else 'disabled'}."
+        )
     elif section == "ti_cache":
         ttl = (request.POST.get("ti_cache_ttl_hours") or "").strip()
         row.ti_cache_ttl_hours = int(ttl) if ttl.isdigit() and int(ttl) > 0 else None
         row.save()
         from agent.ti.enricher import reset_ti_cache
+
         reset_ti_cache()
         if row.ti_cache_ttl_hours:
             messages.success(request, f"TI cache TTL set to {row.ti_cache_ttl_hours}h.")
@@ -366,6 +395,7 @@ def settings_runtime_save(request):
 def settings_ti_cache_stats(request):
     """GET — return TI cache entry counts as JSON."""
     from agent.ti.enricher import get_ti_cache
+
     try:
         cache = get_ti_cache()
         if cache is None:
@@ -380,11 +410,14 @@ def settings_ti_cache_stats(request):
 def settings_ti_cache_clear(request):
     """POST — delete all TI cache entries and redirect back to settings."""
     from agent.ti.enricher import get_ti_cache
+
     try:
         cache = get_ti_cache()
         deleted = cache.clear_all() if cache else 0
-        messages.success(request, f"TI cache cleared ({deleted} entr{'y' if deleted == 1 else 'ies'} removed).")
+        messages.success(
+            request,
+            f"TI cache cleared ({deleted} entr{'y' if deleted == 1 else 'ies'} removed).",
+        )
     except Exception as exc:
         messages.error(request, f"Failed to clear TI cache: {exc}")
     return redirect("dashboard:settings")
-

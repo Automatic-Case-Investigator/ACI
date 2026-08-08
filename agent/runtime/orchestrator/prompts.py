@@ -20,18 +20,28 @@ from ..infra.avfs import reports_dir
 from ..providers.base import format_provider_capability_contracts
 from ..engine.dispatch import dispatch_run
 from ..graph import (
-    _compact_history, _extract_input_tokens, _invoke_bound_model, _normalize,
-    _sanitize_history, _sanitize_message, _should_compact, _tmap,
+    _compact_history,
+    _extract_input_tokens,
+    _invoke_bound_model,
+    _normalize,
+    _sanitize_history,
+    _sanitize_message,
+    _should_compact,
+    _tmap,
 )
 from ..analysis.intent import generate_public_intent
 from ..infra.logbus import (
-    current_session, emit, get_run_issues, summarize_args, summarize_result,
-    summarize_think, update_context_usage,
+    current_session,
+    emit,
+    get_run_issues,
+    summarize_args,
+    summarize_result,
+    summarize_think,
+    update_context_usage,
 )
 from ..config.prompts import compose_system_prompt
 
 from .session import OrchestratorSession
-
 
 
 def _orchestrator_system_prompt(
@@ -42,15 +52,21 @@ def _orchestrator_system_prompt(
     return compose_system_prompt(
         ["platform", "orchestrator"],
         {
-            "src_entity_id": session.src_entity_id or "none set yet — extract from the message or ask the analyst",
+            "src_entity_id": session.src_entity_id
+            or "none set yet — extract from the message or ask the analyst",
             "source_entity_type": session.source_entity_type or "unknown",
             "agent_name": "orchestrator",
             "available_tools": tool_names or [],
-            "provider_capability_contracts": format_provider_capability_contracts(_ORCHESTRATOR_TOOL_POLICY),
+            "provider_capability_contracts": format_provider_capability_contracts(
+                _ORCHESTRATOR_TOOL_POLICY
+            ),
             "mcp_prompt_guidance": mcp_prompt_guidance,
-            "last_triage_report_available": bool((session.last_triage_report or "").strip()),
+            "last_triage_report_available": bool(
+                (session.last_triage_report or "").strip()
+            ),
             "last_triage_src_entity_id": session.last_triage_src_entity_id or "",
-            "last_triage_source_entity_type": session.last_triage_source_entity_type or "",
+            "last_triage_source_entity_type": session.last_triage_source_entity_type
+            or "",
             "investigation_run_id": session.investigation_run_id or "",
             "orchestrator_visible_transcript": session.visible_transcript,
         },
@@ -68,6 +84,7 @@ def _embedded_convo_char_budget() -> int:
     """
     try:
         from ..engine.model_client import model_context_length_sync
+
         limit = model_context_length_sync()
     except Exception:
         limit = 131072

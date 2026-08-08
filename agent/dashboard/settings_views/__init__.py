@@ -1,4 +1,5 @@
 """Analyst-editable settings dashboard (split into cohesive view groups)."""
+
 from . import rows, pages, agents, baselines, integrations
 
 _submodules = [rows, pages, agents, baselines, integrations]

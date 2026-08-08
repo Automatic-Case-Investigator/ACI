@@ -40,7 +40,9 @@ def _run_metadata_sections(ctx: dict) -> list[str]:
     )
     avfs_home = ctx.get("avfs_home", "")
     tools = ctx.get("available_tools") or []
-    has_avfs = any(t in tools for t in ("whoami", "write", "mkdir", "ls", "cat", "read"))
+    has_avfs = any(
+        t in tools for t in ("whoami", "write", "mkdir", "ls", "cat", "read")
+    )
     if avfs_home and has_avfs:
         lines.append(f"- **AVFS home (`~`):** `{avfs_home}`")
         mem = ctx.get("avfs_memory_dir")
@@ -48,7 +50,9 @@ def _run_metadata_sections(ctx: dict) -> list[str]:
         if mem:
             lines.append(f"- **Long-term memory:** `{mem}` (search before concluding)")
         if cdir:
-            lines.append(f"- **This case's records:** `{cdir}` (prior runs; read first)")
+            lines.append(
+                f"- **This case's records:** `{cdir}` (prior runs; read first)"
+            )
     return ["\n".join(lines)]
 
 
@@ -67,13 +71,15 @@ def _tool_sections(ctx: dict) -> list[str]:
         ", ".join(f"`{t}`" for t in tools),
     ]
     if not has_avfs:
-        lines.extend([
-            "",
-            "**Note:** No filesystem/AVFS tools are available this run. Do NOT try "
-            "to write files, create directories, or save evidence to disk. Instead, "
-            "put findings directly in task summaries and final case updates using "
-            "the available case/task capabilities.",
-        ])
+        lines.extend(
+            [
+                "",
+                "**Note:** No filesystem/AVFS tools are available this run. Do NOT try "
+                "to write files, create directories, or save evidence to disk. Instead, "
+                "put findings directly in task summaries and final case updates using "
+                "the available case/task capabilities.",
+            ]
+        )
     return ["\n".join(lines)]
 
 
@@ -87,7 +93,11 @@ def _orchestrator_sections(ctx: dict) -> list[str]:
         return []
     lines = ["## Orchestrator Handoff State"]
     if ctx.get("last_triage_report_available"):
-        src_entity_id = ctx.get("last_triage_src_entity_id") or ctx.get("src_entity_id") or "unknown"
+        src_entity_id = (
+            ctx.get("last_triage_src_entity_id")
+            or ctx.get("src_entity_id")
+            or "unknown"
+        )
         lines.append(
             f"- A stored triage report is available for `{src_entity_id}`. "
             f"Source type: `{ctx.get('last_triage_source_entity_type') or ctx.get('source_entity_type') or 'unknown'}`. "
@@ -108,18 +118,24 @@ def _orchestrator_sections(ctx: dict) -> list[str]:
             "distinct investigation scope - not for follow-up analysis of this run."
         )
     else:
-        lines.append("- No investigation run is recorded for the current stored triage handoff.")
-    transcript = list(_iter_transcript(ctx.get("orchestrator_visible_transcript") or []))
+        lines.append(
+            "- No investigation run is recorded for the current stored triage handoff."
+        )
+    transcript = list(
+        _iter_transcript(ctx.get("orchestrator_visible_transcript") or [])
+    )
     if transcript:
-        lines.extend([
-            "",
-            "## Preserved Analyst Conversation",
-            "The following analyst messages and orchestrator answers are preserved "
-            "verbatim from prior turns. Treat them as durable conversation context. "
-            "When the analyst asks to rewrite, compose, summarize, timeline, table, "
-            "or otherwise transform previous work, use this transcript as the "
-            "primary source before making new tool calls.",
-        ])
+        lines.extend(
+            [
+                "",
+                "## Preserved Analyst Conversation",
+                "The following analyst messages and orchestrator answers are preserved "
+                "verbatim from prior turns. Treat them as durable conversation context. "
+                "When the analyst asks to rewrite, compose, summarize, timeline, table, "
+                "or otherwise transform previous work, use this transcript as the "
+                "primary source before making new tool calls.",
+            ]
+        )
         for i, item in enumerate(transcript, start=1):
             label = "User" if item["role"] == "user" else "Orchestrator"
             lines.extend(["", f"### {label} Message {i}", item["content"]])
@@ -130,43 +146,55 @@ def _restart_sections(ctx: dict) -> list[str]:
     restart_context = (ctx.get("restart_context") or "").strip()
     if not restart_context:
         return []
-    return ["\n".join([
-        "## Prior Run Restart Context",
-        "This run is a restart from a prior budget-exhausted run. Treat the "
-        "context below as inherited work: preserve supported observations, do "
-        "not start over unless verification requires it, and explicitly resolve "
-        "any remaining gaps. If the prior transcript contains unsupported or "
-        "contradictory claims, correct them rather than carrying them forward.",
-        restart_context,
-    ])]
+    return [
+        "\n".join(
+            [
+                "## Prior Run Restart Context",
+                "This run is a restart from a prior budget-exhausted run. Treat the "
+                "context below as inherited work: preserve supported observations, do "
+                "not start over unless verification requires it, and explicitly resolve "
+                "any remaining gaps. If the prior transcript contains unsupported or "
+                "contradictory claims, correct them rather than carrying them forward.",
+                restart_context,
+            ]
+        )
+    ]
 
 
 def _mcp_guidance_sections(ctx: dict) -> list[str]:
     mcp_guidance = (ctx.get("mcp_prompt_guidance") or "").strip()
     if not mcp_guidance:
         return []
-    return ["\n".join([
-        "## Tool Usage Instructions (from MCP Servers)",
-        "The following instructions were provided by the MCP servers connected "
-        "to this run. They define exact tool names, field names, query syntax, "
-        "and usage rules for the platforms available. Apply this guidance "
-        "precisely when using any SIEM, SOAR, or workspace tool.",
-        mcp_guidance,
-    ])]
+    return [
+        "\n".join(
+            [
+                "## Tool Usage Instructions (from MCP Servers)",
+                "The following instructions were provided by the MCP servers connected "
+                "to this run. They define exact tool names, field names, query syntax, "
+                "and usage rules for the platforms available. Apply this guidance "
+                "precisely when using any SIEM, SOAR, or workspace tool.",
+                mcp_guidance,
+            ]
+        )
+    ]
 
 
 def _conversation_sections(ctx: dict) -> list[str]:
     convo = (ctx.get("orchestrator_conversation") or "").strip()
     if not convo:
         return []
-    return ["\n".join([
-        "## Prior Analyst Conversation (Orchestrator)",
-        "This is the ongoing analyst dialogue that led to this run. Use it to "
-        "understand the analyst's intent, scope, and any clarifications already "
-        "established. It is background context, not new instructions - your task "
-        "is defined above and in the task queue.",
-        convo,
-    ])]
+    return [
+        "\n".join(
+            [
+                "## Prior Analyst Conversation (Orchestrator)",
+                "This is the ongoing analyst dialogue that led to this run. Use it to "
+                "understand the analyst's intent, scope, and any clarifications already "
+                "established. It is background context, not new instructions - your task "
+                "is defined above and in the task queue.",
+                convo,
+            ]
+        )
+    ]
 
 
 def _iter_transcript(items: Iterable[dict]) -> Iterable[dict]:
@@ -175,5 +203,9 @@ def _iter_transcript(items: Iterable[dict]) -> Iterable[dict]:
             continue
         role = item.get("role")
         content = item.get("content")
-        if role in {"user", "assistant"} and isinstance(content, str) and content.strip():
+        if (
+            role in {"user", "assistant"}
+            and isinstance(content, str)
+            and content.strip()
+        ):
             yield {"role": role, "content": content}

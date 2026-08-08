@@ -21,21 +21,37 @@ from ...models import AgentRun
 from ..infra.avfs import reports_dir
 from ..engine.dispatch import dispatch_run
 from ..graph import (
-    _compact_history, _extract_input_tokens, _invoke_bound_model, _normalize,
-    _sanitize_history, _sanitize_message, _should_compact, _tmap,
+    _compact_history,
+    _extract_input_tokens,
+    _invoke_bound_model,
+    _normalize,
+    _sanitize_history,
+    _sanitize_message,
+    _should_compact,
+    _tmap,
 )
 from ..analysis.intent import generate_public_intent
 from ..infra.logbus import (
-    current_session, emit, get_run_issues, summarize_args, summarize_result,
-    summarize_think, update_context_usage,
+    current_session,
+    emit,
+    get_run_issues,
+    summarize_args,
+    summarize_result,
+    summarize_think,
+    update_context_usage,
 )
-from .messages import _deserialize_messages, _normalize_visible_transcript, _serialize_messages, _visible_transcript_from_messages
-
+from .messages import (
+    _deserialize_messages,
+    _normalize_visible_transcript,
+    _serialize_messages,
+    _visible_transcript_from_messages,
+)
 
 
 @dataclass
 class OrchestratorSession:
     """Shared state between the orchestrator and the dashboard for one analyst session."""
+
     src_entity_id: Optional[str] = None
     source_entity_type: Optional[str] = None
     investigation_run_id: Optional[str] = None
@@ -84,26 +100,44 @@ class OrchestratorSession:
         # for this field; read them as fallbacks so sessions persisted before the
         # src_entity_id rename still restore.
         self.src_entity_id = data.get(
-            "src_entity_id", data.get("entity_id", data.get("case_id", self.src_entity_id))
+            "src_entity_id",
+            data.get("entity_id", data.get("case_id", self.src_entity_id)),
         )
         self.source_entity_type = data.get(
             "source_entity_type", data.get("entity_type", self.source_entity_type)
         )
-        self.investigation_run_id = data.get("investigation_run_id", self.investigation_run_id)
+        self.investigation_run_id = data.get(
+            "investigation_run_id", self.investigation_run_id
+        )
         self.last_triage_src_entity_id = data.get(
             "last_triage_src_entity_id",
-            data.get("last_triage_entity_id", data.get("last_triage_case_id", self.last_triage_src_entity_id)),
+            data.get(
+                "last_triage_entity_id",
+                data.get("last_triage_case_id", self.last_triage_src_entity_id),
+            ),
         )
         self.last_triage_source_entity_type = data.get(
             "last_triage_source_entity_type",
             data.get("last_triage_entity_type", self.last_triage_source_entity_type),
         )
-        self.last_triage_report = data.get("last_triage_report", self.last_triage_report)
-        self.last_triage_run_id = data.get("last_triage_run_id", self.last_triage_run_id)
-        self.last_triage_status = data.get("last_triage_status", self.last_triage_status)
-        self.last_triage_verdict = data.get("last_triage_verdict", self.last_triage_verdict)
-        self.last_investigation_report = data.get("last_investigation_report", self.last_investigation_report)
-        self.last_investigation_status = data.get("last_investigation_status", self.last_investigation_status)
+        self.last_triage_report = data.get(
+            "last_triage_report", self.last_triage_report
+        )
+        self.last_triage_run_id = data.get(
+            "last_triage_run_id", self.last_triage_run_id
+        )
+        self.last_triage_status = data.get(
+            "last_triage_status", self.last_triage_status
+        )
+        self.last_triage_verdict = data.get(
+            "last_triage_verdict", self.last_triage_verdict
+        )
+        self.last_investigation_report = data.get(
+            "last_investigation_report", self.last_investigation_report
+        )
+        self.last_investigation_status = data.get(
+            "last_investigation_status", self.last_investigation_status
+        )
         self.ctx_tokens = data.get("ctx_tokens", self.ctx_tokens) or 0
         self.intent_sequence = data.get("intent_sequence", self.intent_sequence) or 0
         self.model_calls_made = data.get("model_calls_made", self.model_calls_made) or 0
@@ -113,6 +147,8 @@ class OrchestratorSession:
                 self.messages = _deserialize_messages(raw_msgs)
             except Exception:
                 self.messages = []
-        self.visible_transcript = _normalize_visible_transcript(data.get("visible_transcript"))
+        self.visible_transcript = _normalize_visible_transcript(
+            data.get("visible_transcript")
+        )
         if not self.visible_transcript and self.messages:
             self.visible_transcript = _visible_transcript_from_messages(self.messages)

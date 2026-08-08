@@ -13,6 +13,7 @@ Agent code should prefer `emit(...)` over `logging.info(...)` for anything an
 analyst should see. Plain `logging` calls on the "agent" tree still work — the
 CLI handler synthesizes a low-key event for them so nothing is lost.
 """
+
 from __future__ import annotations
 
 import contextvars
@@ -31,9 +32,15 @@ _seq = itertools.count(1)
 # (= the orchestrator AgentRun id); `run` is the specific AgentRun currently
 # executing. Both are set once at a run's entrypoint and inherited by the asyncio
 # task context, so nested emits (orchestrator -> triage -> investigation) carry them.
-_session: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("aci_session", default=None)
-_run: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("aci_run", default=None)
-_debug: contextvars.ContextVar[bool] = contextvars.ContextVar("aci_debug_mode", default=False)
+_session: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "aci_session", default=None
+)
+_run: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "aci_run", default=None
+)
+_debug: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "aci_debug_mode", default=False
+)
 _ctx_lock = threading.Lock()
 _ctx_by_run: dict[str, dict] = {}
 _MAX_CTX_ENTRIES = 500
@@ -120,7 +127,8 @@ def clear_session_context_usage(session_id: str) -> None:
     """Drop every context reading for a session (its runs are being deleted)."""
     with _ctx_lock:
         for run_id in [
-            k for k, v in _ctx_by_run.items()
+            k
+            for k, v in _ctx_by_run.items()
             if v.get("session_id") == session_id or k == session_id
         ]:
             _ctx_by_run.pop(run_id, None)
@@ -140,12 +148,14 @@ def _record_issue(ev: "LogEvent") -> None:
     if ev.kind not in {"error", "warning", "warn"} or not ev.run_id:
         return
     with _issue_lock:
-        _issues_by_run.setdefault(str(ev.run_id), []).append({
-            "source": ev.source,
-            "kind": ev.kind,
-            "summary": ev.summary,
-            "detail": ev.detail or "",
-        })
+        _issues_by_run.setdefault(str(ev.run_id), []).append(
+            {
+                "source": ev.source,
+                "kind": ev.kind,
+                "summary": ev.summary,
+                "detail": ev.detail or "",
+            }
+        )
 
 
 def next_seq() -> int:
@@ -157,13 +167,13 @@ def next_seq() -> int:
 class LogEvent:
     seq: int
     ts: float
-    source: str           # "orch" | "tri" | "inv" | "cli" | "log"
-    kind: str             # think|stream|intent_delta|intent|call|result|task|note|error|route|answer|done|finding
-    summary: str          # one line, already trimmed for display
-    detail: Optional[str] = None   # full untruncated payload (may be large/multiline)
+    source: str  # "orch" | "tri" | "inv" | "cli" | "log"
+    kind: str  # think|stream|intent_delta|intent|call|result|task|note|error|route|answer|done|finding
+    summary: str  # one line, already trimmed for display
+    detail: Optional[str] = None  # full untruncated payload (may be large/multiline)
     expand: bool = False  # render detail inline automatically (answers, findings)
     session_id: Optional[str] = None  # dashboard grouping (filled from contextvar)
-    run_id: Optional[str] = None      # specific AgentRun (filled from contextvar)
+    run_id: Optional[str] = None  # specific AgentRun (filled from contextvar)
     metadata: dict[str, Any] | None = None
 
 
@@ -177,8 +187,16 @@ def emit(
     metadata: dict[str, Any] | None = None,
 ) -> LogEvent:
     ev = LogEvent(
-        next_seq(), time(), source, kind, summary, detail, expand,
-        session_id=_session.get(), run_id=_run.get(), metadata=metadata or {},
+        next_seq(),
+        time(),
+        source,
+        kind,
+        summary,
+        detail,
+        expand,
+        session_id=_session.get(),
+        run_id=_run.get(),
+        metadata=metadata or {},
     )
     _record_issue(ev)
     _events_log.info(summary, extra={"logevent": ev})
@@ -227,7 +245,8 @@ def _hhmm(ts) -> str:
 
 def _stamp(ts) -> str:
     """MM-DD HH:MM from an ISO bucket key — keeps the date so a multi-day span is not
-    rendered as a misleading same-looking HH:MM (e.g. '12:00->12:00' across two days)."""
+    rendered as a misleading same-looking HH:MM (e.g. '12:00->12:00' across two days).
+    """
     s = str(ts or "")
     return f"{s[5:10]} {s[11:16]}" if len(s) >= 16 and s[10] in ("T", " ") else s
 
@@ -247,8 +266,10 @@ def _summarize_volume(obj: dict) -> str:
     # instead of treating the whole span as one event.
     bursts = obj.get("bursts") or []
     if len(bursts) > 1:
-        shown = ", ".join(f"{_stamp(b.get('start'))}->{_stamp(b.get('end'))}({b.get('total')})"
-                          for b in bursts[:4])
+        shown = ", ".join(
+            f"{_stamp(b.get('start'))}->{_stamp(b.get('end'))}({b.get('total')})"
+            for b in bursts[:4]
+        )
         more = f" +{len(bursts) - 4}" if len(bursts) > 4 else ""
         return f"{head}; {len(bursts)} BURSTS: {shown}{more} - pick the one matching your objective"
     # Saturated: activity fills the window — the profile localized nothing. Show dated
@@ -307,7 +328,11 @@ def summarize_result(tool: str, content: str) -> str:
             # For an over-broad result, name the dominant behaviour class so the flood's
             # composition is visible at a glance (scope to a class to escape it).
             classes = obj.get("rule_groups_breakdown") or []
-            top_class = f" top-class:{classes[0].get('group')}({classes[0].get('count')})" if classes else ""
+            top_class = (
+                f" top-class:{classes[0].get('group')}({classes[0].get('count')})"
+                if classes
+                else ""
+            )
             # When a flood has a discriminating axis, name it (and whether needle events
             # were returned) so the agent sees the residue move at a glance.
             disc = ""
@@ -317,8 +342,10 @@ def summarize_result(tool: str, content: str) -> str:
                 nsamp = len(obj.get("minority_sample") or [])
                 # Show the RAREST minority (the needle candidate), not the largest.
                 rarest = d["minorities"][-1].get("value")
-                disc = (f" discriminator:{d['field']} (dom {d.get('dominant')} "
-                        f"{round(d.get('dominant_share', 0) * 100)}%; needle~{rarest}; sample={nsamp})")
+                disc = (
+                    f" discriminator:{d['field']} (dom {d.get('dominant')} "
+                    f"{round(d.get('dominant_share', 0) * 100)}%; needle~{rarest}; sample={nsamp})"
+                )
             # When the count is a capped lower bound (total.relation="gte"), the returned
             # events are an arbitrary slice of a much larger set — say so loudly so the
             # agent narrows instead of trusting a sample that hides the key events.
@@ -329,13 +356,18 @@ def summarize_result(tool: str, content: str) -> str:
             if obj.get("broadened"):
                 return f"{n} hits (OR-FALLBACK: no all-term match; refine terms){first}"
             if obj.get("too_broad"):
-                return f"{n} hits (TOO BROAD: add a discriminator / narrow window){first}"
+                return (
+                    f"{n} hits (TOO BROAD: add a discriminator / narrow window){first}"
+                )
             return f"{n} hit(s){disc}{first}"
         if "rare_values" in obj:
             rv = obj.get("rare_values") or []
             head = ", ".join(f"{b.get('value')}({b.get('count')})" for b in rv[:4])
-            return (f"{obj.get('field', '?')} RARE: {head}" + (" …" if len(rv) > 4 else "")
-                    if rv else f"{obj.get('field', '?')} RARE: (none ≤{obj.get('max_doc_count')})")
+            return (
+                f"{obj.get('field', '?')} RARE: {head}" + (" …" if len(rv) > 4 else "")
+                if rv
+                else f"{obj.get('field', '?')} RARE: (none ≤{obj.get('max_doc_count')})"
+            )
         if "top_values" in obj:
             tv = obj.get("top_values") or []
             head = ", ".join(f"{b.get('value')}({b.get('count')})" for b in tv[:3])

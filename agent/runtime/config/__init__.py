@@ -9,6 +9,7 @@ existing `.env`-only deployments keep working untouched.
 Everything here is defensive: the DB may not be migrated yet (early boot, tests),
 so DB access is wrapped and silently yields to the env defaults.
 """
+
 from __future__ import annotations
 
 import logging

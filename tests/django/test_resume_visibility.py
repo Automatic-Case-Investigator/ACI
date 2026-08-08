@@ -26,17 +26,26 @@ class ResumeVisibilityTests(TestCase):
         )
 
         with patch("agent.dashboard.runner.session_state.logbus.emit") as emit:
-            publish_specialist_result_to_session(str(session.id), str(child.id), reason="resume")
+            publish_specialist_result_to_session(
+                str(session.id), str(child.id), reason="resume"
+            )
 
         session.refresh_from_db()
         orch_state = (session.metadata or {}).get("orch_session") or {}
         self.assertEqual(session.status, AgentRun.STATUS_COMPLETED)
         self.assertEqual(orch_state.get("investigation_run_id"), str(child.id))
-        self.assertEqual(orch_state.get("last_investigation_status"), AgentRun.STATUS_COMPLETED)
+        self.assertEqual(
+            orch_state.get("last_investigation_status"), AgentRun.STATUS_COMPLETED
+        )
         self.assertEqual(orch_state.get("last_investigation_report"), child.result)
         self.assertEqual(orch_state.get("visible_transcript")[-1]["role"], "assistant")
-        self.assertIn("Resumed investigation run finished.", orch_state.get("visible_transcript")[-1]["content"])
+        self.assertIn(
+            "Resumed investigation run finished.",
+            orch_state.get("visible_transcript")[-1]["content"],
+        )
         self.assertIn("Updated report below", session.result)
         emit.assert_called_once()
         self.assertEqual(emit.call_args.kwargs["metadata"]["reason"], "resume")
-        self.assertEqual(emit.call_args.kwargs["metadata"]["specialist_run_id"], str(child.id))
+        self.assertEqual(
+            emit.call_args.kwargs["metadata"]["specialist_run_id"], str(child.id)
+        )

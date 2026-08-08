@@ -1,8 +1,13 @@
 """Prompt rendering blocks for the interpret model call (SYSTEM/DEVELOPER + USER/CONTEXT)."""
+
 from __future__ import annotations
 
 from langchain_core.messages import AIMessage, ToolMessage
-from .ledger import _coerce_confirmed_findings, _coerce_string_list, _render_query_trials
+from .ledger import (
+    _coerce_confirmed_findings,
+    _coerce_string_list,
+    _render_query_trials,
+)
 from .pivots import _coerce_pivot
 
 
@@ -26,6 +31,8 @@ def _compromise_block(compromise_facts: list[str]) -> str:
         "scope. Do NOT ignore them, and NEVER conclude a negative that contradicts them:\n"
         f"{lines}\n\n"
     )
+
+
 def _notable_events_block(observation: dict) -> str:
     """The retrieved events rendered as a readable list at the TOP of the prompt, so the
     interpreter reasons over WHAT came back (paths, commands, statuses, users, decoded
@@ -43,9 +50,12 @@ def _notable_events_block(observation: dict) -> str:
         "not just how many hits came back):\n"
         f"{lines}\n\n"
     )
+
+
 def _trials_block(ledger: dict) -> str:
     """The task's outcome-annotated query history, rendered for the interpreter to reason
-    over its own failures — the surface the deterministic stagnation signals cannot carry."""
+    over its own failures — the surface the deterministic stagnation signals cannot carry.
+    """
     rendered = _render_query_trials(ledger.get("query_trials") or [])
     if not rendered:
         return ""
@@ -64,6 +74,8 @@ def _trials_block(ledger: dict) -> str:
         "along the burst map, do not re-query it.\n"
         "- Choose a (discriminator, window) pair your trials have NOT already refuted.\n\n"
     )
+
+
 def _batch_tool_outputs(messages: list) -> str:
     """The FULL tool outputs of the current batch — the exact (already 24KB-capped) results
     the acting agent received, so the interpreter analyzes what was actually retrieved rather
@@ -85,11 +97,15 @@ def _batch_tool_outputs(messages: list) -> str:
         content = getattr(msg, "content", "") or ""
         blocks.append(f"### {name}\n{content}")
     return "\n\n".join(blocks)
+
+
 def _render_task(task: dict | None) -> str:
     t = task or {}
     title = " ".join(str(t.get("title") or "").split()) or "(untitled)"
     desc = str(t.get("description") or "").strip()
     return f"{title}\n{desc}" if desc else title
+
+
 def _render_confirmed_findings(findings) -> list[str]:
     out: list[str] = []
     for f in _coerce_confirmed_findings(findings, limit=8):
@@ -97,13 +113,17 @@ def _render_confirmed_findings(findings) -> list[str]:
         events = f.get("event_ids") or []
         out.append(f"{summary}{f' [{events[0]}]' if events else ''}")
     return out
+
+
 def _where_you_are(task: dict | None, ledger: dict) -> str:
     """The durable per-task state rendered as readable prose (replaces the raw ledger JSON
     dump) — a weak model reasons over this far better than ~18 machine fields. Only the
     reasoning-relevant fields; control keys (next_action/evidence_state/stop_state/pivot
     bookkeeping) drive the graph, not the model's prose."""
     lines = ["Where you are on this task (your progress so far):"]
-    lines.append(f"- Objective: {ledger.get('objective') or (task or {}).get('title') or '(unspecified)'}")
+    lines.append(
+        f"- Objective: {ledger.get('objective') or (task or {}).get('title') or '(unspecified)'}"
+    )
     if (ledger.get("stop_condition") or "").strip():
         lines.append(f"- Success criteria: {ledger['stop_condition']}")
     if (ledger.get("hypothesis") or "").strip():
@@ -114,7 +134,11 @@ def _where_you_are(task: dict | None, ledger: dict) -> str:
         lines += [f"    * {c}" for c in confirmed]
     gaps = _coerce_string_list(ledger.get("remaining_gaps"), limit=6)
     blocker = " ".join(str(ledger.get("blocker") or "").split())
-    open_items = gaps + ([blocker] if blocker and blocker.lower() not in {g.lower() for g in gaps} else [])
+    open_items = gaps + (
+        [blocker]
+        if blocker and blocker.lower() not in {g.lower() for g in gaps}
+        else []
+    )
     if open_items:
         lines.append("- Open / unproven: " + "; ".join(open_items))
     pivot = _coerce_pivot(ledger.get("primary_pivot"))
@@ -124,8 +148,12 @@ def _where_you_are(task: dict | None, ledger: dict) -> str:
             f"({pivot.get('source_level')}/{pivot.get('role')}, failures={pivot.get('failure_count')})"
         )
     if (ledger.get("next_step_instruction") or "").strip():
-        lines.append(f"- Your last planned next step: {ledger['next_step_instruction']}")
+        lines.append(
+            f"- Your last planned next step: {ledger['next_step_instruction']}"
+        )
     return "\n".join(lines) + "\n\n"
+
+
 def _signals_this_batch(observation: dict) -> str:
     """The deterministic signals + recommended moves for this batch, as a compact line
     (replaces the raw observation JSON dump — the rest of the observation is already
@@ -139,6 +167,8 @@ def _signals_this_batch(observation: dict) -> str:
         lines.append("- " + ", ".join(str(s) for s in signals))
     lines += [f"- suggested: {m}" for m in moves[:4]]
     return "\n".join(lines) + "\n\n"
+
+
 def _interpret_system_prompt() -> str:
     """The STABLE SystemMessage for the interpret model: `# SYSTEM` (identity + the no-tools
     constraint) and `# DEVELOPER` (the reasoning principles + the output contract). Constant
@@ -234,6 +264,8 @@ def _interpret_system_prompt() -> str:
         "objective is a capable confirmed negative. Choose 'continue' ONLY when a specific "
         "criterion is still unanswered AND you named a concrete query that would answer it>\n"
     )
+
+
 def _coverage_block(coverage: dict | None) -> str:
     """Windows this task PROFILED but never QUERIED.
 
@@ -257,13 +289,20 @@ def _coverage_block(coverage: dict | None) -> str:
     if ranges:
         lines.append("- Unqueried spans: " + ", ".join(str(r) for r in ranges[:6]))
     if clusters:
-        lines.append("- Unqueried post-peak activity at: " + ", ".join(str(c) for c in clusters[:6]))
+        lines.append(
+            "- Unqueried post-peak activity at: "
+            + ", ".join(str(c) for c in clusters[:6])
+        )
     return "\n".join(lines) + "\n\n"
 
 
 def _interpret_context(
-    task: dict | None, ledger: dict, observation: dict, extra_context: str,
-    tool_outputs: str = "", compromise_facts: list[str] | None = None,
+    task: dict | None,
+    ledger: dict,
+    observation: dict,
+    extra_context: str,
+    tool_outputs: str = "",
+    compromise_facts: list[str] | None = None,
     coverage: dict | None = None,
 ) -> str:
     """The VOLATILE HumanMessage for the interpret model: `# USER` (the current task) and
@@ -285,9 +324,15 @@ def _interpret_context(
         f"{tool_outputs or '(no tool output this batch)'}\n\n"
         f"Additional context:\n{extra_context or '(none)'}\n"
     )
+
+
 def _prompt(
-    task: dict | None, ledger: dict, observation: dict, extra_context: str,
-    tool_outputs: str = "", compromise_facts: list[str] | None = None,
+    task: dict | None,
+    ledger: dict,
+    observation: dict,
+    extra_context: str,
+    tool_outputs: str = "",
+    compromise_facts: list[str] | None = None,
     coverage: dict | None = None,
 ) -> str:
     """The interpret prompt as a single combined string (SYSTEM+DEVELOPER then USER+CONTEXT).
@@ -296,9 +341,18 @@ def _prompt(
     return (
         _interpret_system_prompt()
         + "\n\n"
-        + _interpret_context(task, ledger, observation, extra_context, tool_outputs,
-                            compromise_facts, coverage)
+        + _interpret_context(
+            task,
+            ledger,
+            observation,
+            extra_context,
+            tool_outputs,
+            compromise_facts,
+            coverage,
+        )
     )
+
+
 def _prompt_steering(ledger: dict, observation: dict) -> str:
     """Adaptive steering injected above the ledger dump: on a stuck direction, mark the
     prior suggestion FAILED so the model stops echoing it; on a flooded result with an
@@ -326,7 +380,11 @@ def _prompt_steering(ledger: dict, observation: dict) -> str:
             "wider window, or a questioned premise (did this event occur on THIS host at all?)."
         )
     disc = observation.get("discriminator")
-    if isinstance(disc, dict) and disc.get("field") and disc.get("minority") is not None:
+    if (
+        isinstance(disc, dict)
+        and disc.get("field")
+        and disc.get("minority") is not None
+    ):
         values = ", ".join(str(v) for v in (disc.get("minority_values") or [])[:8])
         sample_ids = ", ".join(str(v) for v in (disc.get("sample_event_ids") or [])[:6])
         sample_part = f" Returned sample events: {sample_ids}." if sample_ids else ""

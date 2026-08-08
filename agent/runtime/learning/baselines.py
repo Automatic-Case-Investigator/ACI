@@ -15,6 +15,7 @@ Called from:
 - agent/management/commands/compute_baselines.py — manual one-off
 - dashboard "Recompute now" — background thread
 """
+
 from __future__ import annotations
 
 import logging
@@ -58,7 +59,14 @@ def _health(event_count: int) -> str | None:
     return None  # skip
 
 
-def _upsert(subject_type: str, subject_id: str, feature: str, value: dict, days: int, health: str) -> None:
+def _upsert(
+    subject_type: str,
+    subject_id: str,
+    feature: str,
+    value: dict,
+    days: int,
+    health: str,
+) -> None:
     from agent.models import BaselineSnapshot
 
     BaselineSnapshot.objects.update_or_create(
@@ -80,15 +88,24 @@ def _configured_subjects(subject_type: str) -> list[tuple[str, str]]:
 
 
 def _types_for(subject_type: str) -> list[str]:
-    return [subject_type] if subject_type in ("user", "endpoint") else ["user", "endpoint"]
+    return (
+        [subject_type] if subject_type in ("user", "endpoint") else ["user", "endpoint"]
+    )
 
 
-def _process_subject(adapter, subject_type: str, subject_id: str, days: int) -> tuple[int, int]:
+def _process_subject(
+    adapter, subject_type: str, subject_id: str, days: int
+) -> tuple[int, int]:
     """Compute, health-gate, and persist one subject's features. Returns (written, skipped)."""
     try:
         results = adapter.compute_features(subject_type, subject_id, days)
     except Exception as exc:
-        log.warning("baselines: compute_features failed for %s:%s: %s", subject_type, subject_id, exc)
+        log.warning(
+            "baselines: compute_features failed for %s:%s: %s",
+            subject_type,
+            subject_id,
+            exc,
+        )
         return 0, 0
 
     written = skipped = 0
@@ -141,7 +158,11 @@ def compute_all_baselines(
             w, s = _process_subject(adapter, st, sid, days)
             total_written += w
             total_skipped += s
-        log.info("baselines: complete (configured) — %d written, %d skipped", total_written, total_skipped)
+        log.info(
+            "baselines: complete (configured) — %d written, %d skipped",
+            total_written,
+            total_skipped,
+        )
         return total_written, total_skipped
 
     # 3. Auto-discovery via the adapter
@@ -156,5 +177,9 @@ def compute_all_baselines(
             total_written += w
             total_skipped += s
 
-    log.info("baselines: complete (discovery) — %d written, %d skipped", total_written, total_skipped)
+    log.info(
+        "baselines: complete (discovery) — %d written, %d skipped",
+        total_written,
+        total_skipped,
+    )
     return total_written, total_skipped

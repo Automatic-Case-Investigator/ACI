@@ -5,6 +5,7 @@ so the case carries the reasoning rather than just the disposition. `resolve` do
 the same and then changes status — in that order, so a failed status update still
 leaves the case explained.
 """
+
 from __future__ import annotations
 
 
@@ -13,7 +14,9 @@ import sys
 import unittest
 from unittest import mock
 
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, project_root)
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
 os.environ.setdefault("SECRET_KEY", "test")
@@ -70,7 +73,9 @@ class ExecutionTests(DjangoTestCase):
 
     def _run(self, action, verdict=None, *, key=DECISION_KEY):
         run = AgentRun.objects.create(
-            case_id=MARK + "1", agent_name="triage", question="q",
+            case_id=MARK + "1",
+            agent_name="triage",
+            question="q",
             status=AgentRun.STATUS_COMPLETED,
             result=REPORT,
             verdict=verdict or {"verdict": "tp", "confidence": "high"},
@@ -105,12 +110,16 @@ class ExecutionTests(DjangoTestCase):
         self.assertEqual(client.updates[0]["fields"], {"status": "Resolved"})
 
     def test_resolve_marks_a_false_positive_distinctly(self):
-        _, client = self._run(policy.RESOLVE, verdict={"verdict": "fp", "confidence": "high"})
+        _, client = self._run(
+            policy.RESOLVE, verdict={"verdict": "fp", "confidence": "high"}
+        )
         self.assertEqual(client.updates[0]["fields"], {"status": "FalsePositive"})
 
     def test_none_touches_nothing(self):
         _, client = self._run(policy.NONE)
-        self.assertEqual((client.reports, client.updates, client.comments), ([], [], []))
+        self.assertEqual(
+            (client.reports, client.updates, client.comments), ([], [], [])
+        )
 
     def test_execution_is_idempotent(self):
         run, _ = self._run(policy.DOCUMENT)
@@ -128,19 +137,26 @@ class LegacyDecisionKeyTests(unittest.TestCase):
 
     def _run(self, metadata):
         return AgentRun.objects.create(
-            case_id=MARK + "legacy", agent_name="triage", question="q",
-            status=AgentRun.STATUS_COMPLETED, result=REPORT,
-            verdict={"verdict": "fp", "confidence": "high"}, metadata=metadata)
+            case_id=MARK + "legacy",
+            agent_name="triage",
+            question="q",
+            status=AgentRun.STATUS_COMPLETED,
+            result=REPORT,
+            verdict={"verdict": "fp", "confidence": "high"},
+            metadata=metadata,
+        )
 
     def test_read_falls_back_to_the_legacy_key(self):
         run = self._run({_LEGACY_DECISION_KEY: {"action": policy.RESOLVE}})
         self.assertEqual(read_decision(run)["action"], policy.RESOLVE)
 
     def test_current_key_wins_when_both_are_present(self):
-        run = self._run({
-            _LEGACY_DECISION_KEY: {"action": policy.RESOLVE},
-            DECISION_KEY: {"action": policy.DOCUMENT},
-        })
+        run = self._run(
+            {
+                _LEGACY_DECISION_KEY: {"action": policy.RESOLVE},
+                DECISION_KEY: {"action": policy.DOCUMENT},
+            }
+        )
         self.assertEqual(read_decision(run)["action"], policy.DOCUMENT)
 
     def test_missing_and_malformed_decisions_read_as_empty(self):
@@ -149,11 +165,16 @@ class LegacyDecisionKeyTests(unittest.TestCase):
         self.assertEqual(read_decision(self._run({DECISION_KEY: {}})), {})
 
     def test_a_legacy_run_still_executes(self):
-        run = self._run({
-            "source_entity_type": "case",
-            _LEGACY_DECISION_KEY: {"action": policy.DOCUMENT, "verdict": "fp",
-                                   "confidence": "high"},
-        })
+        run = self._run(
+            {
+                "source_entity_type": "case",
+                _LEGACY_DECISION_KEY: {
+                    "action": policy.DOCUMENT,
+                    "verdict": "fp",
+                    "confidence": "high",
+                },
+            }
+        )
         client = _FakeClient()
         with _patch_client(client):
             execute_response(run)
@@ -168,11 +189,16 @@ class LegacyDecisionKeyTests(unittest.TestCase):
         self.assertEqual(meta[DECISION_KEY]["action"], policy.DOCUMENT)
 
     def test_executing_a_legacy_run_leaves_only_the_current_key(self):
-        run = self._run({
-            "source_entity_type": "case",
-            _LEGACY_DECISION_KEY: {"action": policy.DOCUMENT, "verdict": "fp",
-                                   "confidence": "high"},
-        })
+        run = self._run(
+            {
+                "source_entity_type": "case",
+                _LEGACY_DECISION_KEY: {
+                    "action": policy.DOCUMENT,
+                    "verdict": "fp",
+                    "confidence": "high",
+                },
+            }
+        )
         with _patch_client(_FakeClient()):
             execute_response(run)
         meta = AgentRun.objects.get(id=run.id).metadata
@@ -183,7 +209,8 @@ class LegacyDecisionKeyTests(unittest.TestCase):
 class ReportBodyTests(unittest.TestCase):
     def _run(self, result):
         return AgentRun(
-            case_id=MARK + "b", agent_name="triage", question="q", result=result)
+            case_id=MARK + "b", agent_name="triage", question="q", result=result
+        )
 
     def test_body_leads_with_the_verdict_then_the_report(self):
         body = _report_body(self._run(REPORT), "TP", "high")
@@ -208,8 +235,12 @@ class FailureFallbackExecutionTests(unittest.TestCase):
 
     def _failed_run(self, action, reason="run_failed", result=""):
         run = AgentRun.objects.create(
-            case_id=MARK + "fail", agent_name="triage", question="q",
-            status=AgentRun.STATUS_FAILED, result=result, verdict=None,
+            case_id=MARK + "fail",
+            agent_name="triage",
+            question="q",
+            status=AgentRun.STATUS_FAILED,
+            result=result,
+            verdict=None,
             metadata={
                 "source_entity_type": "case",
                 DECISION_KEY: {"action": action, "fallback_reason": reason},
@@ -231,7 +262,9 @@ class FailureFallbackExecutionTests(unittest.TestCase):
         self.assertIn("did not complete", client.reports[0]["title"])
 
     def test_partial_output_is_still_carried_across(self):
-        client = self._failed_run(policy.DOCUMENT, result="## Triage Summary\npartial work")
+        client = self._failed_run(
+            policy.DOCUMENT, result="## Triage Summary\npartial work"
+        )
         self.assertIn("partial work", client.reports[0]["summary"])
 
     def test_no_case_state_is_changed_by_a_failure(self):
@@ -257,13 +290,19 @@ class PromoteCaseTests(unittest.TestCase):
 
     def _promote(self, created=None, alert_id=None):
         run = AgentRun.objects.create(
-            case_id=alert_id or (MARK + "alert"), agent_name="triage", question="q",
-            status=AgentRun.STATUS_COMPLETED, result=REPORT,
+            case_id=alert_id or (MARK + "alert"),
+            agent_name="triage",
+            question="q",
+            status=AgentRun.STATUS_COMPLETED,
+            result=REPORT,
             verdict={"verdict": "tp", "confidence": "high"},
             metadata={
                 "source_entity_type": "alert",
-                DECISION_KEY: {"action": policy.PROMOTE_CASE, "verdict": "tp",
-                               "confidence": "high"},
+                DECISION_KEY: {
+                    "action": policy.PROMOTE_CASE,
+                    "verdict": "tp",
+                    "confidence": "high",
+                },
             },
         )
         client = _FakeClient()
@@ -283,8 +322,10 @@ class PromoteCaseTests(unittest.TestCase):
 
     def test_the_new_case_id_is_recorded_on_the_run(self):
         run, _ = self._promote()
-        self.assertEqual(read_decision(AgentRun.objects.get(id=run.id))["promoted_case_id"],
-                         "case-99")
+        self.assertEqual(
+            read_decision(AgentRun.objects.get(id=run.id))["promoted_case_id"],
+            "case-99",
+        )
 
     def test_alternate_id_keys_from_thehive_are_accepted(self):
         _, client = self._promote(created={"caseId": "case-77"})

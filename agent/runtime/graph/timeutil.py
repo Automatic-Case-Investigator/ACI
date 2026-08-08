@@ -7,6 +7,7 @@ Scope note: this owns the UTC-normalizing ``_parse_dt``. It deliberately does NO
 ``nodes_flow._parse_iso``, which is a distinct contract — that one parses ISO timestamps
 *without* forcing them to UTC and is used where naive/local comparisons are intended.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -32,7 +33,12 @@ def _parse_dt(value) -> datetime | None:
 
 def _format_dt(dt: datetime) -> str:
     """Render a ``datetime`` as a second-precision UTC ISO string ending in ``Z``."""
-    return dt.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return (
+        dt.astimezone(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
 
 
 def _find_timestamp_range(obj) -> tuple[str | None, str | None]:

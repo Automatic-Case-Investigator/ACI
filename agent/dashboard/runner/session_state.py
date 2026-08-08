@@ -10,7 +10,6 @@ from agent.runtime.orchestrator.specialist_sync import (
     transcript_entry_for_answer,
 )
 
-
 _TERMINAL_RUN_STATUSES = {
     AgentRun.STATUS_COMPLETED,
     AgentRun.STATUS_INCOMPLETE_BUDGET,
@@ -20,7 +19,9 @@ _TERMINAL_RUN_STATUSES = {
 }
 
 
-def set_session_status(session_id: str, *, unless_cancelled: bool = False, **fields) -> None:
+def set_session_status(
+    session_id: str, *, unless_cancelled: bool = False, **fields
+) -> None:
     try:
         qs = AgentRun.objects.filter(id=session_id)
         if unless_cancelled:
@@ -53,7 +54,9 @@ def save_session_state(session_id: str, sess: OrchestratorSession) -> None:
         pass
 
 
-def publish_specialist_result_to_session(session_id: str, run_id: str, *, reason: str) -> None:
+def publish_specialist_result_to_session(
+    session_id: str, run_id: str, *, reason: str
+) -> None:
     if not session_id or not run_id:
         return
     run = AgentRun.objects.filter(id=run_id).first()

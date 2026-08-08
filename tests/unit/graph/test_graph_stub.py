@@ -4,6 +4,7 @@ No real Wazuh, TheHive, LLM, or AVFS needed.
 
 Run from project root with: python .claude/skills/run-aci-backend/tests/test_graph_stub.py
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -14,7 +15,9 @@ import tempfile
 import unittest
 
 # Navigate from .claude/skills/run-aci-backend/tests/ up to project root (4 levels)
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, project_root)
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
 os.environ["SECRET_KEY"] = "test"
@@ -22,6 +25,7 @@ os.environ["TASKQUEUE_DB_PATH"] = tempfile.mktemp(suffix=".db")
 os.environ["BOARD_DB_PATH"] = tempfile.mktemp(suffix=".db")
 
 import django
+
 django.setup()
 
 from aci_taskqueue.store import init_db, list_tasks, create_task as sq_create
@@ -33,8 +37,8 @@ from agent.runtime.engine.seeder_runner import _augment_temporal_method, _item_p
 from langchain_core.messages import AIMessage
 from langchain_core.language_models import BaseChatModel
 
-
 # ── Stub LLM ──────────────────────────────────────────────────────────────────
+
 
 class StubModel(BaseChatModel):
     """
@@ -62,24 +66,26 @@ class StubModel(BaseChatModel):
     async def ainvoke(self, messages, **kwargs):
         text = "\n".join(getattr(m, "content", "") or "" for m in messages)
         if "canonical verdict JSON contract" in text:
-            return AIMessage(content=(
-                "```json\n"
-                "{"
-                "\"verdict\":\"needs_investigation\","
-                "\"confidence\":\"medium\","
-                "\"classification_basis\":\"insufficient_evidence\","
-                "\"impact_state\":\"unknown\","
-                "\"scope_state\":\"unknown\","
-                "\"matched_patterns\":[],"
-                "\"supporting_evidence\":[],"
-                "\"contradicting_evidence\":[],"
-                "\"blocking_gaps\":[\"Stub model did not perform a substantive investigation.\"],"
-                "\"nonblocking_gaps\":[],"
-                "\"missing_evidence\":[\"Stub model did not perform a substantive investigation.\"],"
-                "\"recommended_action\":\"Run with real tools and model for a substantive verdict.\""
-                "}\n"
-                "```"
-            ))
+            return AIMessage(
+                content=(
+                    "```json\n"
+                    "{"
+                    '"verdict":"needs_investigation",'
+                    '"confidence":"medium",'
+                    '"classification_basis":"insufficient_evidence",'
+                    '"impact_state":"unknown",'
+                    '"scope_state":"unknown",'
+                    '"matched_patterns":[],'
+                    '"supporting_evidence":[],'
+                    '"contradicting_evidence":[],'
+                    '"blocking_gaps":["Stub model did not perform a substantive investigation."],'
+                    '"nonblocking_gaps":[],'
+                    '"missing_evidence":["Stub model did not perform a substantive investigation."],'
+                    '"recommended_action":"Run with real tools and model for a substantive verdict."'
+                    "}\n"
+                    "```"
+                )
+            )
         self._turn += 1
         if self._turn == 1:
             return AIMessage(
@@ -165,7 +171,9 @@ class TriageNearbyEventsGuardModel(BaseChatModel):
     async def ainvoke(self, messages, **kwargs):
         self._turns += 1
         if self._turns == 1:
-            return AIMessage(content="## Confirmed Facts\n- Case loaded.\n\n## Findings\n- Done.")
+            return AIMessage(
+                content="## Confirmed Facts\n- Case loaded.\n\n## Findings\n- Done."
+            )
         if self._turns == 2:
             return AIMessage(
                 content="",
@@ -184,42 +192,45 @@ class TriageNearbyEventsGuardModel(BaseChatModel):
                     }
                 ],
             )
-        return AIMessage(content=(
-            "## Triage Summary\n"
-            "Alert ~5345344 on host kali triggered rule 80792 (nano exec on a tmp crontab path). "
-            "Nearby SIEM events were checked; no corroborating evidence retrieved from the stub. "
-            "Verdict: needs_investigation (medium confidence) — insufficient raw telemetry.\n\n"
-            "## Key Evidence\n"
-            "- **Case / Alert**: `~TEST-1` — rule 80792 at 2025-04-20T03:54:10Z, host kali, agent 10.0.2.15\n"
-            "- **Observed activity**: `/usr/bin/nano /tmp/crontab.Tgi9hP/crontab` (auditd exec, tty pts2)\n"
-            "- **Context**: No matched FP/TP patterns; baseline reviewed.\n"
-            "- **Gaps**: Stub SIEM result has no real production telemetry; syscheck FIM events not retrieved.\n\n"
-            "## Investigation Plan\n"
-            "1. **Review real nearby Wazuh events** — pivots: host=kali, rule=80792, "
-            "window 2025-04-20T01:54:10Z to 2025-04-20T05:54:10Z, source: SIEM. Priority: 75.\n\n"
-            "```json\n"
-            "{"
-            "\"verdict\":\"needs_investigation\","
-            "\"confidence\":\"medium\","
-            "\"classification_basis\":\"insufficient_evidence\","
-            "\"impact_state\":\"unknown\","
-            "\"scope_state\":\"unknown\","
-            "\"matched_patterns\":[],"
-            "\"supporting_evidence\":[],"
-            "\"contradicting_evidence\":[],"
-            "\"blocking_gaps\":[\"Production SIEM telemetry was not available in this stub.\"],"
-            "\"nonblocking_gaps\":[],"
-            "\"missing_evidence\":[],"
-            "\"recommended_action\":\"open investigation\""
-            "}\n"
-            "```"
-        ))
+        return AIMessage(
+            content=(
+                "## Triage Summary\n"
+                "Alert ~5345344 on host kali triggered rule 80792 (nano exec on a tmp crontab path). "
+                "Nearby SIEM events were checked; no corroborating evidence retrieved from the stub. "
+                "Verdict: needs_investigation (medium confidence) — insufficient raw telemetry.\n\n"
+                "## Key Evidence\n"
+                "- **Case / Alert**: `~TEST-1` — rule 80792 at 2025-04-20T03:54:10Z, host kali, agent 10.0.2.15\n"
+                "- **Observed activity**: `/usr/bin/nano /tmp/crontab.Tgi9hP/crontab` (auditd exec, tty pts2)\n"
+                "- **Context**: No matched FP/TP patterns; baseline reviewed.\n"
+                "- **Gaps**: Stub SIEM result has no real production telemetry; syscheck FIM events not retrieved.\n\n"
+                "## Investigation Plan\n"
+                "1. **Review real nearby Wazuh events** — pivots: host=kali, rule=80792, "
+                "window 2025-04-20T01:54:10Z to 2025-04-20T05:54:10Z, source: SIEM. Priority: 75.\n\n"
+                "```json\n"
+                "{"
+                '"verdict":"needs_investigation",'
+                '"confidence":"medium",'
+                '"classification_basis":"insufficient_evidence",'
+                '"impact_state":"unknown",'
+                '"scope_state":"unknown",'
+                '"matched_patterns":[],'
+                '"supporting_evidence":[],'
+                '"contradicting_evidence":[],'
+                '"blocking_gaps":["Production SIEM telemetry was not available in this stub."],'
+                '"nonblocking_gaps":[],'
+                '"missing_evidence":[],'
+                '"recommended_action":"open investigation"'
+                "}\n"
+                "```"
+            )
+        )
 
 
 class SeedWindowPropagationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         init_db()
         import sqlite3
+
         con = sqlite3.connect(os.environ["TASKQUEUE_DB_PATH"])
         con.execute("DELETE FROM tasks")
         con.commit()
@@ -308,33 +319,37 @@ class TriageContractModel(BaseChatModel):
         self._turns += 1
         text = "\n".join(getattr(m, "content", "") or "" for m in messages)
         if "canonical verdict JSON contract" in text:
-            return AIMessage(content=(
-                "```json\n"
-                "{\n"
-                '  "verdict": "needs_investigation",\n'
-                '  "confidence": "medium",\n'
-                '  "classification_basis": "insufficient_evidence",\n'
-                '  "impact_state": "unknown",\n'
-                '  "scope_state": "unknown",\n'
-                '  "matched_patterns": [],\n'
-                '  "supporting_evidence": [],\n'
-                '  "contradicting_evidence": [],\n'
-                '  "blocking_gaps": ["Crontab contents were not retrieved"],\n'
-                '  "nonblocking_gaps": [],\n'
-                '  "missing_evidence": ["Crontab contents were not retrieved"],\n'
-                '  "recommended_action": "Open investigation to retrieve crontab contents."\n'
-                "}\n"
-                "```"
-            ))
-        return AIMessage(content=(
-            "## Triage Summary\n"
-            "The case indicates suspicious cron-related activity, but the crontab contents were not retrieved.\n\n"
-            "## Key Evidence\n"
-            "- Case and alert summary were loaded.\n"
-            "- Nano opened a temporary crontab path, but crontab contents were not retrieved.\n\n"
-            "## Investigation Plan\n"
-            "1. Retrieve crontab diff or contents around the alert timestamp.\n"
-        ))
+            return AIMessage(
+                content=(
+                    "```json\n"
+                    "{\n"
+                    '  "verdict": "needs_investigation",\n'
+                    '  "confidence": "medium",\n'
+                    '  "classification_basis": "insufficient_evidence",\n'
+                    '  "impact_state": "unknown",\n'
+                    '  "scope_state": "unknown",\n'
+                    '  "matched_patterns": [],\n'
+                    '  "supporting_evidence": [],\n'
+                    '  "contradicting_evidence": [],\n'
+                    '  "blocking_gaps": ["Crontab contents were not retrieved"],\n'
+                    '  "nonblocking_gaps": [],\n'
+                    '  "missing_evidence": ["Crontab contents were not retrieved"],\n'
+                    '  "recommended_action": "Open investigation to retrieve crontab contents."\n'
+                    "}\n"
+                    "```"
+                )
+            )
+        return AIMessage(
+            content=(
+                "## Triage Summary\n"
+                "The case indicates suspicious cron-related activity, but the crontab contents were not retrieved.\n\n"
+                "## Key Evidence\n"
+                "- Case and alert summary were loaded.\n"
+                "- Nano opened a temporary crontab path, but crontab contents were not retrieved.\n\n"
+                "## Investigation Plan\n"
+                "1. Retrieve crontab diff or contents around the alert timestamp.\n"
+            )
+        )
 
 
 class MalformedTriageContractModel(TriageContractModel):
@@ -344,36 +359,45 @@ class MalformedTriageContractModel(TriageContractModel):
         self._turns += 1
         text = "\n".join(getattr(m, "content", "") or "" for m in messages)
         if "canonical verdict JSON contract" in text:
-            return AIMessage(content=(
-                "```json\n"
-                "{\n"
-                '  "verdict": "needs_investigation",\n'
-                '  "confidence": "medium",\n'
-                '  "classification_basis": "insufficient_evidence",\n'
-                '  "impact_state": "unknown",\n'
-                '  "scope_state": "unknown",\n'
-                '  "matched_patterns": [],\n'
-                '  "supporting_evidence": [],\n'
-                '  "contradicting_evidence": [],\n'
-                '  "blocking_gaps": ["Crontab contents were not retrieved"],\n'
-                '  "nonblocking_gaps": [],\n'
-                '  "missing_evidence": ["Crontab contents were not retrieved"],\n'
-                '  "recommended_action": "Open investigation to retrieve crontab contents."\n'
-                "}\n"
-                "```"
-            ))
-        if "not a valid triage handoff report" in text or "Rewrite the triage handoff as a complete text report now" in text:
-            return AIMessage(content=(
-                "## Triage Summary\n"
-                "The alert points to suspicious cron-related activity, but the current evidence is incomplete.\n\n"
-                "## Key Evidence\n"
-                "- Case and alert summary were loaded.\n"
-                "- Nano opened a temporary crontab path.\n"
-                "- The crontab contents themselves were not retrieved.\n\n"
-                "## Investigation Plan\n"
-                "1. Retrieve crontab diff or contents from 2022-01-18T12:00:00Z to 2022-01-18T13:00:00Z.\n"
-            ))
-        return AIMessage(content='{"entities": [{"subject_type": "user", "subject_id": "kali"}]}')
+            return AIMessage(
+                content=(
+                    "```json\n"
+                    "{\n"
+                    '  "verdict": "needs_investigation",\n'
+                    '  "confidence": "medium",\n'
+                    '  "classification_basis": "insufficient_evidence",\n'
+                    '  "impact_state": "unknown",\n'
+                    '  "scope_state": "unknown",\n'
+                    '  "matched_patterns": [],\n'
+                    '  "supporting_evidence": [],\n'
+                    '  "contradicting_evidence": [],\n'
+                    '  "blocking_gaps": ["Crontab contents were not retrieved"],\n'
+                    '  "nonblocking_gaps": [],\n'
+                    '  "missing_evidence": ["Crontab contents were not retrieved"],\n'
+                    '  "recommended_action": "Open investigation to retrieve crontab contents."\n'
+                    "}\n"
+                    "```"
+                )
+            )
+        if (
+            "not a valid triage handoff report" in text
+            or "Rewrite the triage handoff as a complete text report now" in text
+        ):
+            return AIMessage(
+                content=(
+                    "## Triage Summary\n"
+                    "The alert points to suspicious cron-related activity, but the current evidence is incomplete.\n\n"
+                    "## Key Evidence\n"
+                    "- Case and alert summary were loaded.\n"
+                    "- Nano opened a temporary crontab path.\n"
+                    "- The crontab contents themselves were not retrieved.\n\n"
+                    "## Investigation Plan\n"
+                    "1. Retrieve crontab diff or contents from 2022-01-18T12:00:00Z to 2022-01-18T13:00:00Z.\n"
+                )
+            )
+        return AIMessage(
+            content='{"entities": [{"subject_type": "user", "subject_id": "kali"}]}'
+        )
 
 
 class InvestigationContractModel(BaseChatModel):
@@ -392,57 +416,64 @@ class InvestigationContractModel(BaseChatModel):
     async def ainvoke(self, messages, **kwargs):
         text = "\n".join(getattr(m, "content", "") or "" for m in messages)
         if "canonical verdict JSON contract" in text:
-            return AIMessage(content=(
-                "```json\n"
-                "{\n"
-                '  "verdict": "tp",\n'
-                '  "confidence": "high",\n'
-                '  "classification_basis": "malicious_evidence",\n'
-                '  "impact_state": "active",\n'
-                '  "scope_state": "isolated",\n'
-                '  "matched_patterns": [],\n'
-                '  "supporting_evidence": [\n'
-                '    "Syscheck modified /var/spool/cron/crontabs/user with reverse-shell cron entry"\n'
-                "  ],\n"
-                '  "contradicting_evidence": [],\n'
-                '  "blocking_gaps": ["Initial access source IP not retrieved from telemetry"],\n'
-                '  "nonblocking_gaps": ["No direct network telemetry confirming callback"],\n'
-                '  "missing_evidence": ["Initial access source IP not retrieved from telemetry"],\n'
-                '  "recommended_action": "Isolate kali and remove the malicious crontab."\n'
-                "}\n"
-                "```"
-            ))
+            return AIMessage(
+                content=(
+                    "```json\n"
+                    "{\n"
+                    '  "verdict": "tp",\n'
+                    '  "confidence": "high",\n'
+                    '  "classification_basis": "malicious_evidence",\n'
+                    '  "impact_state": "active",\n'
+                    '  "scope_state": "isolated",\n'
+                    '  "matched_patterns": [],\n'
+                    '  "supporting_evidence": [\n'
+                    '    "Syscheck modified /var/spool/cron/crontabs/user with reverse-shell cron entry"\n'
+                    "  ],\n"
+                    '  "contradicting_evidence": [],\n'
+                    '  "blocking_gaps": ["Initial access source IP not retrieved from telemetry"],\n'
+                    '  "nonblocking_gaps": ["No direct network telemetry confirming callback"],\n'
+                    '  "missing_evidence": ["Initial access source IP not retrieved from telemetry"],\n'
+                    '  "recommended_action": "Isolate kali and remove the malicious crontab."\n'
+                    "}\n"
+                    "```"
+                )
+            )
         if "Write the final report in markdown" in text:
-            return AIMessage(content=(
-                "## Verdict\n"
-                "compromise confirmed; critical; active\n\n"
-                "## Executive Summary\n"
-                "Syscheck confirmed a malicious reverse-shell cron entry on kali.\n\n"
-                "## Timeline\n"
-                "- 2025-04-20T03:49:57.127Z syscheck modified /var/spool/cron/crontabs/user.\n\n"
-                "## Scope & Impact\n"
-                "| Asset | Type | Role | Attacker access / impact |\n"
-                "|---|---|---|---|\n"
-                "| kali | host | affected endpoint | malicious cron persistence |\n\n"
-                "## Initial Access\n"
-                "Initial access vector not established — source IP missing from telemetry.\n\n"
-                "## Recommended Actions\n"
-                "1. Isolate kali.\n\n"
-                "## Open Gaps\n"
-                "- Initial access source IP not retrieved from telemetry.\n"
-            ))
-        return AIMessage(content=(
-            "## Findings\n"
-            "- Syscheck modified /var/spool/cron/crontabs/user with reverse-shell cron entry.\n"
-            "- The cron entry runs sh -i to /dev/tcp/10.0.2.5/5555 every minute.\n\n"
-            "## Hypotheses\n"
-            "- [confirmed/high] Cron persistence was installed on kali.\n\n"
-            "## New Leads\n"
-            "- None.\n"
-        ))
+            return AIMessage(
+                content=(
+                    "## Verdict\n"
+                    "compromise confirmed; critical; active\n\n"
+                    "## Executive Summary\n"
+                    "Syscheck confirmed a malicious reverse-shell cron entry on kali.\n\n"
+                    "## Timeline\n"
+                    "- 2025-04-20T03:49:57.127Z syscheck modified /var/spool/cron/crontabs/user.\n\n"
+                    "## Scope & Impact\n"
+                    "| Asset | Type | Role | Attacker access / impact |\n"
+                    "|---|---|---|---|\n"
+                    "| kali | host | affected endpoint | malicious cron persistence |\n\n"
+                    "## Initial Access\n"
+                    "Initial access vector not established — source IP missing from telemetry.\n\n"
+                    "## Recommended Actions\n"
+                    "1. Isolate kali.\n\n"
+                    "## Open Gaps\n"
+                    "- Initial access source IP not retrieved from telemetry.\n"
+                )
+            )
+        return AIMessage(
+            content=(
+                "## Findings\n"
+                "- Syscheck modified /var/spool/cron/crontabs/user with reverse-shell cron entry.\n"
+                "- The cron entry runs sh -i to /dev/tcp/10.0.2.5/5555 every minute.\n\n"
+                "## Hypotheses\n"
+                "- [confirmed/high] Cron persistence was installed on kali.\n\n"
+                "## New Leads\n"
+                "- None.\n"
+            )
+        )
 
 
 # ── Real-store task queue tools ───────────────────────────────────────────────
+
 
 class TQTool:
     def __init__(self, name: str, fn):
@@ -456,14 +487,22 @@ class TQTool:
 
 def _make_triage_tools(case_id: str, inv_run_id: str):
     from aci_taskqueue.store import (
-        create_task, claim_next, complete_task, list_tasks,
+        create_task,
+        claim_next,
+        complete_task,
+        list_tasks,
     )
+
     return [
         TQTool("create_task", create_task),
-        TQTool("claim_next",  claim_next),
-        TQTool("complete_task", lambda task_id, summary, avfs_paths=None:
-               complete_task(task_id, summary, avfs_paths)),
-        TQTool("list_tasks",  list_tasks),
+        TQTool("claim_next", claim_next),
+        TQTool(
+            "complete_task",
+            lambda task_id, summary, avfs_paths=None: complete_task(
+                task_id, summary, avfs_paths
+            ),
+        ),
+        TQTool("list_tasks", list_tasks),
         # Dummy AVFS tools (triage may call write/mkdir)
         _DummyTool("write"),
         _DummyTool("mkdir"),
@@ -473,6 +512,7 @@ def _make_triage_tools(case_id: str, inv_run_id: str):
 class _DummyTool:
     def __init__(self, name):
         self.name = name
+
     async def ainvoke(self, args):
         return json.dumps({"ok": True})
 
@@ -491,6 +531,7 @@ class _RecorderTool:
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
+
 class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
@@ -498,6 +539,7 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
         # Tests share one taskqueue DB; purge so cases that reuse case/run ids
         # don't see each other's tasks (these tests run in one process).
         import sqlite3
+
         con = sqlite3.connect(os.environ["TASKQUEUE_DB_PATH"])
         con.execute("DELETE FROM tasks")
         con.commit()
@@ -506,8 +548,8 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
     async def test_triage_does_not_seed_investigation_queue(self):
         """Triage should produce a report task only, not downstream investigation tasks."""
         triage_run_id = "triage-run-001"
-        inv_run_id    = "inv-run-001"
-        case_id       = "~001"
+        inv_run_id = "inv-run-001"
+        case_id = "~001"
 
         tools = _make_triage_tools(case_id, inv_run_id)
         model = StubModel(inv_run_id, case_id)
@@ -542,7 +584,9 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
         inv_tasks = list_tasks(case_id, inv_run_id, "investigation")
         triage_tasks = list_tasks(case_id, triage_run_id, "triage")
 
-        self.assertEqual(inv_tasks, [], "Triage must not create investigation queue tasks")
+        self.assertEqual(
+            inv_tasks, [], "Triage must not create investigation queue tasks"
+        )
         # The flat loop answers the analyst's question directly and never uses the
         # task queue, so triage now creates no tasks of its own either.
         self.assertEqual(triage_tasks, [])
@@ -551,7 +595,8 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
     async def test_triage_queries_siem_then_completes_with_valid_handoff(self):
         """End-to-end triage: a scripted agent queries nearby SIEM events and produces a valid
         3-section handoff that completes. (Grounding is enforced by the interpret prompt, not a
-        deterministic SIEM guard — removed; this pins that the triage flow still completes.)"""
+        deterministic SIEM guard — removed; this pins that the triage flow still completes.)
+        """
         triage_run_id = "triage-run-siem-guard"
         case_id = "~siemguard"
 
@@ -590,7 +635,11 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
         # so pin the OUTCOME (a durable handoff naming the SIEM check) rather than a
         # turn count, which is an artifact of the loop shape.
         self.assertIn("Nearby SIEM events were checked", final["final_answer"])
-        for section in ("## Triage Summary", "## Key Evidence", "## Investigation Plan"):
+        for section in (
+            "## Triage Summary",
+            "## Key Evidence",
+            "## Investigation Plan",
+        ):
             self.assertIn(section, final["final_answer"])
 
     async def test_triage_verdict_contract_node_appends_canonical_json(self):
@@ -815,24 +864,40 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
     async def test_investigation_skips_seed_when_queue_populated(self):
         """Investigation seed should not add a fallback task when its queue is populated."""
         inv_run_id = "inv-run-002"
-        case_id    = "~002"
+        case_id = "~002"
 
         # Pre-seed the investigation queue (simulating what triage did)
-        sq_create(case_id, inv_run_id, "investigation",
-                  "Investigate lateral movement", priority=85)
+        sq_create(
+            case_id,
+            inv_run_id,
+            "investigation",
+            "Investigate lateral movement",
+            priority=85,
+        )
 
         class InvModel(BaseChatModel):
             """Processes one task then stops."""
-            def __init__(self): super().__init__(); self._turn = 0
+
+            def __init__(self):
+                super().__init__()
+                self._turn = 0
+
             @property
-            def _llm_type(self): return "stub"
-            def _generate(self, *a, **kw): raise NotImplementedError
-            def bind_tools(self, tools): return self
+            def _llm_type(self):
+                return "stub"
+
+            def _generate(self, *a, **kw):
+                raise NotImplementedError
+
+            def bind_tools(self, tools):
+                return self
+
             async def ainvoke(self, messages, **kwargs):
                 self._turn += 1
                 return AIMessage(content="Investigation complete.")
 
         from aci_taskqueue.store import list_tasks as _lt
+
         tools = _make_triage_tools(case_id, "")
         # Adjust tools for investigation (same underlying store, different agent_name)
         model = InvModel()
@@ -866,8 +931,11 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
 
         all_tasks = _lt(case_id, inv_run_id, "investigation")
         # Should have exactly 1 task (the existing one), not 2
-        self.assertEqual(len(all_tasks), 1,
-            f"Expected 1 task (no duplicate seed), got {[t['title'] for t in all_tasks]}")
+        self.assertEqual(
+            len(all_tasks),
+            1,
+            f"Expected 1 task (no duplicate seed), got {[t['title'] for t in all_tasks]}",
+        )
         print(f"\nInvestigation skipped seed, processed 1 existing task.")
         print(f"Investigation status: {final['status']}")
 
@@ -881,16 +949,20 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
             """Turn 1 (seeder): creates a task via tool calls.
             Turn 2 (seeder): returns plain text — done seeding.
             Turn 3+ (investigation): completes each claimed task."""
+
             def __init__(self):
                 super().__init__()
                 self._turn = 0
 
             @property
-            def _llm_type(self): return "seeder-and-inv-stub"
+            def _llm_type(self):
+                return "seeder-and-inv-stub"
 
-            def _generate(self, *a, **kw): raise NotImplementedError
+            def _generate(self, *a, **kw):
+                raise NotImplementedError
 
-            def bind_tools(self, tools): return self
+            def bind_tools(self, tools):
+                return self
 
             async def ainvoke(self, messages, **kwargs):
                 self._turn += 1
@@ -898,18 +970,20 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
                     # Seeder call: create one investigation task
                     return AIMessage(
                         content="",
-                        tool_calls=[{
-                            "id": "tc-seed-1",
-                            "name": "create_task",
-                            "args": {
-                                "case_id": case_id,
-                                "run_id": inv_run_id,
-                                "agent_name": "investigation",
-                                "title": "Investigate SSH brute-force from 1.2.3.4",
-                                "description": "Query SIEM for SSH events from 1.2.3.4.",
-                                "priority": 90,
-                            },
-                        }],
+                        tool_calls=[
+                            {
+                                "id": "tc-seed-1",
+                                "name": "create_task",
+                                "args": {
+                                    "case_id": case_id,
+                                    "run_id": inv_run_id,
+                                    "agent_name": "investigation",
+                                    "title": "Investigate SSH brute-force from 1.2.3.4",
+                                    "description": "Query SIEM for SSH events from 1.2.3.4.",
+                                    "priority": 90,
+                                },
+                            }
+                        ],
                     )
                 if self._turn == 2:
                     # Seeder done: no more tool calls
@@ -959,11 +1033,13 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
 
         # Seeder creates tasks directly — no "populate investigation queue" meta-task
         self.assertNotIn(
-            "Populate investigation queue from triage handoff", titles,
+            "Populate investigation queue from triage handoff",
+            titles,
             "Seeder should not leave a meta seed-task in the queue",
         )
         self.assertIn(
-            "Investigate SSH brute-force from 1.2.3.4", titles,
+            "Investigate SSH brute-force from 1.2.3.4",
+            titles,
             "Seeder should create the investigation task from the triage plan",
         )
 
@@ -983,7 +1059,8 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
         read_tool = _RecorderTool("read")
         post_tool = _RecorderTool("post_case_report")
         tools = [
-            t for t in _make_triage_tools(case_id, run_id)
+            t
+            for t in _make_triage_tools(case_id, run_id)
             if t.name not in {"write", "mkdir"}
         ] + [write_tool, mkdir_tool, read_tool, post_tool]
 
@@ -991,18 +1068,18 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
             "Triage required more investigation.\n\n"
             "```json\n"
             "{"
-            "\"verdict\":\"needs_investigation\","
-            "\"confidence\":\"medium\","
-            "\"classification_basis\":\"insufficient_evidence\","
-            "\"impact_state\":\"unknown\","
-            "\"scope_state\":\"unknown\","
-            "\"matched_patterns\":[],"
-            "\"supporting_evidence\":[],"
-            "\"contradicting_evidence\":[],"
-            "\"blocking_gaps\":[\"Crontab contents were not retrieved\"],"
-            "\"nonblocking_gaps\":[],"
-            "\"missing_evidence\":[],"
-            "\"recommended_action\":\"investigate crontab contents\""
+            '"verdict":"needs_investigation",'
+            '"confidence":"medium",'
+            '"classification_basis":"insufficient_evidence",'
+            '"impact_state":"unknown",'
+            '"scope_state":"unknown",'
+            '"matched_patterns":[],'
+            '"supporting_evidence":[],'
+            '"contradicting_evidence":[],'
+            '"blocking_gaps":["Crontab contents were not retrieved"],'
+            '"nonblocking_gaps":[],'
+            '"missing_evidence":[],'
+            '"recommended_action":"investigate crontab contents"'
             "}\n"
             "```"
         )
@@ -1051,7 +1128,8 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(parse_verdict(final["final_answer"]), final["verdict"])
 
         final_writes = [
-            call for call in write_tool.calls
+            call
+            for call in write_tool.calls
             if call.get("path", "").endswith("/reports/final.md")
         ]
         self.assertEqual(len(final_writes), 1)

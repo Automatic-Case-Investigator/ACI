@@ -4,13 +4,16 @@ Offline test: TheHive alert metadata extraction (pure parsing, no DB/LLM).
 Run from project root with:
     python .claude/skills/run-aci-backend/tests/test_alert_metadata.py -v
 """
+
 from __future__ import annotations
 
 import os
 import sys
 import unittest
 
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, project_root)
 
 from agent.runtime.analysis.alert_metadata import extract_alert_metadata
@@ -58,7 +61,15 @@ class TestExtractAlertMetadata(unittest.TestCase):
         self.assertEqual(meta["users"], [])
         self.assertEqual(meta["titles"], [])
         # Contract fields always present
-        for key in ("rule_ids", "users", "paths", "tags", "titles", "time_windows", "signals"):
+        for key in (
+            "rule_ids",
+            "users",
+            "paths",
+            "tags",
+            "titles",
+            "time_windows",
+            "signals",
+        ):
             self.assertIn(key, meta)
 
     def test_non_tag_strings_ignored(self):

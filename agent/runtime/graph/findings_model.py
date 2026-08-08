@@ -15,6 +15,7 @@ The result drives three things (see nodes_flow):
 Mirrors `lead_model.validate_leads_model`: one bounded async model call, fail-open
 (returns None on unavailable/timeout/unparseable so callers fall back to the regex).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -74,8 +75,12 @@ class FindingVerdict:
 
     def to_dict(self) -> dict:
         return {
-            "text": self.text, "status": self.status, "grounded": self.grounded,
-            "novel": self.novel, "reason": self.reason, "event_refs": list(self.event_refs),
+            "text": self.text,
+            "status": self.status,
+            "grounded": self.grounded,
+            "novel": self.novel,
+            "reason": self.reason,
+            "event_refs": list(self.event_refs),
         }
 
     @classmethod
@@ -115,7 +120,9 @@ class FindingsVerification:
             reason = v.reason if len(v.reason) <= 120 else v.reason[:120].rstrip() + "…"
             lines.append(f'- REJECTED [{v.status or "?"}] "{text}" -> {reason}')
         if len(self.rejected) > max_items:
-            lines.append(f"- … {len(self.rejected) - max_items} more rejected bullet(s)")
+            lines.append(
+                f"- … {len(self.rejected) - max_items} more rejected bullet(s)"
+            )
         lines.append(f"You have {self.verified_count} verified finding(s).")
         return "\n".join(lines)
 
@@ -144,7 +151,10 @@ def build_evidence_digest(state, messages: list) -> tuple[str, list[str]]:
     facts so the model can flag restatements. Reuses the grounding helpers so the
     verifier shares one notion of "trusted evidence" with the literal-grounding guard.
     """
-    from .validation import _board_entries_for_validation, _trusted_artifacts_for_validation
+    from .validation import (
+        _board_entries_for_validation,
+        _trusted_artifacts_for_validation,
+    )
 
     event_ids: list[str] = []
     seen: set[str] = set()
@@ -173,8 +183,12 @@ def build_evidence_digest(state, messages: list) -> tuple[str, list[str]]:
     return digest, board_facts
 
 
-def _build_findings_prompt(findings_section: str, evidence_digest: str,
-                           board_facts: list[str], current_task: dict | None) -> str:
+def _build_findings_prompt(
+    findings_section: str,
+    evidence_digest: str,
+    board_facts: list[str],
+    current_task: dict | None,
+) -> str:
     task_line = ""
     if current_task:
         task_line = f"Current task: {current_task.get('title') or ''}\n\n"
@@ -218,8 +232,14 @@ def _to_verdict(item: dict) -> FindingVerdict:
     v = FindingVerdict.from_dict(item)
     if v.status not in _VALID_STATUSES:
         # Unknown status is treated as not-a-finding so it can never pass as verified.
-        v = FindingVerdict(v.text, "speculative", False, v.novel,
-                           v.reason or "unrecognized status from verifier", v.event_refs)
+        v = FindingVerdict(
+            v.text,
+            "speculative",
+            False,
+            v.novel,
+            v.reason or "unrecognized status from verifier",
+            v.event_refs,
+        )
     return v
 
 
@@ -237,27 +257,42 @@ async def verify_findings_model(
     section returns an empty (valid) verification, not None."""
     src = src_label(agent_name)
     if model is None:
-        emit(src, "warning", "findings verifier: no model — falling back to regex check")
+        emit(
+            src, "warning", "findings verifier: no model — falling back to regex check"
+        )
         return None
     if not (findings_section or "").strip():
         return FindingsVerification(verified=[], rejected=[])
 
-    prompt = _build_findings_prompt(findings_section, evidence_digest, board_facts, current_task)
+    prompt = _build_findings_prompt(
+        findings_section, evidence_digest, board_facts, current_task
+    )
     try:
         resp = await asyncio.wait_for(
-            model.ainvoke([
-                SystemMessage(content=_FINDINGS_SYSTEM),
-                HumanMessage(content=prompt),
-            ]),
+            model.ainvoke(
+                [
+                    SystemMessage(content=_FINDINGS_SYSTEM),
+                    HumanMessage(content=prompt),
+                ]
+            ),
             timeout=_FINDINGS_MODEL_TIMEOUT_SECS,
         )
         _sanitize_message(resp)
         items = _parse_model_verdicts(getattr(resp, "content", "") or "")
     except asyncio.TimeoutError:
-        emit(src, "warning", f"findings verifier: model timed out ({_FINDINGS_MODEL_TIMEOUT_SECS}s) — falling back")
+        emit(
+            src,
+            "warning",
+            f"findings verifier: model timed out ({_FINDINGS_MODEL_TIMEOUT_SECS}s) — falling back",
+        )
         return None
     except Exception as exc:
-        emit(src, "warning", "findings verifier: model call failed — falling back", detail=str(exc))
+        emit(
+            src,
+            "warning",
+            "findings verifier: model call failed — falling back",
+            detail=str(exc),
+        )
         return None
 
     if items is None:

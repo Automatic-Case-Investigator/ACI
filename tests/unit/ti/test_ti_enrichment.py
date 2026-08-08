@@ -1,5 +1,6 @@
 """Tests for TI enrichment: TIResult, TICache, VirusTotalProvider, TIEnricher,
 board/lead integration, cache management views."""
+
 from __future__ import annotations
 
 import json
@@ -14,17 +15,18 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
 _tmp_board = tempfile.mktemp(suffix="_board.db")
-_tmp_ti    = tempfile.mktemp(suffix="_ti.db")
-_tmp_tq    = tempfile.mktemp(suffix="_tq.db")
+_tmp_ti = tempfile.mktemp(suffix="_ti.db")
+_tmp_tq = tempfile.mktemp(suffix="_tq.db")
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
 os.environ.setdefault("SECRET_KEY", "test-secret-key")
-os.environ["BOARD_DB_PATH"]     = _tmp_board
-os.environ["TI_CACHE_DB_PATH"]  = _tmp_ti
+os.environ["BOARD_DB_PATH"] = _tmp_board
+os.environ["TI_CACHE_DB_PATH"] = _tmp_ti
 os.environ["TASKQUEUE_DB_PATH"] = _tmp_tq
-os.environ["VT_API_KEY"]        = ""   # disabled by default
+os.environ["VT_API_KEY"] = ""  # disabled by default
 
 import django
+
 django.setup()
 
 from agent.ti.base import TIProvider, TIResult
@@ -39,8 +41,8 @@ from agent.ti.enricher import (
 )
 from agent.ti.providers.virustotal import VirusTotalProvider
 
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
 
 def _tmp_cache(ttl_hours: int = 24) -> TICache:
     return TICache(db_path=tempfile.mktemp(suffix=".db"), ttl_hours=ttl_hours)
@@ -79,6 +81,7 @@ def _fake_artifact(kind: str = "ip", value: str = "1.2.3.4"):
 
 # ── TestTIResult ──────────────────────────────────────────────────────────────
 
+
 class TestTIResult(unittest.TestCase):
     def test_frozen(self):
         r = _fake_result()
@@ -86,8 +89,19 @@ class TestTIResult(unittest.TestCase):
             r.verdict = "clean"  # type: ignore[misc]
 
     def test_raw_excluded_from_equality(self):
-        r1 = TIResult("vt", "ip", "1.2.3.4", "malicious", 0.5, "botnet", "https://x", raw={"a": 1})
-        r2 = TIResult("vt", "ip", "1.2.3.4", "malicious", 0.5, "botnet", "https://x", raw={"b": 999})
+        r1 = TIResult(
+            "vt", "ip", "1.2.3.4", "malicious", 0.5, "botnet", "https://x", raw={"a": 1}
+        )
+        r2 = TIResult(
+            "vt",
+            "ip",
+            "1.2.3.4",
+            "malicious",
+            0.5,
+            "botnet",
+            "https://x",
+            raw={"b": 999},
+        )
         self.assertEqual(r1, r2)
 
     def test_score_none_allowed(self):
@@ -96,6 +110,7 @@ class TestTIResult(unittest.TestCase):
 
 
 # ── TestTICache ───────────────────────────────────────────────────────────────
+
 
 class TestTICache(unittest.TestCase):
     def setUp(self):
@@ -145,9 +160,11 @@ class TestTICache(unittest.TestCase):
 
     def test_cleanup_expired_removes_stale(self):
         from datetime import datetime, timedelta, timezone
+
         # Write an entry then manually backdate its expires_at.
         self.cache.set(_fake_result(value="12.0.0.1"), "c1")
         import sqlite3
+
         conn = sqlite3.connect(self.cache._db_path)
         conn.execute(
             "UPDATE ti_cache SET expires_at=? WHERE value=?",
@@ -167,6 +184,7 @@ class TestTICache(unittest.TestCase):
 
 
 # ── TestVirusTotalProvider ────────────────────────────────────────────────────
+
 
 def _vt_response(malicious=0, suspicious=0, harmless=60, labels=None) -> dict:
     results = {}
@@ -200,9 +218,13 @@ class TestVirusTotalProvider(unittest.TestCase):
 
     def test_malicious_ip(self):
         p = self._provider()
-        body = _vt_response(malicious=12, suspicious=2, harmless=55, labels=["Trojan", "c2"])
+        body = _vt_response(
+            malicious=12, suspicious=2, harmless=55, labels=["Trojan", "c2"]
+        )
         with patch("httpx.Client") as MockClient:
-            MockClient.return_value.__enter__.return_value.get.return_value = self._mock_resp(body)
+            MockClient.return_value.__enter__.return_value.get.return_value = (
+                self._mock_resp(body)
+            )
             r = p.lookup("ip", "1.2.3.4")
         self.assertEqual(r.verdict, "malicious")
         self.assertIsNotNone(r.score)
@@ -213,7 +235,9 @@ class TestVirusTotalProvider(unittest.TestCase):
         p = self._provider()
         body = _vt_response(malicious=0, suspicious=5, harmless=60)
         with patch("httpx.Client") as MockClient:
-            MockClient.return_value.__enter__.return_value.get.return_value = self._mock_resp(body)
+            MockClient.return_value.__enter__.return_value.get.return_value = (
+                self._mock_resp(body)
+            )
             r = p.lookup("domain", "evil.com")
         self.assertEqual(r.verdict, "suspicious")
 
@@ -221,7 +245,9 @@ class TestVirusTotalProvider(unittest.TestCase):
         p = self._provider()
         body = _vt_response(malicious=0, suspicious=0, harmless=67)
         with patch("httpx.Client") as MockClient:
-            MockClient.return_value.__enter__.return_value.get.return_value = self._mock_resp(body)
+            MockClient.return_value.__enter__.return_value.get.return_value = (
+                self._mock_resp(body)
+            )
             r = p.lookup("sha256", "a" * 64)
         self.assertEqual(r.verdict, "clean")
         self.assertEqual(r.score, 0.0)
@@ -229,14 +255,18 @@ class TestVirusTotalProvider(unittest.TestCase):
     def test_404_returns_unknown(self):
         p = self._provider()
         with patch("httpx.Client") as MockClient:
-            MockClient.return_value.__enter__.return_value.get.return_value = self._mock_resp({}, 404)
+            MockClient.return_value.__enter__.return_value.get.return_value = (
+                self._mock_resp({}, 404)
+            )
             r = p.lookup("ip", "0.0.0.0")
         self.assertEqual(r.verdict, "unknown")
 
     def test_network_error_returns_unknown(self):
         p = self._provider()
         with patch("httpx.Client") as MockClient:
-            MockClient.return_value.__enter__.return_value.get.side_effect = OSError("timeout")
+            MockClient.return_value.__enter__.return_value.get.side_effect = OSError(
+                "timeout"
+            )
             r = p.lookup("ip", "0.0.0.1")
         self.assertEqual(r.verdict, "unknown")
         self.assertIn("timeout", r.indicators)
@@ -281,6 +311,7 @@ class TestVirusTotalProvider(unittest.TestCase):
 
 # ── TestTIEnricher ────────────────────────────────────────────────────────────
 
+
 class TestTIEnricher(unittest.TestCase):
     def _enricher(self, provider=None, calls_per_minute=60):
         cache = _tmp_cache()
@@ -307,7 +338,9 @@ class TestTIEnricher(unittest.TestCase):
     def test_unsupported_kind_skipped(self):
         mock_p = self._mock_vt_provider(_fake_result())
         e = self._enricher(provider=mock_p)
-        e.enrich_batch([_fake_artifact(kind="process", value="cmd.exe")], "c1", "r1", "inv")
+        e.enrich_batch(
+            [_fake_artifact(kind="process", value="cmd.exe")], "c1", "r1", "inv"
+        )
         mock_p.lookup.assert_not_called()
 
     def test_cache_hit_skips_provider(self):
@@ -327,6 +360,7 @@ class TestTIEnricher(unittest.TestCase):
 
     def test_malicious_verdict_creates_lead(self):
         from aci_taskqueue import store as tq_store
+
         r = _fake_result(verdict="malicious", value="3.3.3.3")
         n = create_ti_leads([r], "case-lead-mal", "run-lead-mal", "investigation")
         self.assertEqual(n, 1)
@@ -337,6 +371,7 @@ class TestTIEnricher(unittest.TestCase):
 
     def test_suspicious_verdict_priority(self):
         from aci_taskqueue import store as tq_store
+
         r = _fake_result(verdict="suspicious", value="evil2.com", kind="domain")
         create_ti_leads([r], "case-susp", "run-susp", "investigation")
         tasks = tq_store.list_tasks("case-susp", "run-susp", "investigation")
@@ -344,12 +379,14 @@ class TestTIEnricher(unittest.TestCase):
 
     def test_clean_verdict_no_lead(self):
         from aci_taskqueue import store as tq_store
+
         r = _fake_result(verdict="clean", value="8.8.8.8")
         n = create_ti_leads([], "case-c", "run-c", "investigation")
         self.assertEqual(n, 0)
 
     def test_write_ti_results_to_board(self):
         from aci_board import store
+
         store.init_db()
         r = _fake_result(value="200.0.0.1")
         write_ti_results([r], "case-b", "run-b", "investigation")
@@ -361,6 +398,7 @@ class TestTIEnricher(unittest.TestCase):
 
     def test_dedup_key_prevents_duplicate_board_entries(self):
         from aci_board import store
+
         r = _fake_result(value="201.0.0.1")
         write_ti_results([r], "case-dup", "run-dup", "investigation")
         write_ti_results([r], "case-dup", "run-dup", "investigation")
@@ -371,10 +409,12 @@ class TestTIEnricher(unittest.TestCase):
 
 # ── TestGetEnricher ───────────────────────────────────────────────────────────
 
+
 class TestGetEnricher(unittest.TestCase):
     def setUp(self):
         # Reset singleton state before each test.
         import agent.ti.enricher as enricher_mod
+
         enricher_mod._enricher_instance = None
         enricher_mod._cache_instance = None
 
@@ -384,12 +424,16 @@ class TestGetEnricher(unittest.TestCase):
         # Isolate from any DB-stored aci-ti ProviderConfig (these tests hit the
         # real DB): resolve_settings returns the env-backed defaults unchanged.
         from django.test import override_settings
-        with override_settings(VT_API_KEY=""), \
-                patch("agent.runtime.config.resolve_settings", side_effect=lambda key, defaults: defaults):
+
+        with override_settings(VT_API_KEY=""), patch(
+            "agent.runtime.config.resolve_settings",
+            side_effect=lambda key, defaults: defaults,
+        ):
             self.assertIsNone(get_enricher())
 
     def test_returns_enricher_when_api_key_set(self):
         from django.test import override_settings
+
         with override_settings(VT_API_KEY="fake-key-for-test"):
             enricher = get_enricher()
         self.assertIsNotNone(enricher)
@@ -397,6 +441,7 @@ class TestGetEnricher(unittest.TestCase):
 
     def test_singleton_identity(self):
         from django.test import override_settings
+
         with override_settings(VT_API_KEY="fake-key-for-test"):
             a = get_enricher()
             b = get_enricher()
@@ -411,10 +456,12 @@ class TestGetEnricher(unittest.TestCase):
 
 # ── TestBoardContextTI ────────────────────────────────────────────────────────
 
+
 class TestBoardContextTI(unittest.TestCase):
     def _format(self, entries: list) -> str:
         import json
         from agent.runtime.graph import _format_board_context
+
         raw = json.dumps({"entries": entries})
         return _format_board_context(raw)
 
@@ -435,16 +482,26 @@ class TestBoardContextTI(unittest.TestCase):
 
     def test_advisory_disclaimer_present(self):
         entries = [
-            {"kind": "ti_result", "content": "TI[vt] ip 2.2.2.2: clean (0.00)",
-             "source": "", "confidence": "low", "status": "observed"},
+            {
+                "kind": "ti_result",
+                "content": "TI[vt] ip 2.2.2.2: clean (0.00)",
+                "source": "",
+                "confidence": "low",
+                "status": "observed",
+            },
         ]
         text = self._format(entries)
         self.assertIn("advisory only", text.lower())
 
     def test_no_ti_section_when_empty(self):
         entries = [
-            {"kind": "artifact", "content": "ip: 3.3.3.3", "source": "evt1",
-             "confidence": "high", "status": "observed"},
+            {
+                "kind": "artifact",
+                "content": "ip: 3.3.3.3",
+                "source": "evt1",
+                "confidence": "high",
+                "status": "observed",
+            },
         ]
         text = self._format(entries)
         self.assertNotIn("TI Enrichment", text)
@@ -452,9 +509,11 @@ class TestBoardContextTI(unittest.TestCase):
 
 # ── TestCacheManagement (view tests) ─────────────────────────────────────────
 
+
 class TestCacheManagement(unittest.TestCase):
     def setUp(self):
         import agent.ti.enricher as enricher_mod
+
         enricher_mod._cache_instance = None
 
     tearDown = setUp

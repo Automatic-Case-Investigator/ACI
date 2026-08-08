@@ -5,6 +5,7 @@ baselines, and analyst feedback. Writes happen through the Django admin only.
 
 Run as stdio: python -m aci_memory.server
 """
+
 from __future__ import annotations
 
 import json
@@ -150,7 +151,10 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "subject_type": {"type": "string", "enum": ["endpoint", "user", "service"]},
+                    "subject_type": {
+                        "type": "string",
+                        "enum": ["endpoint", "user", "service"],
+                    },
                 },
             },
         ),
@@ -165,7 +169,10 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "subject_type": {"type": "string", "enum": ["endpoint", "user", "service"]},
+                    "subject_type": {
+                        "type": "string",
+                        "enum": ["endpoint", "user", "service"],
+                    },
                     "subject_id": {"type": "string"},
                 },
                 "required": ["subject_type", "subject_id"],
@@ -219,12 +226,14 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 )
             }
         elif name == "search_feedback":
-            result = {"feedback": _store.search_feedback(
-                case_id=arguments.get("case_id"),
-                rule_ids=arguments.get("rule_ids"),
-                days=arguments.get("days", 30),
-                limit=int(arguments.get("limit", 20)),
-            )}
+            result = {
+                "feedback": _store.search_feedback(
+                    case_id=arguments.get("case_id"),
+                    rule_ids=arguments.get("rule_ids"),
+                    days=arguments.get("days", 30),
+                    limit=int(arguments.get("limit", 20)),
+                )
+            }
         else:
             result = {"error": f"Unknown tool: {name}"}
     except Exception as exc:
@@ -240,4 +249,5 @@ async def main() -> None:
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(main())

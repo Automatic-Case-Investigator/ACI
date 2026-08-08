@@ -8,7 +8,9 @@ import time
 class Progress:
     """Tiny stderr progress bar for interactive benchmark commands."""
 
-    def __init__(self, label: str, total: int | None = None, enabled: bool | None = None):
+    def __init__(
+        self, label: str, total: int | None = None, enabled: bool | None = None
+    ):
         self.label = label
         self.total = total if total and total > 0 else None
         self.enabled = sys.stderr.isatty() if enabled is None else enabled
@@ -16,7 +18,14 @@ class Progress:
         self._last_render = 0.0
         self._closed = False
 
-    def update(self, current: int, *, total: int | None = None, extra: str = "", force: bool = False) -> None:
+    def update(
+        self,
+        current: int,
+        *,
+        total: int | None = None,
+        extra: str = "",
+        force: bool = False,
+    ) -> None:
         if total and total > 0:
             self.total = total
         self.current = max(0, current)

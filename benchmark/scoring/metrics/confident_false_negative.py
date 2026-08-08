@@ -10,6 +10,7 @@ ground truth. A judge-based metric can later refine the attribution; this catche
 blatant cases cheaply. Recon/scan phases are excluded — denying reconnaissance is not a
 compromise miss.
 """
+
 from __future__ import annotations
 
 import re
@@ -31,8 +32,14 @@ from ..registry import register
 _PHASE_TACTIC_KEYWORDS = {
     "webshell": ("webshell", "web shell", "web-shell", "code execution"),
     "cracking": ("credential", "password crack", "hash dump", "cracking", "wp_users"),
-    "reverse_shell": ("reverse shell", "reverse-shell", "command and control", "c2",
-                      "callback", "beacon"),
+    "reverse_shell": (
+        "reverse shell",
+        "reverse-shell",
+        "command and control",
+        "c2",
+        "callback",
+        "beacon",
+    ),
     "privilege_escalation": ("privilege escalation", "privesc"),
     "service_stop": ("service stop", "impact", "destructive", "ransom"),
     "dnsteal": ("exfiltration", "exfil", "data theft", "dnsteal", "data leaving"),

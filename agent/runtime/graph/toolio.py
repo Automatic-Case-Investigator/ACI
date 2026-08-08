@@ -7,13 +7,18 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 
 from ..engine.streaming import invoke_streaming
 from ..infra.avfs import home_dir
-from ..infra.logbus import emit, src_label, summarize_args, summarize_result, update_context_usage
+from ..infra.logbus import (
+    emit,
+    src_label,
+    summarize_args,
+    summarize_result,
+    update_context_usage,
+)
 
 from .sanitize import _normalize, _sanitize_history, _sanitize_message
 from .state import AgentState
 
 log = logging.getLogger(__name__)
-
 
 
 def _tmap(tools: list) -> dict:
@@ -33,14 +38,16 @@ _GRAPH_MANAGED_TOOLS = frozenset({"claim_next", "complete_task"})
 # must never call these autonomously — writes require explicit analyst authorization
 # which only the orchestrator can grant. Keeping them out of the model tool list
 # is the only reliable enforcement (prompt instructions are overridden by MCP guidance).
-_CASE_WRITE_TOOLS = frozenset({
-    "post_case_report",
-    "update_case",
-    "close_case",
-    "resolve_case",
-    "add_case_comment",
-    "post_case_comment",
-})
+_CASE_WRITE_TOOLS = frozenset(
+    {
+        "post_case_report",
+        "update_case",
+        "close_case",
+        "resolve_case",
+        "add_case_comment",
+        "post_case_comment",
+    }
+)
 
 _MAX_SYNTHESIS_FINDINGS_CHARS = 2000
 
@@ -88,11 +95,16 @@ async def _invoke_bound_model(bound, messages: list, agent_name: str):
             if "unexpected tokens remaining in message header" not in str(exc2):
                 raise
             from langchain_core.messages import AIMessage
+
             log.warning(
                 "[%s] think -- double harmony-token failure, returning empty response",
                 agent_name,
             )
-            emit(src_label(agent_name), "warning", "double harmony-token failure — empty response used")
+            emit(
+                src_label(agent_name),
+                "warning",
+                "double harmony-token failure — empty response used",
+            )
             return AIMessage(content="")
 
 
@@ -142,6 +154,7 @@ def _should_compact(ctx_tokens: int) -> bool:
         return False
     try:
         from ..engine.model_client import model_context_length_sync
+
         limit = model_context_length_sync()
     except Exception:
         limit = 131072
@@ -183,15 +196,19 @@ async def _compact_history(messages: list, bound, agent_name: str) -> list:
         return messages  # nothing safe to compact without dropping evidence
 
     try:
-        resp = await bound.ainvoke([
-            *sys_msgs,
-            *summarizable,
-            HumanMessage(content=(
-                "Concisely summarise the above conversation. Preserve: case IDs, "
-                "host names, IPs, key findings, tool results still relevant, and "
-                "any context established so far. This replaces the prior history."
-            )),
-        ])
+        resp = await bound.ainvoke(
+            [
+                *sys_msgs,
+                *summarizable,
+                HumanMessage(
+                    content=(
+                        "Concisely summarise the above conversation. Preserve: case IDs, "
+                        "host names, IPs, key findings, tool results still relevant, and "
+                        "any context established so far. This replaces the prior history."
+                    )
+                ),
+            ]
+        )
         _sanitize_message(resp)
         summary = (resp.content or "").strip()
     except Exception:
@@ -212,9 +229,14 @@ async def _call(tool, args: dict, *, _dbg: str | None = None) -> str:
     name = getattr(tool, "name", "?")
     if _dbg is not None:
         from ..infra.logbus import debug_mode_enabled
+
         if debug_mode_enabled():
-            emit(_dbg, "call", f"[graph] {name}({summarize_args(args)})",
-                 detail=json.dumps(args, indent=2, default=str))
+            emit(
+                _dbg,
+                "call",
+                f"[graph] {name}({summarize_args(args)})",
+                detail=json.dumps(args, indent=2, default=str),
+            )
     try:
         result = await tool.ainvoke(args)
         result = _normalize(result)
@@ -222,14 +244,21 @@ async def _call(tool, args: dict, *, _dbg: str | None = None) -> str:
         result = f"Error: {exc}"
     if _dbg is not None:
         from ..infra.logbus import debug_mode_enabled
+
         if debug_mode_enabled():
-            emit(_dbg, "result", f"[graph] {name}: {summarize_result(name, result)}", detail=result)
+            emit(
+                _dbg,
+                "result",
+                f"[graph] {name}: {summarize_result(name, result)}",
+                detail=result,
+            )
     return result
 
 
 def _emit_node_entry(src: str, node: str, state: AgentState) -> None:
     """Emit a [route] event at node entry when debug mode is on."""
     from ..infra.logbus import debug_mode_enabled
+
     if not debug_mode_enabled():
         return
     task_title = (state.get("current_task") or {}).get("title") or ""
@@ -259,7 +288,9 @@ async def _list_tasks(tools: list, case_id: str, run_id: str, agent_name: str) -
     list_fn = _tmap(tools).get("list_tasks")
     if list_fn is None:
         return []
-    raw = await _call(list_fn, {"case_id": case_id, "run_id": run_id, "agent_name": agent_name})
+    raw = await _call(
+        list_fn, {"case_id": case_id, "run_id": run_id, "agent_name": agent_name}
+    )
     try:
         data = json.loads(raw) if isinstance(raw, str) else raw
         tasks = data if isinstance(data, list) else data.get("tasks", [])
@@ -268,7 +299,9 @@ async def _list_tasks(tools: list, case_id: str, run_id: str, agent_name: str) -
         return []
 
 
-async def _has_pending_tasks(tools: list, case_id: str, run_id: str, agent_name: str) -> bool:
+async def _has_pending_tasks(
+    tools: list, case_id: str, run_id: str, agent_name: str
+) -> bool:
     tasks = await _list_tasks(tools, case_id, run_id, agent_name)
     return any(t.get("status") == "pending" for t in tasks)
 
@@ -284,7 +317,9 @@ def _parse_claimed_task(raw):
     return data if isinstance(data, dict) and "id" in data else None
 
 
-async def _reclaim_stale_tasks(tools: list, state: AgentState, *, _dbg: str | None = None) -> int:
+async def _reclaim_stale_tasks(
+    tools: list, state: AgentState, *, _dbg: str | None = None
+) -> int:
     """Reset this run's tasks stuck in `claimed` back to `pending`, returning the count.
 
     `claim` runs only between tasks, so for a single-threaded run no task should be
@@ -297,12 +332,13 @@ async def _reclaim_stale_tasks(tools: list, state: AgentState, *, _dbg: str | No
     update_fn = _tmap(tools).get("update_task")
     if update_fn is None:
         return 0
-    tasks = await _list_tasks(tools, state["case_id"], state["run_id"], state["agent_name"])
+    tasks = await _list_tasks(
+        tools, state["case_id"], state["run_id"], state["agent_name"]
+    )
     stale = [t for t in tasks if t.get("status") == "claimed" and t.get("id")]
     for t in stale:
         await _call(update_fn, {"task_id": t["id"], "status": "pending"}, _dbg=_dbg)
     return len(stale)
-
 
 
 # Hard cap on any single tool result fed back into the conversation. Prevents a
@@ -356,8 +392,6 @@ def _expand_tilde_args(args: dict) -> dict:
     return expanded
 
 
-
-
 async def _ensure_parent_dir(tmap: dict, path) -> None:
     """Create the parent directory of an AVFS path (mkdir -p). No-op if already present."""
     mkdir = tmap.get("mkdir")
@@ -393,6 +427,8 @@ async def _cancel_requested(run_id: str) -> bool:
         from ...models import AgentRun
 
         run = await AgentRun.objects.aget(id=run_id)
-        return run.status == AgentRun.STATUS_CANCELLED or bool((run.metadata or {}).get("cancel_requested"))
+        return run.status == AgentRun.STATUS_CANCELLED or bool(
+            (run.metadata or {}).get("cancel_requested")
+        )
     except Exception:
         return False

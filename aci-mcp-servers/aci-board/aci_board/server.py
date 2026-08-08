@@ -3,6 +3,7 @@
 Per-session Findings Board for ACI investigation agents.
 Run as stdio: python -m aci_board.server
 """
+
 from __future__ import annotations
 
 import json
@@ -21,8 +22,11 @@ _store.init_db()
 def _identity_overrides() -> dict:
     """Board identity is owned by the platform, not the model."""
     out: dict = {}
-    for key, env in (("case_id", "ACI_CASE_ID"), ("run_id", "ACI_RUN_ID"),
-                     ("agent_name", "ACI_AGENT_NAME")):
+    for key, env in (
+        ("case_id", "ACI_CASE_ID"),
+        ("run_id", "ACI_RUN_ID"),
+        ("agent_name", "ACI_AGENT_NAME"),
+    ):
         val = os.environ.get(env)
         if val:
             out[key] = val
@@ -32,13 +36,20 @@ def _identity_overrides() -> dict:
 def _ident(arguments: dict, overrides: dict, key: str) -> str:
     val = overrides.get(key) or arguments.get(key)
     if not val:
-        raise ValueError(f"{key} is required but was not supplied by the platform or caller.")
+        raise ValueError(
+            f"{key} is required but was not supplied by the platform or caller."
+        )
     return val
 
 
 @app.list_prompts()
 async def list_prompts() -> list[Prompt]:
-    return [Prompt(name="agent_instructions", description="Findings Board guidance for ACI agents.")]
+    return [
+        Prompt(
+            name="agent_instructions",
+            description="Findings Board guidance for ACI agents.",
+        )
+    ]
 
 
 @app.get_prompt()
@@ -47,9 +58,12 @@ async def get_prompt(name: str, arguments: dict[str, str] | None) -> GetPromptRe
         raise ValueError(f"Unknown prompt: {name}")
     return GetPromptResult(
         description="Findings Board guidance for ACI agents.",
-        messages=[PromptMessage(
-            role="user",
-            content=TextContent(type="text", text="""# ACI Findings Board Guidance
+        messages=[
+            PromptMessage(
+                role="user",
+                content=TextContent(
+                    type="text",
+                    text="""# ACI Findings Board Guidance
 
 The Findings Board contains found artifacts, confirmed facts, and hypotheses for
 the current investigation run. It is read by the dashboard and injected into
@@ -89,8 +103,10 @@ the backend. Do not call a tool to add artifacts.
 Do not add a fact or hypothesis that is already on the Findings Board. Call `get_board`
 first if you are unsure. The pivot node auto-adds facts from your
 `## Confirmed Facts` section — you do not need to call `add_fact` for those.
-"""),
-        )],
+""",
+                ),
+            )
+        ],
     )
 
 
@@ -108,8 +124,14 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "content": {"type": "string", "description": "One-sentence confirmed fact."},
-                    "source": {"type": "string", "description": "Event IDs or AVFS paths supporting this fact."},
+                    "content": {
+                        "type": "string",
+                        "description": "One-sentence confirmed fact.",
+                    },
+                    "source": {
+                        "type": "string",
+                        "description": "Event IDs or AVFS paths supporting this fact.",
+                    },
                     "confidence": {
                         "type": "string",
                         "enum": ["high", "medium", "low"],
@@ -128,7 +150,10 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "content": {"type": "string", "description": "One-sentence hypothesis."},
+                    "content": {
+                        "type": "string",
+                        "description": "One-sentence hypothesis.",
+                    },
                     "confidence": {
                         "type": "string",
                         "enum": ["high", "medium", "low"],
@@ -229,4 +254,5 @@ async def main() -> None:
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(main())

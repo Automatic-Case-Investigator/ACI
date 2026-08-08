@@ -47,10 +47,15 @@ class TheHiveTeardownTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "fox_wazuh.json").write_text("", encoding="utf-8")
-            with patch.object(load_thehive._th, "load_labels", return_value={}), \
-                    patch.object(load_thehive._th, "selected_alerts", return_value=rows), \
-                    patch.object(load_thehive._th, "to_alert", side_effect=fake_to_alert), \
-                    patch.object(load_thehive._th, "TheHive", return_value=hive):
+            with patch.object(
+                load_thehive._th, "load_labels", return_value={}
+            ), patch.object(
+                load_thehive._th, "selected_alerts", return_value=rows
+            ), patch.object(
+                load_thehive._th, "to_alert", side_effect=fake_to_alert
+            ), patch.object(
+                load_thehive._th, "TheHive", return_value=hive
+            ):
                 result = load_thehive.run(
                     "fox",
                     root,
@@ -77,11 +82,16 @@ class TheHiveTeardownTest(unittest.TestCase):
         hive = _Hive()
         with tempfile.TemporaryDirectory() as tmp:
             manifest = Path(tmp) / "thehive_manifest.run-1.json"
-            manifest.write_text(json.dumps({"alert_ids": ["a1", "a2", "a1"]}), encoding="utf-8")
+            manifest.write_text(
+                json.dumps({"alert_ids": ["a1", "a2", "a1"]}), encoding="utf-8"
+            )
 
-            with patch.object(load_thehive, "_resolve_connection", return_value=("u", "k", True)), \
-                    patch.object(load_thehive._th, "TheHive", return_value=hive):
-                deleted = load_thehive.teardown("run-1", manifest_path=manifest, progress=False)
+            with patch.object(
+                load_thehive, "_resolve_connection", return_value=("u", "k", True)
+            ), patch.object(load_thehive._th, "TheHive", return_value=hive):
+                deleted = load_thehive.teardown(
+                    "run-1", manifest_path=manifest, progress=False
+                )
 
         self.assertEqual(deleted, 2)
         self.assertEqual(hive.deleted, ["a1", "a2"])
@@ -89,8 +99,9 @@ class TheHiveTeardownTest(unittest.TestCase):
 
     def test_teardown_falls_back_to_tag_lookup_without_manifest(self):
         hive = _Hive()
-        with patch.object(load_thehive, "_resolve_connection", return_value=("u", "k", True)), \
-                patch.object(load_thehive._th, "TheHive", return_value=hive):
+        with patch.object(
+            load_thehive, "_resolve_connection", return_value=("u", "k", True)
+        ), patch.object(load_thehive._th, "TheHive", return_value=hive):
             deleted = load_thehive.teardown("run-1", progress=False)
 
         self.assertEqual(deleted, 1)
@@ -103,14 +114,17 @@ class TheHiveTeardownTest(unittest.TestCase):
             [{"_id": f"a{i}"} for i in range(500)],
             [{"_id": "last"}],
         ]
-        with patch.object(load_thehive, "_resolve_connection", return_value=("u", "k", True)), \
-                patch.object(load_thehive._th, "TheHive", return_value=hive):
+        with patch.object(
+            load_thehive, "_resolve_connection", return_value=("u", "k", True)
+        ), patch.object(load_thehive._th, "TheHive", return_value=hive):
             deleted = load_thehive.teardown("run-1", progress=False)
 
         self.assertEqual(deleted, 501)
         # Deletion is parallel, so ORDER is not guaranteed — assert the full set instead.
         self.assertEqual(set(hive.deleted), {f"a{i}" for i in range(500)} | {"last"})
-        self.assertEqual(hive.queried_tags, ["ait-import-run:run-1", "ait-import-run:run-1"])
+        self.assertEqual(
+            hive.queried_tags, ["ait-import-run:run-1", "ait-import-run:run-1"]
+        )
 
 
 if __name__ == "__main__":

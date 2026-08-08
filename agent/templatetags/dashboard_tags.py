@@ -1,4 +1,5 @@
 """Template helpers for rendering log events (ported from the old TUI's renderer)."""
+
 from __future__ import annotations
 
 import json
@@ -72,7 +73,7 @@ def event_role(ev) -> str:
 def bubble_text(summary: str) -> str:
     """Strip the 'analyst:' prefix from an analyst bubble's summary."""
     s = summary or ""
-    return s[len("analyst:"):].strip() if s.startswith("analyst:") else s
+    return s[len("analyst:") :].strip() if s.startswith("analyst:") else s
 
 
 @register.simple_tag

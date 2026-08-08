@@ -6,7 +6,9 @@ import unittest
 
 import httpx
 
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 sys.path.insert(0, project_root)
 sys.path.insert(0, os.path.join(project_root, "aci-mcp-servers", "aci-thehive"))
 
@@ -15,7 +17,9 @@ from aci_thehive.client import TheHiveClient
 
 def _http_error(status_code: int = 400) -> httpx.HTTPStatusError:
     request = httpx.Request("POST", "http://thehive/api/v1/query")
-    response = httpx.Response(status_code, request=request, text="query step unsupported")
+    response = httpx.Response(
+        status_code, request=request, text="query step unsupported"
+    )
     return httpx.HTTPStatusError("query failed", request=request, response=response)
 
 
@@ -52,7 +56,9 @@ class TestGetSimilarCases(unittest.TestCase):
         client._query = fake_query  # type: ignore[attr-defined]
         result = client.get_similar_cases("~1", max_items=5)
 
-        self.assertEqual([q[1]["_name"] for q in queries], ["similarCases", "linkedCases"])
+        self.assertEqual(
+            [q[1]["_name"] for q in queries], ["similarCases", "linkedCases"]
+        )
         self.assertEqual(result["query_operator"], "linkedCases")
         self.assertEqual(result["cases"], [{"_id": "~3"}])
 

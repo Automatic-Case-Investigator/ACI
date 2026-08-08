@@ -15,6 +15,7 @@ The handler records the *decision* (and emits the audit event); the actual conne
 side effect is applied by `execution`, which owns the connector tools. That split is
 what keeps the decision auditable independently of whether its side effect succeeded.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -157,13 +158,19 @@ def apply_response_policy(run: AgentRun, *, save: bool = True) -> dict:
 
     src = "workflow"
     if failure:
-        emit(src, AUDIT_DIAGNOSED,
-             f"{subject} {run.case_id}: no usable verdict ({failure}) → "
-             f"failure fallback: {action}")
+        emit(
+            src,
+            AUDIT_DIAGNOSED,
+            f"{subject} {run.case_id}: no usable verdict ({failure}) → "
+            f"failure fallback: {action}",
+        )
     else:
-        emit(src, AUDIT_DIAGNOSED,
-             f"{subject} {run.case_id}: verdict {decision['verdict'] or 'none'} "
-             f"({decision['confidence'] or '?'}) → {action}")
+        emit(
+            src,
+            AUDIT_DIAGNOSED,
+            f"{subject} {run.case_id}: verdict {decision['verdict'] or 'none'} "
+            f"({decision['confidence'] or '?'}) → {action}",
+        )
     if action == policy.RESOLVE:
         emit(src, AUDIT_POSTED, f"case {run.case_id}: resolved ({decision['verdict']})")
 

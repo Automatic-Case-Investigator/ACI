@@ -5,6 +5,7 @@ Pure-logic tests (evaluate) need no DB. The loader test (match_patterns) creates
 and deletes PatternEntry rows via the ORM. Run from project root with:
     python .claude/skills/run-aci-backend/tests/test_pattern_matcher.py -v
 """
+
 from __future__ import annotations
 
 import os
@@ -12,17 +13,24 @@ import sys
 import unittest
 from datetime import timedelta
 
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, project_root)
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
 os.environ.setdefault("SECRET_KEY", "test")
 
 import django
+
 django.setup()
 
 from django.utils import timezone
 
-from agent.runtime.analysis.pattern_matcher import evaluate, match_patterns, PatternMatch
+from agent.runtime.analysis.pattern_matcher import (
+    evaluate,
+    match_patterns,
+    PatternMatch,
+)
 from agent.models import PatternEntry
 
 # A cron-maintenance FP pattern, as it would be stored.
@@ -68,7 +76,11 @@ class TestEvaluate(unittest.TestCase):
         self.assertIn("users", m.unmet_conditions)
 
     def test_missing_field_counts_as_unmet(self):
-        meta = {"rule_ids": ["2832"], "users": ["backup"], "paths": ["/var/spool/cron/x"]}
+        meta = {
+            "rule_ids": ["2832"],
+            "users": ["backup"],
+            "paths": ["/var/spool/cron/x"],
+        }
         # no time_windows key at all
         m = evaluate(CRON_FP, meta)
         self.assertFalse(m.matched)
@@ -113,18 +125,25 @@ class TestMatchPatternsLoader(unittest.TestCase):
     def setUpClass(cls):
         now = timezone.now()
         cls.active = PatternEntry.objects.create(
-            name=cls.MARK + "active", verdict="fp", confidence="high",
-            conditions={"rule_ids": ["2832"]}, enabled=True,
+            name=cls.MARK + "active",
+            verdict="fp",
+            confidence="high",
+            conditions={"rule_ids": ["2832"]},
+            enabled=True,
             expires_at=now + timedelta(days=10),
         )
         cls.expired = PatternEntry.objects.create(
-            name=cls.MARK + "expired", verdict="fp",
-            conditions={"rule_ids": ["2832"]}, enabled=True,
+            name=cls.MARK + "expired",
+            verdict="fp",
+            conditions={"rule_ids": ["2832"]},
+            enabled=True,
             expires_at=now - timedelta(days=1),
         )
         cls.disabled = PatternEntry.objects.create(
-            name=cls.MARK + "disabled", verdict="fp",
-            conditions={"rule_ids": ["2832"]}, enabled=False,
+            name=cls.MARK + "disabled",
+            verdict="fp",
+            conditions={"rule_ids": ["2832"]},
+            enabled=False,
         )
 
     @classmethod

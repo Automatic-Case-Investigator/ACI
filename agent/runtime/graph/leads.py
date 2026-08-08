@@ -8,7 +8,6 @@ from typing import Iterable
 
 from .parsing import _normalize_fact_key
 
-
 _ARTIFACT_RE = re.compile(
     r"\b\d{1,3}(?:\.\d{1,3}){3}\b|"
     r"\b(?:[0-9a-fA-F]{32}|[0-9a-fA-F]{40}|[0-9a-fA-F]{64})\b|"
@@ -25,15 +24,46 @@ _ISO_OR_DATE_RE = re.compile(
 _WORD_RE = re.compile(r"[a-z0-9]+")
 
 _OBJECTIVE_PATTERNS: tuple[tuple[str, re.Pattern], ...] = (
-    ("initial_access", re.compile(r"\b(initial access|source ip|earliest|login|ssh|pam|session)\b", re.I)),
-    ("c2_callback", re.compile(r"\b(c2|callback|/dev/tcp|listener|beacon|outbound|destination|10\.\d+\.\d+\.\d+)\b", re.I)),
-    ("execution", re.compile(r"\b(exec|process|command|shell|payload|binary|script)\b", re.I)),
-    ("persistence", re.compile(r"\b(persist|cron|crontab|scheduled task|startup|service)\b", re.I)),
-    ("privilege_escalation", re.compile(r"\b(privilege|sudo|root|admin|escalat)\b", re.I)),
-    ("lateral_movement", re.compile(r"\b(lateral|rdp|smb|winrm|ssh to|other host|second host)\b", re.I)),
-    ("exfiltration", re.compile(r"\b(exfil|upload|download|transfer|egress|data)\b", re.I)),
+    (
+        "initial_access",
+        re.compile(
+            r"\b(initial access|source ip|earliest|login|ssh|pam|session)\b", re.I
+        ),
+    ),
+    (
+        "c2_callback",
+        re.compile(
+            r"\b(c2|callback|/dev/tcp|listener|beacon|outbound|destination|10\.\d+\.\d+\.\d+)\b",
+            re.I,
+        ),
+    ),
+    (
+        "execution",
+        re.compile(r"\b(exec|process|command|shell|payload|binary|script)\b", re.I),
+    ),
+    (
+        "persistence",
+        re.compile(r"\b(persist|cron|crontab|scheduled task|startup|service)\b", re.I),
+    ),
+    (
+        "privilege_escalation",
+        re.compile(r"\b(privilege|sudo|root|admin|escalat)\b", re.I),
+    ),
+    (
+        "lateral_movement",
+        re.compile(r"\b(lateral|rdp|smb|winrm|ssh to|other host|second host)\b", re.I),
+    ),
+    (
+        "exfiltration",
+        re.compile(r"\b(exfil|upload|download|transfer|egress|data)\b", re.I),
+    ),
     ("reporting", re.compile(r"\b(report|document|summari[sz]e|cleanup)\b", re.I)),
-    ("scoping_enrichment", re.compile(r"\b(scope|enrich|reputation|ti|prevalence|baseline|correlate)\b", re.I)),
+    (
+        "scoping_enrichment",
+        re.compile(
+            r"\b(scope|enrich|reputation|ti|prevalence|baseline|correlate)\b", re.I
+        ),
+    ),
 )
 
 
@@ -71,14 +101,16 @@ class LeadValidationResult:
     def detail(self) -> str:
         rows = []
         for decision in [*self.approved, *self.deferred, *self.rejected]:
-            rows.append({
-                "title": decision.candidate.title,
-                "approved": decision.approved,
-                "category": decision.category,
-                "reason": decision.reason,
-                "score": decision.score,
-                "signature": decision.signature,
-            })
+            rows.append(
+                {
+                    "title": decision.candidate.title,
+                    "approved": decision.approved,
+                    "category": decision.category,
+                    "reason": decision.reason,
+                    "score": decision.score,
+                    "signature": decision.signature,
+                }
+            )
         return json.dumps(rows, indent=2, ensure_ascii=False)
 
 
@@ -104,13 +136,15 @@ def coerce_lead_candidates(raw_leads: Iterable) -> list[LeadCandidate]:
             pivots = str(pivots or "")
             evidence = str(evidence or "")
             priority = _safe_priority(priority)
-        candidates.append(LeadCandidate(
-            title=title.strip(),
-            pivots=pivots.strip(),
-            evidence=evidence.strip(),
-            priority=priority,
-            original_index=idx,
-        ))
+        candidates.append(
+            LeadCandidate(
+                title=title.strip(),
+                pivots=pivots.strip(),
+                evidence=evidence.strip(),
+                priority=priority,
+                original_index=idx,
+            )
+        )
     return candidates
 
 
@@ -207,7 +241,9 @@ def _artifacts(text: str) -> frozenset[str]:
     return frozenset(out)
 
 
-def _signature(objective: str, artifacts: frozenset[str], pivots: str, title: str) -> str:
+def _signature(
+    objective: str, artifacts: frozenset[str], pivots: str, title: str
+) -> str:
     pivot_key = _normalize_fact_key(pivots)
     if artifacts:
         return objective + ":" + ",".join(sorted(artifacts))
@@ -244,7 +280,12 @@ def _task_ref(task: dict) -> dict:
         "summary": summary,
         "conclusion": conclusion,
         "blocks_duplicate": _task_blocks_duplicate(status, summary, conclusion),
-        "signature": _signature(objective, artifacts, str(task.get("description") or ""), str(task.get("title") or "")),
+        "signature": _signature(
+            objective,
+            artifacts,
+            str(task.get("description") or ""),
+            str(task.get("title") or ""),
+        ),
     }
 
 
@@ -318,7 +359,12 @@ def duplicate_existing_task(candidate: LeadCandidate, existing_refs: list[dict])
     for ref in existing_refs:
         if not ref.get("blocks_duplicate"):
             continue
-        is_active = ref.get("status") in {"pending", "claimed", "running", "in_progress"}
+        is_active = ref.get("status") in {
+            "pending",
+            "claimed",
+            "running",
+            "in_progress",
+        }
         label = "active task" if is_active else "resolved task"
         if ref["signature"] == signature:
             return f"duplicate of {label}: {ref['title']}"

@@ -22,7 +22,10 @@ def _baseline_scheduler() -> None:
     while True:
         try:
             django.db.close_old_connections()
-            from agent.runtime.learning.baselines import compute_all_baselines, get_window_days
+            from agent.runtime.learning.baselines import (
+                compute_all_baselines,
+                get_window_days,
+            )
 
             compute_all_baselines(days=get_window_days())
         except Exception:
@@ -53,4 +56,6 @@ class AgentConfig(AppConfig):
 
             import threading
 
-            threading.Thread(target=_baseline_scheduler, daemon=True, name="baseline-scheduler").start()
+            threading.Thread(
+                target=_baseline_scheduler, daemon=True, name="baseline-scheduler"
+            ).start()

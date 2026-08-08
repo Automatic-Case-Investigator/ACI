@@ -2,6 +2,7 @@
 
 Run as stdio: python -m aci_wazuh.server
 """
+
 from __future__ import annotations
 
 import json
@@ -139,4 +140,5 @@ async def main() -> None:
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(main())

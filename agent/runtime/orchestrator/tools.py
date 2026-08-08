@@ -20,21 +20,37 @@ from ...models import AgentRun
 from ..infra.avfs import reports_dir
 from ..engine.dispatch import dispatch_run
 from ..graph import (
-    _compact_history, _extract_input_tokens, _invoke_bound_model, _normalize,
-    _sanitize_history, _sanitize_message, _should_compact, _tmap,
+    _compact_history,
+    _extract_input_tokens,
+    _invoke_bound_model,
+    _normalize,
+    _sanitize_history,
+    _sanitize_message,
+    _should_compact,
+    _tmap,
 )
 from ..analysis.intent import generate_public_intent
 from ..infra.logbus import (
-    current_session, emit, get_run_issues, summarize_args, summarize_result,
-    summarize_think, update_context_usage,
+    current_session,
+    emit,
+    get_run_issues,
+    summarize_args,
+    summarize_result,
+    summarize_think,
+    update_context_usage,
 )
 from .messages import _summarize_conversation, render_conversation
 from .prompts import _embedded_convo_char_budget
 from .session import OrchestratorSession
-from .specialist_sync import apply_specialist_run_to_session, propagate_verdict_to_current_session
+from .specialist_sync import (
+    apply_specialist_run_to_session,
+    propagate_verdict_to_current_session,
+)
 
 
-def _has_completed_triage_handoff(session: OrchestratorSession, src_entity_id: str) -> bool:
+def _has_completed_triage_handoff(
+    session: OrchestratorSession, src_entity_id: str
+) -> bool:
     """True only when the session holds a completed triage report for this entity."""
     return (
         session.last_triage_src_entity_id == src_entity_id
@@ -43,10 +59,11 @@ def _has_completed_triage_handoff(session: OrchestratorSession, src_entity_id: s
     )
 
 
-
 async def _propagate_verdict_to_session(verdict: dict | None) -> None:
     """Compatibility wrapper; canonical session publication lives in specialist_sync."""
-    await propagate_verdict_to_current_session(verdict, current_session_id=current_session())
+    await propagate_verdict_to_current_session(
+        verdict, current_session_id=current_session()
+    )
 
 
 def _format_subagent_issues(run_id: str) -> str:
@@ -60,10 +77,11 @@ def _format_subagent_issues(run_id: str) -> str:
             detail = detail[:1000] + "...[truncated]"
         lines.append(
             f"- [{issue.get('source')}/{issue.get('kind')}] "
-            f"{issue.get('summary')}"
-            + (f"\n  detail: {detail}" if detail else "")
+            f"{issue.get('summary')}" + (f"\n  detail: {detail}" if detail else "")
         )
     return "\n".join(lines)
+
+
 def _make_tools(session: OrchestratorSession) -> list[StructuredTool]:
     """Generate one orchestrator tool per routable agent in the registry (A2).
 
@@ -80,17 +98,24 @@ def _make_tools(session: OrchestratorSession) -> list[StructuredTool]:
     return tools
 
 
-_SrcEntityId = Annotated[str, Field(description=(
-    "The primary case/alert/event identifier from the analyst's request (e.g. "
-    "'~449101824'). This may be a SOAR case id, a standalone SOAR alert id, or a "
-    "SIEM-side alert/event reference — pass through whatever identifier was given "
-    "as-is; do not classify or reformat it (beyond preserving any existing '~' "
-    "prefix). The target agent determines which kind of identifier it is and "
-    "resolves it accordingly."
-))]
+_SrcEntityId = Annotated[
+    str,
+    Field(
+        description=(
+            "The primary case/alert/event identifier from the analyst's request (e.g. "
+            "'~449101824'). This may be a SOAR case id, a standalone SOAR alert id, or a "
+            "SIEM-side alert/event reference — pass through whatever identifier was given "
+            "as-is; do not classify or reformat it (beyond preserving any existing '~' "
+            "prefix). The target agent determines which kind of identifier it is and "
+            "resolves it accordingly."
+        )
+    ),
+]
 
 
-def _make_agent_tool(session: OrchestratorSession, agent_def: AgentDefinition) -> StructuredTool:
+def _make_agent_tool(
+    session: OrchestratorSession, agent_def: AgentDefinition
+) -> StructuredTool:
     name = agent_def.name
 
     def _resolved_source_entity_type(src_entity_id: str, question: str) -> str:
@@ -125,12 +150,18 @@ def _make_agent_tool(session: OrchestratorSession, agent_def: AgentDefinition) -
         # with a single model call only if it exceeds the char budget.
         convo_text = render_conversation(session.messages)
         if convo_text and len(convo_text) > _embedded_convo_char_budget():
-            emit("orch", "note",
-                 f"compacting orchestrator conversation for handoff ({len(convo_text):,} chars)")
+            emit(
+                "orch",
+                "note",
+                f"compacting orchestrator conversation for handoff ({len(convo_text):,} chars)",
+            )
             convo_text = await _summarize_conversation(convo_text)
         if convo_text:
-            emit("orch", "note",
-                 f"embedded orchestrator conversation ({len(convo_text):,} chars) into {name}")
+            emit(
+                "orch",
+                "note",
+                f"embedded orchestrator conversation ({len(convo_text):,} chars) into {name}",
+            )
 
         # consumes_handoff agents (investigation) accept an explicit triage report.
         # Always prefer the session-stored full triage report (set when triage
@@ -144,7 +175,7 @@ def _make_agent_tool(session: OrchestratorSession, agent_def: AgentDefinition) -
             resume_report = prior_investigation_report or (
                 session.last_investigation_report
                 if session.last_investigation_status == "incomplete_budget"
-                   and session.last_triage_src_entity_id == src_entity_id
+                and session.last_triage_src_entity_id == src_entity_id
                 else None
             )
             if resume_report:
@@ -155,11 +186,16 @@ def _make_agent_tool(session: OrchestratorSession, agent_def: AgentDefinition) -
                     source_entity_type=source_entity_type,
                     prior_investigation_report=resume_report,
                 )
-                emit("orch", "note", "investigation: resume mode — seeding from prior run's open gaps")
+                emit(
+                    "orch",
+                    "note",
+                    "investigation: resume mode — seeding from prior run's open gaps",
+                )
             else:
                 stored_report = (
                     session.last_triage_report
-                    if _has_completed_triage_handoff(session, src_entity_id) else None
+                    if _has_completed_triage_handoff(session, src_entity_id)
+                    else None
                 )
                 report = stored_report or triage_report
                 if report:
@@ -171,9 +207,16 @@ def _make_agent_tool(session: OrchestratorSession, agent_def: AgentDefinition) -
                         source_entity_type=source_entity_type,
                     )
 
-        emit("orch", "route", f"{name}(entity={src_entity_id})", detail=f"handoff={'yes' if handoff else 'no'}")
+        emit(
+            "orch",
+            "route",
+            f"{name}(entity={src_entity_id})",
+            detail=f"handoff={'yes' if handoff else 'no'}",
+        )
         run = await dispatch_run(
-            name, src_entity_id, question,
+            name,
+            src_entity_id,
+            question,
             session_id=current_session(),
             trigger=AgentRun.TRIGGER_INTERACTIVE,
             handoff=handoff,
@@ -190,7 +233,9 @@ def _make_agent_tool(session: OrchestratorSession, agent_def: AgentDefinition) -
             apply_specialist_run_to_session(session, run)
             if agent_def.produces_handoff:
                 session.investigation_run_id = None
-                session.last_investigation_status = None  # reset resume state for new case
+                session.last_investigation_status = (
+                    None  # reset resume state for new case
+                )
             # Dashboard verdict totals count session rows, not interactive child runs.
             await propagate_verdict_to_current_session(
                 run.verdict,
@@ -202,14 +247,19 @@ def _make_agent_tool(session: OrchestratorSession, agent_def: AgentDefinition) -
     # Only handoff-consuming agents expose the triage/resume report parameters,
     # so the tool schema matches what each agent actually accepts.
     if agent_def.consumes_handoff:
+
         async def _run(
             src_entity_id: _SrcEntityId,
             question: str,
             triage_report: Optional[str] = None,
             prior_investigation_report: Optional[str] = None,
         ) -> str:
-            return await _execute(src_entity_id, question, triage_report, prior_investigation_report)
+            return await _execute(
+                src_entity_id, question, triage_report, prior_investigation_report
+            )
+
     else:
+
         async def _run(src_entity_id: _SrcEntityId, question: str) -> str:
             return await _execute(src_entity_id, question, None)
 
@@ -235,7 +285,8 @@ def _agent_run_summary(agent_def: AgentDefinition, run: AgentRun) -> str:
         )
     tail = (
         f"\nreport={reports_dir(run.case_id)}/final.md"
-        if agent_def.consumes_handoff else ""
+        if agent_def.consumes_handoff
+        else ""
     )
     # Investigation summaries include confirmed facts, task summaries, and
     # incomplete tasks — they can be several KB. Send the full text so the

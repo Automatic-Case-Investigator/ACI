@@ -112,7 +112,9 @@ AVFS_AGENT_ID = os.environ.get("AVFS_AGENT_ID", "agent_1")
 BASELINE_SIEM_ADAPTER = os.environ.get("BASELINE_SIEM_ADAPTER", "wazuh")
 # Lookback window and scheduler cadence for the in-process baseline thread.
 BASELINE_WINDOW_DAYS = int(os.environ.get("BASELINE_WINDOW_DAYS", "30"))
-BASELINE_COMPUTE_INTERVAL_HOURS = int(os.environ.get("BASELINE_COMPUTE_INTERVAL_HOURS", "24"))
+BASELINE_COMPUTE_INTERVAL_HOURS = int(
+    os.environ.get("BASELINE_COMPUTE_INTERVAL_HOURS", "24")
+)
 
 
 # ── Task queue (passed to aci-taskqueue subprocess as env) ───────────────────
@@ -123,11 +125,11 @@ BOARD_DB_PATH = os.environ.get("BOARD_DB_PATH", str(BASE_DIR / "board.db"))
 
 # ── Threat Intelligence (TI) enrichment ──────────────────────────────────────
 # Settings UI (ProviderConfig for "aci-ti") overrides these env-backed defaults.
-VT_API_KEY               = os.environ.get("VT_API_KEY", "")
-VT_BASE_URL              = os.environ.get("VT_BASE_URL", "https://www.virustotal.com")
-TI_CACHE_DB_PATH         = os.environ.get("TI_CACHE_DB_PATH", str(BASE_DIR / "ti_cache.db"))
-TI_CACHE_TTL_HOURS       = int(os.environ.get("TI_CACHE_TTL_HOURS", "24"))
-TI_CALLS_PER_MINUTE      = int(os.environ.get("TI_CALLS_PER_MINUTE", "4"))
+VT_API_KEY = os.environ.get("VT_API_KEY", "")
+VT_BASE_URL = os.environ.get("VT_BASE_URL", "https://www.virustotal.com")
+TI_CACHE_DB_PATH = os.environ.get("TI_CACHE_DB_PATH", str(BASE_DIR / "ti_cache.db"))
+TI_CACHE_TTL_HOURS = int(os.environ.get("TI_CACHE_TTL_HOURS", "24"))
+TI_CALLS_PER_MINUTE = int(os.environ.get("TI_CALLS_PER_MINUTE", "4"))
 
 # ── Automatic workflows (C4 trigger seam) ────────────────────────────────────
 # Off by default: only the manual `run_workflow` management command honours this

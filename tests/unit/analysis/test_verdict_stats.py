@@ -4,6 +4,7 @@ Offline test: verdict trend/breakdown aggregation for the dashboard.
 Run from project root with:
     python .claude/skills/run-aci-backend/tests/test_verdict_stats.py -v
 """
+
 from __future__ import annotations
 
 import os
@@ -11,12 +12,15 @@ import sys
 import unittest
 from datetime import datetime, timedelta, timezone
 
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, project_root)
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
 os.environ.setdefault("SECRET_KEY", "test")
 
 import django
+
 django.setup()
 
 from agent.models import AgentRun
@@ -64,14 +68,17 @@ class TestVerdictStats(unittest.TestCase):
         # Each row sums its verdict columns into total.
         for r in trend:
             self.assertEqual(
-                r["total"], r["tp"] + r["fp"] + r["inconclusive"] + r["needs_investigation"]
+                r["total"],
+                r["tp"] + r["fp"] + r["inconclusive"] + r["needs_investigation"],
             )
 
     def test_window_excludes_old_runs(self):
         wide = verdict_breakdown(30, group_by="agent_name")
         narrow = verdict_breakdown(7, group_by="agent_name")
         inv_wide = next((r for r in wide if r["agent_name"] == "investigation"), None)
-        inv_narrow = next((r for r in narrow if r["agent_name"] == "investigation"), None)
+        inv_narrow = next(
+            (r for r in narrow if r["agent_name"] == "investigation"), None
+        )
         # The 20-day-old tp counts in the 30d window but not the 7d window.
         self.assertIsNotNone(inv_wide)
         self.assertGreaterEqual(inv_wide["tp"], 1)
@@ -94,7 +101,8 @@ class TestVerdictStats(unittest.TestCase):
         rows = verdict_breakdown(7, group_by="agent_name")
         for r in rows:
             self.assertEqual(
-                r["total"], r["tp"] + r["fp"] + r["inconclusive"] + r["needs_investigation"]
+                r["total"],
+                r["tp"] + r["fp"] + r["inconclusive"] + r["needs_investigation"],
             )
 
 

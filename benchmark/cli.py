@@ -59,7 +59,11 @@ def _cmd_load_wazuh(args):
     from .pipeline import load_wazuh
 
     url = args.output_url or _wazuh_output_url()
-    print(load_wazuh.run(args.scenario, _DATA / "preprocessed", url, progress=_progress_enabled(args)))
+    print(
+        load_wazuh.run(
+            args.scenario, _DATA / "preprocessed", url, progress=_progress_enabled(args)
+        )
+    )
 
 
 def _cmd_load_thehive(args):
@@ -84,7 +88,9 @@ def _cmd_run(args):
 
     cfg = _run_cfg()
     spec = ScenarioSpec.from_yaml(scenario_spec_path(args.scenario))
-    entry_ids = [args.entry_point] if args.entry_point else [e.id for e in spec.entry_points]
+    entry_ids = (
+        [args.entry_point] if args.entry_point else [e.id for e in spec.entry_points]
+    )
     trials = args.trials or cfg["trials"]
     agent_name = cfg.get("agent", "investigation")
     concurrency = max(1, args.concurrency or cfg.get("run_concurrency") or 1)
@@ -160,7 +166,9 @@ def _cmd_teardown(args):
         from .pipeline import load_wazuh
 
         url = args.output_url or _wazuh_output_url()
-        result = load_wazuh.teardown(url, args.scenario, progress=_progress_enabled(args))
+        result = load_wazuh.teardown(
+            url, args.scenario, progress=_progress_enabled(args)
+        )
         print("wazuh:", result)
 
     if target in ("thehive", "all"):
@@ -172,8 +180,10 @@ def _cmd_teardown(args):
         else:
             targets = _thehive_tags_for_scenario(args.scenario)
         if not targets:
-            print(f"thehive: no manifests found for scenario {args.scenario!r} "
-                  f"under {_DATA / 'manifests'}; pass --run-id to tear down a specific tag")
+            print(
+                f"thehive: no manifests found for scenario {args.scenario!r} "
+                f"under {_DATA / 'manifests'}; pass --run-id to tear down a specific tag"
+            )
         for tag, manifest in targets:
             deleted = load_thehive.teardown(
                 tag,
@@ -207,17 +217,32 @@ def build_parser() -> argparse.ArgumentParser:
         s.add_argument("--trials", type=int, default=None)
         s.add_argument("--min-level", type=int, default=7)
         s.add_argument("--output-url", default=None)
-        s.add_argument("--target", choices=["wazuh", "thehive", "all"], default=None,
-                        help="teardown only: which system to tear down (default: all)")
-        s.add_argument("--run-id", default=None,
-                        help="teardown only: a specific TheHive run tag/id "
-                             "(default: every manifest recorded for --scenario)")
-        s.add_argument("--no-progress", action="store_true",
-                        help="disable interactive benchmark progress bars")
-        s.add_argument("--concurrency", type=int, default=None,
-                        help="worker count for concurrent runs or TheHive import/teardown")
-        s.add_argument("--quiet", action="store_true",
-                        help="suppress benchmark status logging")
+        s.add_argument(
+            "--target",
+            choices=["wazuh", "thehive", "all"],
+            default=None,
+            help="teardown only: which system to tear down (default: all)",
+        )
+        s.add_argument(
+            "--run-id",
+            default=None,
+            help="teardown only: a specific TheHive run tag/id "
+            "(default: every manifest recorded for --scenario)",
+        )
+        s.add_argument(
+            "--no-progress",
+            action="store_true",
+            help="disable interactive benchmark progress bars",
+        )
+        s.add_argument(
+            "--concurrency",
+            type=int,
+            default=None,
+            help="worker count for concurrent runs or TheHive import/teardown",
+        )
+        s.add_argument(
+            "--quiet", action="store_true", help="suppress benchmark status logging"
+        )
     return p
 
 

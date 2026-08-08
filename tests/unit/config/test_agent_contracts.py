@@ -6,13 +6,16 @@ import tempfile
 import unittest
 
 # Navigate from .claude/skills/run-aci-backend/tests/ up to project root (4 levels)
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, project_root)
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
 os.environ["SECRET_KEY"] = "test"
 os.environ["TASKQUEUE_DB_PATH"] = tempfile.mktemp(suffix=".db")
 
 import django
+
 django.setup()
 
 from aci_taskqueue.store import claim_next, complete_task, create_task, init_db
@@ -90,7 +93,13 @@ class TestAgentContracts(unittest.TestCase):
 
     def test_citation_validation_accepts_existing_path(self):
         validated = validate_citations(
-            [{"claim_id": "c1", "avfs_path": "/evidence/event.json", "native_id": "abc"}],
+            [
+                {
+                    "claim_id": "c1",
+                    "avfs_path": "/evidence/event.json",
+                    "native_id": "abc",
+                }
+            ],
             exists=lambda path: path == "/evidence/event.json",
         )
         self.assertEqual(validated[0]["native_id"], "abc")
@@ -111,13 +120,18 @@ class TestAgentContracts(unittest.TestCase):
             )
 
     def test_provider_contract_snapshot_has_stable_shape(self):
-        provider = next(provider for provider in list_providers() if provider.key == "aci-wazuh")
+        provider = next(
+            provider for provider in list_providers() if provider.key == "aci-wazuh"
+        )
         snapshot = provider_contract_snapshot(provider)
         self.assertEqual(snapshot["provider_key"], "aci-wazuh")
         self.assertEqual(snapshot["provider_kind"], "siem")
         self.assertIs(snapshot["instructions_required"], True)
         self.assertTrue(
-            any(item["id"] == "search_events" for item in snapshot["standardized_capabilities"])
+            any(
+                item["id"] == "search_events"
+                for item in snapshot["standardized_capabilities"]
+            )
         )
 
     def test_contract_rendering_includes_utility_and_filesystem_bindings(self):

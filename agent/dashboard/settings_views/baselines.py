@@ -23,7 +23,6 @@ from agent.models import (
 from django.http import JsonResponse
 
 
-
 @csrf_exempt
 @require_POST
 def settings_baseline_subject_save(request):
@@ -54,9 +53,13 @@ def settings_baseline_subject_save(request):
 def settings_baseline_subject_toggle(request):
     subject_id = (request.POST.get("id") or "").strip()
     enabled = request.POST.get("enabled") == "1"
-    updated = BaselineSubjectConfig.objects.filter(id=subject_id).update(enabled=enabled)
+    updated = BaselineSubjectConfig.objects.filter(id=subject_id).update(
+        enabled=enabled
+    )
     if updated:
-        messages.success(request, f"Baseline subject {'enabled' if enabled else 'disabled'}.")
+        messages.success(
+            request, f"Baseline subject {'enabled' if enabled else 'disabled'}."
+        )
     else:
         messages.error(request, "Baseline subject not found.")
     return redirect("dashboard:settings")
@@ -100,7 +103,11 @@ def settings_baseline_recompute(request):
     form is persisted so the nightly scheduler uses the same value.
     """
     from agent.runtime.learning.baseline_adapters import active_adapter_name
-    from agent.runtime.learning.baselines import compute_all_baselines, get_window_days, set_window_days
+    from agent.runtime.learning.baselines import (
+        compute_all_baselines,
+        get_window_days,
+        set_window_days,
+    )
 
     raw = (request.POST.get("window_days") or "").strip()
     if raw.isdigit() and int(raw) >= 1:
@@ -137,4 +144,3 @@ def settings_baseline_recompute(request):
                 "the SIEM connection.",
             )
     return redirect("dashboard:settings")
-

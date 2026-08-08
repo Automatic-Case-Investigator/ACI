@@ -6,7 +6,9 @@ import unittest
 
 import httpx
 
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 sys.path.insert(0, project_root)
 sys.path.insert(0, os.path.join(project_root, "aci-mcp-servers", "aci-wazuh"))
 
@@ -31,7 +33,10 @@ class _FakeOpenSearchClient:
         self.posts.append((path, json))
         return httpx.Response(
             200,
-            json={"hits": {"total": {"value": self._total}}, "aggregations": self._aggs},
+            json={
+                "hits": {"total": {"value": self._total}},
+                "aggregations": self._aggs,
+            },
             request=httpx.Request("POST", f"https://wazuh.local{path}"),
         )
 
@@ -50,9 +55,15 @@ def _agg(body: dict) -> dict:
 class TestProfileFieldDefault(unittest.TestCase):
     def test_default_uses_terms_and_returns_top_values(self):
         fake = _FakeOpenSearchClient(
-            {"top": {"buckets": [{"key": "31101", "doc_count": 940239},
-                                 {"key": "31151", "doc_count": 71334}],
-                     "sum_other_doc_count": 12}},
+            {
+                "top": {
+                    "buckets": [
+                        {"key": "31101", "doc_count": 940239},
+                        {"key": "31151", "doc_count": 71334},
+                    ],
+                    "sum_other_doc_count": 12,
+                }
+            },
             total=1017364,
         )
         result = _client(fake).profile_field("rule.id", top_n=20)
@@ -70,9 +81,15 @@ class TestProfileFieldRare(unittest.TestCase):
     def test_rare_uses_rare_terms_with_default_cap(self):
         # The needles a top-N view buries: level-0 webshell rule, 2-record service-stop.
         fake = _FakeOpenSearchClient(
-            {"rare": {"buckets": [{"key": "80700", "doc_count": 2},
-                                  {"key": "31108", "doc_count": 4},
-                                  {"key": "5402", "doc_count": 9}]}},
+            {
+                "rare": {
+                    "buckets": [
+                        {"key": "80700", "doc_count": 2},
+                        {"key": "31108", "doc_count": 4},
+                        {"key": "5402", "doc_count": 9},
+                    ]
+                }
+            },
             total=1017364,
         )
         result = _client(fake).profile_field("rule.id", rare=True)
@@ -82,17 +99,23 @@ class TestProfileFieldRare(unittest.TestCase):
         self.assertEqual(agg["rare"]["rare_terms"]["field"], "rule.id")
         self.assertEqual(agg["rare"]["rare_terms"]["max_doc_count"], 10)  # default
         self.assertEqual(result["max_doc_count"], 10)
-        self.assertEqual([b["value"] for b in result["rare_values"]], ["80700", "31108", "5402"])
+        self.assertEqual(
+            [b["value"] for b in result["rare_values"]], ["80700", "31108", "5402"]
+        )
         self.assertNotIn("top_values", result)
 
     def test_max_doc_count_is_clamped_to_supported_range(self):
         fake = _FakeOpenSearchClient({"rare": {"buckets": []}})
         _client(fake).profile_field("rule.id", rare=True, max_doc_count=500)
-        self.assertEqual(_agg(fake.posts[0][1])["rare"]["rare_terms"]["max_doc_count"], 100)
+        self.assertEqual(
+            _agg(fake.posts[0][1])["rare"]["rare_terms"]["max_doc_count"], 100
+        )
 
         fake2 = _FakeOpenSearchClient({"rare": {"buckets": []}})
         _client(fake2).profile_field("rule.id", rare=True, max_doc_count=0)
-        self.assertEqual(_agg(fake2.posts[0][1])["rare"]["rare_terms"]["max_doc_count"], 1)
+        self.assertEqual(
+            _agg(fake2.posts[0][1])["rare"]["rare_terms"]["max_doc_count"], 1
+        )
 
     def test_rare_results_sliced_to_top_n(self):
         buckets = [{"key": f"r{i}", "doc_count": 1} for i in range(40)]

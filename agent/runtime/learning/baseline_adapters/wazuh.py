@@ -5,6 +5,7 @@ the field names (`data.srcuser`, `agent.name`, `rule.id`, `data.srcip`,
 `@timestamp`), the OpenSearch query DSL, and which features each subject type
 yields. The orchestrator sees only `FeatureResult`s and clean subject IDs.
 """
+
 from __future__ import annotations
 
 import logging
@@ -25,7 +26,13 @@ def _daily_stats(buckets: list[dict]) -> dict:
     """Summarise date-histogram buckets into mean/std/percentile stats."""
     counts = [b["doc_count"] for b in buckets]
     if not counts:
-        return {"daily_mean": 0.0, "daily_std": 0.0, "p5": 0.0, "p95": 0.0, "total_days_observed": 0}
+        return {
+            "daily_mean": 0.0,
+            "daily_std": 0.0,
+            "p5": 0.0,
+            "p95": 0.0,
+            "total_days_observed": 0,
+        }
     mean = statistics.mean(counts)
     std = statistics.stdev(counts) if len(counts) > 1 else 0.0
     sorted_counts = sorted(counts)
@@ -73,22 +80,28 @@ class WazuhBaselineAdapter:
     def discover_subjects(self, subject_type: str, days: int) -> list[str]:
         tr = self._time_range(days)
         if subject_type == "user":
-            result = self._client.profile_field("data.srcuser", time_range=tr, top_n=500)
+            result = self._client.profile_field(
+                "data.srcuser", time_range=tr, top_n=500
+            )
             return [
-                v["value"] for v in result.get("top_values", [])
+                v["value"]
+                for v in result.get("top_values", [])
                 if v.get("value") and str(v["value"]).strip() not in _SKIP_USERS
             ]
         if subject_type == "endpoint":
             result = self._client.profile_field("agent.name", time_range=tr, top_n=500)
             return [
-                v["value"] for v in result.get("top_values", [])
+                v["value"]
+                for v in result.get("top_values", [])
                 if v.get("value") and str(v["value"]).strip()
             ]
         return []
 
     # ── Feature computation ──────────────────────────────────────────────────
 
-    def compute_features(self, subject_type: str, subject_id: str, days: int) -> list[FeatureResult]:
+    def compute_features(
+        self, subject_type: str, subject_id: str, days: int
+    ) -> list[FeatureResult]:
         if subject_type == "user":
             return self._user_features(subject_id, days)
         if subject_type == "endpoint":
@@ -102,46 +115,69 @@ class WazuhBaselineAdapter:
         # source_ips
         try:
             result = self._client.profile_field(
-                "data.srcip", query={"term": {"data.srcuser": uid}}, time_range=tr, top_n=20
+                "data.srcip",
+                query={"term": {"data.srcuser": uid}},
+                time_range=tr,
+                top_n=20,
             )
-            out.append(FeatureResult(
-                feature="source_ips",
-                value={"top_ips": [
-                    {"ip": v["value"], "count": v["count"]} for v in result.get("top_values", [])
-                ]},
-                event_count=result.get("matched_docs", 0),
-            ))
+            out.append(
+                FeatureResult(
+                    feature="source_ips",
+                    value={
+                        "top_ips": [
+                            {"ip": v["value"], "count": v["count"]}
+                            for v in result.get("top_values", [])
+                        ]
+                    },
+                    event_count=result.get("matched_docs", 0),
+                )
+            )
         except Exception as exc:
             log.warning("wazuh baseline: user %s source_ips failed: %s", uid, exc)
 
         # active_hours
         try:
             result = self._client.search(
-                {"term": {"data.srcuser": uid}}, time_range=tr, max_results=100,
+                {"term": {"data.srcuser": uid}},
+                time_range=tr,
+                max_results=100,
                 source_fields=["@timestamp"],
             )
             hours = _hours_from_events(result.get("events", []))
             # Count the events actually returned — the client runs searches with
             # track_total_hits disabled, so result["total"] is an unreliable
             # lower bound (often 0) and must not be used for the health gate.
-            out.append(FeatureResult(
-                feature="active_hours",
-                value={"counts": dict(hours)},
-                event_count=sum(hours.values()),
-            ))
+            out.append(
+                FeatureResult(
+                    feature="active_hours",
+                    value={"counts": dict(hours)},
+                    event_count=sum(hours.values()),
+                )
+            )
         except Exception as exc:
             log.warning("wazuh baseline: user %s active_hours failed: %s", uid, exc)
 
         # event_volume
         try:
-            aggs = {"by_day": {"date_histogram": {"field": "@timestamp", "calendar_interval": "day"}}}
-            raw = self._client.aggregate(aggs, query={"term": {"data.srcuser": uid}}, time_range=tr)
+            aggs = {
+                "by_day": {
+                    "date_histogram": {
+                        "field": "@timestamp",
+                        "calendar_interval": "day",
+                    }
+                }
+            }
+            raw = self._client.aggregate(
+                aggs, query={"term": {"data.srcuser": uid}}, time_range=tr
+            )
             buckets = raw.get("by_day", {}).get("buckets", [])
-            out.append(FeatureResult(
-                feature="event_volume",
-                value=_daily_stats(buckets),
-                event_count=sum(b["doc_count"] for b in buckets),
-            ))
+            out.append(
+                FeatureResult(
+                    feature="event_volume",
+                    value=_daily_stats(buckets),
+                    event_count=sum(b["doc_count"] for b in buckets),
+                )
+            )
         except Exception as exc:
             log.warning("wazuh baseline: user %s event_volume failed: %s", uid, exc)
 
@@ -152,23 +188,35 @@ class WazuhBaselineAdapter:
                     "filters": {
                         "filters": {
                             "total_auth": {"match": {"rule.groups": "authentication"}},
-                            "failed_auth": {"match": {"rule.groups": "authentication_failed"}},
+                            "failed_auth": {
+                                "match": {"rule.groups": "authentication_failed"}
+                            },
                         }
                     }
                 }
             }
-            raw = self._client.aggregate(aggs, query={"term": {"data.srcuser": uid}}, time_range=tr)
+            raw = self._client.aggregate(
+                aggs, query={"term": {"data.srcuser": uid}}, time_range=tr
+            )
             buckets = raw.get("auth_stats", {}).get("buckets", {})
             total = buckets.get("total_auth", {}).get("doc_count", 0)
             failed = buckets.get("failed_auth", {}).get("doc_count", 0)
             rate = round(failed / total, 4) if total > 0 else 0.0
-            out.append(FeatureResult(
-                feature="auth_failure_rate",
-                value={"auth_events": total, "auth_failures": failed, "failure_rate": rate},
-                event_count=total,
-            ))
+            out.append(
+                FeatureResult(
+                    feature="auth_failure_rate",
+                    value={
+                        "auth_events": total,
+                        "auth_failures": failed,
+                        "failure_rate": rate,
+                    },
+                    event_count=total,
+                )
+            )
         except Exception as exc:
-            log.warning("wazuh baseline: user %s auth_failure_rate failed: %s", uid, exc)
+            log.warning(
+                "wazuh baseline: user %s auth_failure_rate failed: %s", uid, exc
+            )
 
         return out
 
@@ -181,31 +229,40 @@ class WazuhBaselineAdapter:
             result = self._client.profile_field(
                 "rule.id", query={"term": {"agent.name": eid}}, time_range=tr, top_n=20
             )
-            out.append(FeatureResult(
-                feature="common_rules",
-                value={"top_rules": [
-                    {"rule_id": v["value"], "count": v["count"]} for v in result.get("top_values", [])
-                ]},
-                event_count=result.get("matched_docs", 0),
-            ))
+            out.append(
+                FeatureResult(
+                    feature="common_rules",
+                    value={
+                        "top_rules": [
+                            {"rule_id": v["value"], "count": v["count"]}
+                            for v in result.get("top_values", [])
+                        ]
+                    },
+                    event_count=result.get("matched_docs", 0),
+                )
+            )
         except Exception as exc:
             log.warning("wazuh baseline: endpoint %s common_rules failed: %s", eid, exc)
 
         # active_hours
         try:
             result = self._client.search(
-                {"term": {"agent.name": eid}}, time_range=tr, max_results=100,
+                {"term": {"agent.name": eid}},
+                time_range=tr,
+                max_results=100,
                 source_fields=["@timestamp"],
             )
             hours = _hours_from_events(result.get("events", []))
             # Count the events actually returned — the client runs searches with
             # track_total_hits disabled, so result["total"] is an unreliable
             # lower bound (often 0) and must not be used for the health gate.
-            out.append(FeatureResult(
-                feature="active_hours",
-                value={"counts": dict(hours)},
-                event_count=sum(hours.values()),
-            ))
+            out.append(
+                FeatureResult(
+                    feature="active_hours",
+                    value={"counts": dict(hours)},
+                    event_count=sum(hours.values()),
+                )
+            )
         except Exception as exc:
             log.warning("wazuh baseline: endpoint %s active_hours failed: %s", eid, exc)
 
@@ -217,28 +274,43 @@ class WazuhBaselineAdapter:
                 time_range=tr,
                 top_n=20,
             )
-            out.append(FeatureResult(
-                feature="common_users",
-                value={"top_users": [
-                    {"user": v["value"], "count": v["count"]}
-                    for v in result.get("top_values", [])
-                    if str(v["value"]).strip() not in _SKIP_USERS
-                ]},
-                event_count=result.get("matched_docs", 0),
-            ))
+            out.append(
+                FeatureResult(
+                    feature="common_users",
+                    value={
+                        "top_users": [
+                            {"user": v["value"], "count": v["count"]}
+                            for v in result.get("top_values", [])
+                            if str(v["value"]).strip() not in _SKIP_USERS
+                        ]
+                    },
+                    event_count=result.get("matched_docs", 0),
+                )
+            )
         except Exception as exc:
             log.warning("wazuh baseline: endpoint %s common_users failed: %s", eid, exc)
 
         # event_volume
         try:
-            aggs = {"by_day": {"date_histogram": {"field": "@timestamp", "calendar_interval": "day"}}}
-            raw = self._client.aggregate(aggs, query={"term": {"agent.name": eid}}, time_range=tr)
+            aggs = {
+                "by_day": {
+                    "date_histogram": {
+                        "field": "@timestamp",
+                        "calendar_interval": "day",
+                    }
+                }
+            }
+            raw = self._client.aggregate(
+                aggs, query={"term": {"agent.name": eid}}, time_range=tr
+            )
             buckets = raw.get("by_day", {}).get("buckets", [])
-            out.append(FeatureResult(
-                feature="event_volume",
-                value=_daily_stats(buckets),
-                event_count=sum(b["doc_count"] for b in buckets),
-            ))
+            out.append(
+                FeatureResult(
+                    feature="event_volume",
+                    value=_daily_stats(buckets),
+                    event_count=sum(b["doc_count"] for b in buckets),
+                )
+            )
         except Exception as exc:
             log.warning("wazuh baseline: endpoint %s event_volume failed: %s", eid, exc)
 

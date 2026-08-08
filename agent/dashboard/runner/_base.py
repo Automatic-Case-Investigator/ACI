@@ -7,12 +7,16 @@ import threading
 from agent.models import AgentEvent, AgentRun
 from agent.runtime.infra import logbus
 
-from .session_state import load_session_state as _load_session_state, publish_specialist_result_to_session, save_session_state as _save_session_state, set_session_status as _set_status
+from .session_state import (
+    load_session_state as _load_session_state,
+    publish_specialist_result_to_session,
+    save_session_state as _save_session_state,
+    set_session_status as _set_status,
+)
 
-
-_active_sessions: dict[str, queue.Queue] = {}       # session_id → message queue
-_loops: dict[str, asyncio.AbstractEventLoop] = {}   # session_id → running event loop
-_processing: set[str] = set()                       # sessions currently inside run_orchestrator
+_active_sessions: dict[str, queue.Queue] = {}  # session_id → message queue
+_loops: dict[str, asyncio.AbstractEventLoop] = {}  # session_id → running event loop
+_processing: set[str] = set()  # sessions currently inside run_orchestrator
 _lock = threading.Lock()
 _RESTARTABLE_AGENTS = {"triage", "investigation"}
 _RESTART_CONTEXT_LIMIT = 70000
@@ -87,16 +91,20 @@ def _current_context_run(session_id: str) -> AgentRun | None:
         # scanning here on that path cost a 200-row table scan on every 400ms
         # dashboard status push, for the whole orchestrator-only phase of a session.
         runs = [
-            run for run in AgentRun.objects.exclude(agent_name="orchestrator").order_by("-updated_at")[:200]
+            run
+            for run in AgentRun.objects.exclude(agent_name="orchestrator").order_by(
+                "-updated_at"
+            )[:200]
             if (run.metadata or {}).get("session_id") == session_id
         ]
     running_specialists = [
-        run for run in runs
+        run
+        for run in runs
         if run.status == AgentRun.STATUS_RUNNING and run.agent_name != "orchestrator"
     ]
     if running_specialists:
         return max(running_specialists, key=lambda r: r.updated_at)
     return AgentRun.objects.filter(id=session_id).first()
 
-# ── internal ───────────────────────────────────────────────────────────────────
 
+# ── internal ───────────────────────────────────────────────────────────────────

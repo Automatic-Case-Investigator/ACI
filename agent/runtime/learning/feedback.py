@@ -12,6 +12,7 @@ The `context` field carries the structured pivots from the case (rule_ids, users
 hosts, alert_types) so that future cross-case queries can assess relevance without
 re-fetching the original case data.
 """
+
 from __future__ import annotations
 
 from agent.models import FeedbackEntry, PatternCandidate

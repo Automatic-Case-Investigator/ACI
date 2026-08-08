@@ -4,6 +4,7 @@ Offline test: diagnosis verdict parsing, validation, and citation policy.
 Pure-Python (no Django / LLM / MCP). Run from project root with:
     python .claude/skills/run-aci-backend/tests/test_verdict_parsing.py -v
 """
+
 from __future__ import annotations
 
 import os
@@ -11,7 +12,9 @@ import sys
 import unittest
 
 # Navigate from .claude/skills/run-aci-backend/tests/ up to project root (4 levels)
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, project_root)
 
 from agent.runtime.analysis.verdict import (
@@ -27,7 +30,6 @@ from agent.runtime.analysis.verdict import (
     apply_success_verification_floor,
     apply_verdict_integrity,
 )
-
 
 TP_BLOCK = """\
 ## Verdict
@@ -57,7 +59,9 @@ class TestParseVerdict(unittest.TestCase):
         self.assertIsNotNone(v)
         self.assertEqual(v["verdict"], "tp")
         self.assertEqual(v["confidence"], "high")
-        self.assertEqual(v["supporting_evidence"], ["event 1712 — reverse shell in crontab"])
+        self.assertEqual(
+            v["supporting_evidence"], ["event 1712 — reverse shell in crontab"]
+        )
 
     def test_parses_bare_fence_without_json_tag(self):
         text = '```\n{"verdict": "fp", "confidence": "high", "supporting_evidence": ["pattern x"]}\n```'
@@ -146,20 +150,32 @@ class TestValidateVerdict(unittest.TestCase):
         self.assertTrue(any("confidence must be one of" in p for p in problems))
 
     def test_tp_without_evidence_flagged(self):
-        v = {"verdict": "tp", "confidence": "high",
-             "classification_basis": "malicious_evidence", "supporting_evidence": []}
+        v = {
+            "verdict": "tp",
+            "confidence": "high",
+            "classification_basis": "malicious_evidence",
+            "supporting_evidence": [],
+        }
         problems = validate_verdict(v)
         self.assertTrue(any("supporting_evidence" in p for p in problems))
 
     def test_tp_without_malicious_basis_flagged(self):
-        v = {"verdict": "tp", "confidence": "high",
-             "classification_basis": "insufficient_evidence", "supporting_evidence": ["e1"]}
+        v = {
+            "verdict": "tp",
+            "confidence": "high",
+            "classification_basis": "insufficient_evidence",
+            "supporting_evidence": ["e1"],
+        }
         problems = validate_verdict(v)
         self.assertTrue(any("malicious_evidence" in p for p in problems))
 
     def test_fp_without_benign_basis_flagged(self):
-        v = {"verdict": "fp", "confidence": "high",
-             "classification_basis": "insufficient_evidence", "supporting_evidence": ["e1"]}
+        v = {
+            "verdict": "fp",
+            "confidence": "high",
+            "classification_basis": "insufficient_evidence",
+            "supporting_evidence": ["e1"],
+        }
         problems = validate_verdict(v)
         self.assertTrue(any("benign_evidence" in p for p in problems))
 
@@ -174,8 +190,12 @@ class TestCitationPolicy(unittest.TestCase):
         self.assertEqual(out["verdict"], "tp")
 
     def test_uncited_tp_demoted_to_inconclusive(self):
-        v = {"verdict": "tp", "confidence": "high", "supporting_evidence": [],
-             "recommended_action": "escalate"}
+        v = {
+            "verdict": "tp",
+            "confidence": "high",
+            "supporting_evidence": [],
+            "recommended_action": "escalate",
+        }
         self.assertFalse(citation_check(v))
         out, demoted = apply_citation_policy(v)
         self.assertTrue(demoted)
@@ -196,7 +216,11 @@ class TestCitationPolicy(unittest.TestCase):
         self.assertFalse(demoted)
 
     def test_needs_investigation_passes_without_evidence(self):
-        v = {"verdict": "needs_investigation", "confidence": "low", "supporting_evidence": []}
+        v = {
+            "verdict": "needs_investigation",
+            "confidence": "low",
+            "supporting_evidence": [],
+        }
         self.assertTrue(citation_check(v))
 
 
@@ -205,9 +229,12 @@ class TestCompletenessFloor(unittest.TestCase):
     must not clear a case as benign."""
 
     def _fp(self):
-        return {"verdict": "fp", "confidence": "high",
-                "classification_basis": "benign_evidence",
-                "supporting_evidence": ["benign event 5"]}
+        return {
+            "verdict": "fp",
+            "confidence": "high",
+            "classification_basis": "benign_evidence",
+            "supporting_evidence": ["benign event 5"],
+        }
 
     def test_escalated_fp_floored_to_needs_investigation(self):
         out, floored = apply_completeness_floor(self._fp(), escalation_posted=True)
@@ -224,23 +251,29 @@ class TestCompletenessFloor(unittest.TestCase):
 
     def test_clean_complete_fp_not_floored(self):
         out, floored = apply_completeness_floor(
-            self._fp(), escalation_posted=False, over_budget=False)
+            self._fp(), escalation_posted=False, over_budget=False
+        )
         self.assertFalse(floored)
         self.assertEqual(out["verdict"], "fp")
 
     def test_tp_never_floored(self):
-        v = {"verdict": "tp", "confidence": "high",
-             "classification_basis": "malicious_evidence",
-             "supporting_evidence": ["e1"]}
+        v = {
+            "verdict": "tp",
+            "confidence": "high",
+            "classification_basis": "malicious_evidence",
+            "supporting_evidence": ["e1"],
+        }
         out, floored = apply_completeness_floor(
-            v, escalation_posted=True, over_budget=True)
+            v, escalation_posted=True, over_budget=True
+        )
         self.assertFalse(floored)
         self.assertEqual(out["verdict"], "tp")
 
     def test_inconclusive_never_floored(self):
         v = {"verdict": "inconclusive", "confidence": "low"}
         out, floored = apply_completeness_floor(
-            v, escalation_posted=True, over_budget=True)
+            v, escalation_posted=True, over_budget=True
+        )
         self.assertFalse(floored)
         self.assertEqual(out["verdict"], "inconclusive")
 
@@ -252,7 +285,8 @@ class TestCompletenessFloor(unittest.TestCase):
 
     def test_both_reasons_listed(self):
         out, floored = apply_completeness_floor(
-            self._fp(), escalation_posted=True, over_budget=True)
+            self._fp(), escalation_posted=True, over_budget=True
+        )
         self.assertTrue(floored)
         self.assertIn("escalation", out["reassessment_reason"].lower())
         self.assertIn("budget", out["reassessment_reason"].lower())
@@ -282,45 +316,70 @@ class TestImpactScopeFields(unittest.TestCase):
         self.assertEqual(v.get("scope_state"), "unknown")
 
     def test_validate_catches_bad_impact_state(self):
-        v = {"verdict": "inconclusive", "confidence": "low",
-             "supporting_evidence": [], "impact_state": "critical", "scope_state": "unknown"}
+        v = {
+            "verdict": "inconclusive",
+            "confidence": "low",
+            "supporting_evidence": [],
+            "impact_state": "critical",
+            "scope_state": "unknown",
+        }
         problems = validate_verdict(v)
         self.assertTrue(any("impact_state" in p for p in problems))
 
     def test_validate_catches_bad_scope_state(self):
-        v = {"verdict": "inconclusive", "confidence": "low",
-             "supporting_evidence": [], "impact_state": "unknown", "scope_state": "global"}
+        v = {
+            "verdict": "inconclusive",
+            "confidence": "low",
+            "supporting_evidence": [],
+            "impact_state": "unknown",
+            "scope_state": "global",
+        }
         problems = validate_verdict(v)
         self.assertTrue(any("scope_state" in p for p in problems))
 
     def test_validate_passes_valid_enum_values(self):
-        v = {"verdict": "tp", "confidence": "high",
-             "classification_basis": "malicious_evidence",
-             "supporting_evidence": ["e1"], "impact_state": "contained", "scope_state": "isolated"}
+        v = {
+            "verdict": "tp",
+            "confidence": "high",
+            "classification_basis": "malicious_evidence",
+            "supporting_evidence": ["e1"],
+            "impact_state": "contained",
+            "scope_state": "isolated",
+        }
         self.assertEqual(validate_verdict(v), [])
 
 
 class TestOpenGapsPolicy(unittest.TestCase):
 
     def _tp_with_gaps(self, gaps):
-        return {"verdict": "tp", "confidence": "high",
-                "classification_basis": "malicious_evidence",
-                "supporting_evidence": ["e1"], "missing_evidence": gaps}
+        return {
+            "verdict": "tp",
+            "confidence": "high",
+            "classification_basis": "malicious_evidence",
+            "supporting_evidence": ["e1"],
+            "missing_evidence": gaps,
+        }
 
     def test_nonblocking_gaps_do_not_demote(self):
-        v = {"verdict": "tp", "confidence": "high",
-             "classification_basis": "malicious_evidence",
-             "supporting_evidence": ["event 1712"],
-             "nonblocking_gaps": ["additional log source would help"]}
+        v = {
+            "verdict": "tp",
+            "confidence": "high",
+            "classification_basis": "malicious_evidence",
+            "supporting_evidence": ["event 1712"],
+            "nonblocking_gaps": ["additional log source would help"],
+        }
         out, demoted = apply_open_gaps_policy(v, strict=True)
         self.assertFalse(demoted)
         self.assertEqual(out["verdict"], "tp")
 
     def test_blocking_gaps_demote(self):
-        v = {"verdict": "tp", "confidence": "high",
-             "classification_basis": "malicious_evidence",
-             "supporting_evidence": ["event 1712"],
-             "blocking_gaps": ["cannot distinguish admin from attacker"]}
+        v = {
+            "verdict": "tp",
+            "confidence": "high",
+            "classification_basis": "malicious_evidence",
+            "supporting_evidence": ["event 1712"],
+            "blocking_gaps": ["cannot distinguish admin from attacker"],
+        }
         out, demoted = apply_open_gaps_policy(v, strict=False)
         self.assertTrue(demoted)
         self.assertEqual(out["verdict"], "needs_investigation")
@@ -345,24 +404,32 @@ class TestOpenGapsPolicy(unittest.TestCase):
         self.assertEqual(out["verdict"], "needs_investigation")
 
     def test_fp_without_benign_basis_demotes(self):
-        v = {"verdict": "fp", "confidence": "high",
-             "supporting_evidence": ["no malicious evidence found"],
-             "nonblocking_gaps": ["collect EDR process tree"]}
+        v = {
+            "verdict": "fp",
+            "confidence": "high",
+            "supporting_evidence": ["no malicious evidence found"],
+            "nonblocking_gaps": ["collect EDR process tree"],
+        }
         out, demoted = apply_open_gaps_policy(v, strict=False)
         self.assertTrue(demoted)
         self.assertEqual(out["verdict"], "needs_investigation")
 
     def test_fp_with_benign_basis_and_nonblocking_gaps_remains_fp(self):
-        v = {"verdict": "fp", "confidence": "high",
-             "classification_basis": "benign_evidence",
-             "supporting_evidence": ["change ticket approved crontab edit"],
-             "nonblocking_gaps": ["no EDR process tree available"]}
+        v = {
+            "verdict": "fp",
+            "confidence": "high",
+            "classification_basis": "benign_evidence",
+            "supporting_evidence": ["change ticket approved crontab edit"],
+            "nonblocking_gaps": ["no EDR process tree available"],
+        }
         out, demoted = apply_open_gaps_policy(v, strict=False)
         self.assertFalse(demoted)
         self.assertEqual(out["verdict"], "fp")
 
     def test_session_regression_tp_with_followup_gaps_remains_tp(self):
-        v = self._tp_with_gaps(["additional log source would help", "confirm persistence mechanism"])
+        v = self._tp_with_gaps(
+            ["additional log source would help", "confirm persistence mechanism"]
+        )
         out, demoted = apply_open_gaps_policy(v, strict=False)
         self.assertFalse(demoted)
         self.assertEqual(out["verdict"], "tp")
@@ -383,53 +450,89 @@ class TestOpenGapsPolicy(unittest.TestCase):
         self.assertFalse(demoted)
         self.assertEqual(out["verdict"], "tp")
         self.assertEqual(out["blocking_gaps"], [])
-        self.assertIn("Initial access source IP not retrieved from telemetry", out["nonblocking_gaps"])
+        self.assertIn(
+            "Initial access source IP not retrieved from telemetry",
+            out["nonblocking_gaps"],
+        )
 
     def test_no_missing_evidence_never_demotes(self):
-        v = {"verdict": "tp", "confidence": "high",
-             "classification_basis": "malicious_evidence",
-             "supporting_evidence": ["e1"], "missing_evidence": []}
+        v = {
+            "verdict": "tp",
+            "confidence": "high",
+            "classification_basis": "malicious_evidence",
+            "supporting_evidence": ["e1"],
+            "missing_evidence": [],
+        }
         out, demoted = apply_open_gaps_policy(v, strict=True)
         self.assertFalse(demoted)
 
     def test_inconclusive_never_demoted(self):
-        v = {"verdict": "inconclusive", "confidence": "low", "missing_evidence": ["gap"]}
+        v = {
+            "verdict": "inconclusive",
+            "confidence": "low",
+            "missing_evidence": ["gap"],
+        }
         out, demoted = apply_open_gaps_policy(v, strict=True)
         self.assertFalse(demoted)
 
 
 class OffensiveAlertDetectionTests(unittest.TestCase):
     def test_detects_scan_recon_from_matched_patterns(self):
-        v = {"verdict": "fp", "matched_patterns": ["T1595.002 vulnerability scanning"],
-             "supporting_evidence": []}
+        v = {
+            "verdict": "fp",
+            "matched_patterns": ["T1595.002 vulnerability scanning"],
+            "supporting_evidence": [],
+        }
         self.assertTrue(is_offensive_alert(v))
 
     def test_detects_wpscan_from_supporting_evidence(self):
-        v = {"verdict": "fp", "matched_patterns": [],
-             "supporting_evidence": ["user-agent WPScan v3.8.20 probing plugin paths"]}
+        v = {
+            "verdict": "fp",
+            "matched_patterns": [],
+            "supporting_evidence": ["user-agent WPScan v3.8.20 probing plugin paths"],
+        }
         self.assertTrue(is_offensive_alert(v))
 
     def test_non_offensive_alert_not_flagged(self):
-        v = {"verdict": "fp", "matched_patterns": [],
-             "supporting_evidence": ["change ticket approved crontab edit"]}
+        v = {
+            "verdict": "fp",
+            "matched_patterns": [],
+            "supporting_evidence": ["change ticket approved crontab edit"],
+        }
         self.assertFalse(is_offensive_alert(v))
 
 
 class ClassifyFpGapsTests(unittest.TestCase):
     def test_fp_success_gap_promoted_to_blocking(self):
-        v = {"verdict": "fp", "confidence": "high",
-             "nonblocking_gaps": ["No post-scan success or follow-on activity was confirmed",
-                                  "Broad query was truncated at 10,000 hits"]}
+        v = {
+            "verdict": "fp",
+            "confidence": "high",
+            "nonblocking_gaps": [
+                "No post-scan success or follow-on activity was confirmed",
+                "Broad query was truncated at 10,000 hits",
+            ],
+        }
         out, changed = classify_fp_gaps(v)
         self.assertTrue(changed)
-        self.assertIn("No post-scan success or follow-on activity was confirmed", out["blocking_gaps"])
+        self.assertIn(
+            "No post-scan success or follow-on activity was confirmed",
+            out["blocking_gaps"],
+        )
         # Unrelated gap stays nonblocking.
-        self.assertIn("Broad query was truncated at 10,000 hits", out["nonblocking_gaps"])
-        self.assertNotIn("No post-scan success or follow-on activity was confirmed", out["nonblocking_gaps"])
+        self.assertIn(
+            "Broad query was truncated at 10,000 hits", out["nonblocking_gaps"]
+        )
+        self.assertNotIn(
+            "No post-scan success or follow-on activity was confirmed",
+            out["nonblocking_gaps"],
+        )
 
     def test_fp_benign_followup_gap_not_promoted(self):
-        v = {"verdict": "fp", "confidence": "high",
-             "nonblocking_gaps": ["no EDR process tree available"]}
+        v = {
+            "verdict": "fp",
+            "confidence": "high",
+            "nonblocking_gaps": ["no EDR process tree available"],
+        }
         out, changed = classify_fp_gaps(v)
         self.assertFalse(changed)
         self.assertEqual(out["nonblocking_gaps"], ["no EDR process tree available"])
@@ -442,27 +545,40 @@ class ClassifyFpGapsTests(unittest.TestCase):
 
 class SuccessVerificationFloorTests(unittest.TestCase):
     def test_fp_offensive_without_success_check_floored(self):
-        v = {"verdict": "fp", "confidence": "high",
-             "classification_basis": "benign_evidence",
-             "matched_patterns": ["T1595.002 vulnerability scanning"],
-             "supporting_evidence": ["HTTP HEAD requests to plugin paths returning 404"]}
+        v = {
+            "verdict": "fp",
+            "confidence": "high",
+            "classification_basis": "benign_evidence",
+            "matched_patterns": ["T1595.002 vulnerability scanning"],
+            "supporting_evidence": ["HTTP HEAD requests to plugin paths returning 404"],
+        }
         out, floored = apply_success_verification_floor(v, offensive_alert=True)
         self.assertTrue(floored)
         self.assertEqual(out["verdict"], "needs_investigation")
         self.assertEqual(out["demoted_from"], "fp")
 
     def test_fp_offensive_with_benign_justification_not_floored(self):
-        v = {"verdict": "fp", "confidence": "high",
-             "matched_patterns": ["vulnerability scanning"],
-             "supporting_evidence": ["approved internal vulnerability management scan window"]}
+        v = {
+            "verdict": "fp",
+            "confidence": "high",
+            "matched_patterns": ["vulnerability scanning"],
+            "supporting_evidence": [
+                "approved internal vulnerability management scan window"
+            ],
+        }
         out, floored = apply_success_verification_floor(v, offensive_alert=True)
         self.assertFalse(floored)
 
     def test_fp_offensive_with_success_negative_not_floored(self):
         # A confirmed success-negative means the run DID check downstream success.
-        v = {"verdict": "fp", "confidence": "high",
-             "matched_patterns": ["scan"],
-             "supporting_evidence": ["no successful login or authenticated session followed the scan"]}
+        v = {
+            "verdict": "fp",
+            "confidence": "high",
+            "matched_patterns": ["scan"],
+            "supporting_evidence": [
+                "no successful login or authenticated session followed the scan"
+            ],
+        }
         out, floored = apply_success_verification_floor(v, offensive_alert=True)
         self.assertFalse(floored)
 
@@ -476,10 +592,14 @@ class VerdictIntegrityPipelineTests(unittest.TestCase):
     def _session_fp(self):
         # Reproduces the triage verdict from session 49ae3801 that wrongly auto-closed.
         return {
-            "verdict": "fp", "confidence": "high",
+            "verdict": "fp",
+            "confidence": "high",
             "classification_basis": "benign_evidence",
-            "matched_patterns": ["T1595.002 vulnerability scanning", "Web reconnaissance",
-                                 "WPScan user-agent"],
+            "matched_patterns": [
+                "T1595.002 vulnerability scanning",
+                "Web reconnaissance",
+                "WPScan user-agent",
+            ],
             "supporting_evidence": [
                 "Retrieved raw events show repeated HTTP HEAD requests returning 404",
                 "Alert family rule.id=31151 describes multiple web server 400 error codes",
@@ -506,20 +626,28 @@ class VerdictIntegrityPipelineTests(unittest.TestCase):
 
     def test_legitimate_benign_fp_survives(self):
         # A properly-justified benign FP on a non-offensive alert is untouched.
-        v = {"verdict": "fp", "confidence": "high",
-             "classification_basis": "benign_evidence",
-             "supporting_evidence": ["change ticket approved crontab edit"],
-             "nonblocking_gaps": ["no EDR process tree available"]}
+        v = {
+            "verdict": "fp",
+            "confidence": "high",
+            "classification_basis": "benign_evidence",
+            "supporting_evidence": ["change ticket approved crontab edit"],
+            "nonblocking_gaps": ["no EDR process tree available"],
+        }
         out, notes = apply_verdict_integrity(v, strict=False)
         self.assertEqual(out["verdict"], "fp")
         self.assertEqual(notes, [])
 
     def test_proven_tp_survives_with_followup_relief(self):
-        v = {"verdict": "tp", "confidence": "high",
-             "classification_basis": "malicious_evidence",
-             "supporting_evidence": ["Syscheck modified crontab with reverse-shell entry"],
-             "blocking_gaps": ["Initial access source IP not retrieved from telemetry"],
-             "nonblocking_gaps": []}
+        v = {
+            "verdict": "tp",
+            "confidence": "high",
+            "classification_basis": "malicious_evidence",
+            "supporting_evidence": [
+                "Syscheck modified crontab with reverse-shell entry"
+            ],
+            "blocking_gaps": ["Initial access source IP not retrieved from telemetry"],
+            "nonblocking_gaps": [],
+        }
         out, notes = apply_verdict_integrity(v, strict=False)
         self.assertEqual(out["verdict"], "tp")
         self.assertEqual(out["blocking_gaps"], [])

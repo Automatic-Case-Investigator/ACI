@@ -6,7 +6,6 @@ from typing import Awaitable, Callable
 
 from .indexer import MEMORY_FILE, parent_index_dirs, upsert_memory_content
 
-
 ToolCall = Callable[[str, dict], Awaitable[str]]
 
 
@@ -105,4 +104,6 @@ def _is_error(raw: str) -> bool:
         data = json.loads(raw)
     except Exception:
         return False
-    return isinstance(data, dict) and (data.get("ok") is False or bool(data.get("error")))
+    return isinstance(data, dict) and (
+        data.get("ok") is False or bool(data.get("error"))
+    )

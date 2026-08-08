@@ -1,4 +1,5 @@
 """The `interpret` graph node and its ledger-application + compaction glue."""
+
 from __future__ import annotations
 
 from ...infra.logbus import emit, src_label
@@ -8,30 +9,76 @@ from ..toolio import _call, _emit_node_entry, _tmap
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from ..coverage import _unqueried_post_peak_clusters, _unqueried_time_ranges
-from ._const import _DEFAULT_STOP_CONDITION, _NO_PROGRESS_BRAKE_CYCLES, _READY_EVIDENCE_KEEP, _STUCK_RETRIES
-from .ledger import _coerce_confirmed_findings, _coerce_string_list, _coerce_trials, _confirmed_findings_from_observation, _default_ledger, _merge_confirmed_findings, _merge_query_trials, _merge_string_lists, _parse_interpretation_text
-from .pivots import _coerce_adjacency, _coerce_pivot, _coerce_pivots, _update_pivot_state
-from .decisions import _action_from_review, _compose_instruction, _evidence_state_from_observation, _exhausted_shape, _fallback_interpretation, _forbidden_repeats, _reconcile_terminal_action, _should_assess
+from ._const import (
+    _DEFAULT_STOP_CONDITION,
+    _NO_PROGRESS_BRAKE_CYCLES,
+    _READY_EVIDENCE_KEEP,
+    _STUCK_RETRIES,
+)
+from .ledger import (
+    _coerce_confirmed_findings,
+    _coerce_string_list,
+    _coerce_trials,
+    _confirmed_findings_from_observation,
+    _default_ledger,
+    _merge_confirmed_findings,
+    _merge_query_trials,
+    _merge_string_lists,
+    _parse_interpretation_text,
+)
+from .pivots import (
+    _coerce_adjacency,
+    _coerce_pivot,
+    _coerce_pivots,
+    _update_pivot_state,
+)
+from .decisions import (
+    _action_from_review,
+    _compose_instruction,
+    _evidence_state_from_observation,
+    _exhausted_shape,
+    _fallback_interpretation,
+    _forbidden_repeats,
+    _reconcile_terminal_action,
+    _should_assess,
+)
 from .prompt import _batch_tool_outputs, _interpret_context, _interpret_system_prompt
 
 
 def _apply_model_ledger(
-    ledger: dict, observation: dict, parsed: dict, action: str, observation_retries: int, is_triage: bool
+    ledger: dict,
+    observation: dict,
+    parsed: dict,
+    action: str,
+    observation_retries: int,
+    is_triage: bool,
 ) -> tuple[dict, str]:
-    ready = _should_assess(observation, action, observation_retries, is_triage=is_triage)
-    evidence_state = str(parsed.get("evidence_state") or "").strip() or _evidence_state_from_observation(
-        observation, action, ready
+    ready = _should_assess(
+        observation, action, observation_retries, is_triage=is_triage
     )
+    evidence_state = str(
+        parsed.get("evidence_state") or ""
+    ).strip() or _evidence_state_from_observation(observation, action, ready)
     updated = {
         "objective": ledger.get("objective") or "",
-        "hypothesis": str(parsed.get("hypothesis") or ledger.get("hypothesis") or "").strip(),
-        "evidence_summary": str(parsed.get("what_showed") or observation.get("summary") or "").strip(),
-        "stop_state": str(parsed.get("stop_state") or ("continue" if not ready else "complete")).strip().lower(),
+        "hypothesis": str(
+            parsed.get("hypothesis") or ledger.get("hypothesis") or ""
+        ).strip(),
+        "evidence_summary": str(
+            parsed.get("what_showed") or observation.get("summary") or ""
+        ).strip(),
+        "stop_state": str(
+            parsed.get("stop_state") or ("continue" if not ready else "complete")
+        )
+        .strip()
+        .lower(),
         "next_action": action,
         "next_step_instruction": "",
         # Keep the model's forward-stage target, else persist the prior one so the
         # "what happened next on the same asset" pressure survives across cycles.
-        "next_adjacent_evidence_path": _coerce_adjacency(parsed.get("next_adjacent_evidence_path"))
+        "next_adjacent_evidence_path": _coerce_adjacency(
+            parsed.get("next_adjacent_evidence_path")
+        )
         or _coerce_adjacency(ledger.get("next_adjacent_evidence_path")),
         "forbidden_repeats": _merge_string_lists(
             ledger.get("forbidden_repeats"),
@@ -40,7 +87,9 @@ def _apply_model_ledger(
         ),
         "blocker": str(parsed.get("blocker") or "").strip(),
         "evidence_state": evidence_state,
-        "evidence_found": _merge_string_lists(ledger.get("evidence_found"), parsed.get("evidence_found")),
+        "evidence_found": _merge_string_lists(
+            ledger.get("evidence_found"), parsed.get("evidence_found")
+        ),
         "confirmed_findings": _merge_confirmed_findings(
             ledger.get("confirmed_findings"),
             _coerce_confirmed_findings(parsed.get("confirmed_findings"))
@@ -49,9 +98,13 @@ def _apply_model_ledger(
         "remaining_gaps": _coerce_string_list(parsed.get("remaining_gaps"))
         or _coerce_string_list(ledger.get("remaining_gaps")),
         "stop_condition": str(
-            parsed.get("stop_condition") or ledger.get("stop_condition") or _DEFAULT_STOP_CONDITION
+            parsed.get("stop_condition")
+            or ledger.get("stop_condition")
+            or _DEFAULT_STOP_CONDITION
         ).strip(),
-        "stop_reason": str(parsed.get("stop_reason") or ledger.get("stop_reason") or "").strip(),
+        "stop_reason": str(
+            parsed.get("stop_reason") or ledger.get("stop_reason") or ""
+        ).strip(),
         "active_pivots": _coerce_pivots(ledger.get("active_pivots")),
         "primary_pivot": _coerce_pivot(ledger.get("primary_pivot")),
         "query_trials": _coerce_trials(ledger.get("query_trials")),
@@ -63,9 +116,15 @@ def _apply_model_ledger(
         updated["why_current_pivot_failed"],
     ) = _update_pivot_state(updated, observation, action, parsed=parsed)
     updated["next_step_instruction"] = _compose_instruction(
-        observation, action, ready, str(parsed.get("next_step_instruction") or ""), updated
+        observation,
+        action,
+        ready,
+        str(parsed.get("next_step_instruction") or ""),
+        updated,
     )
     return updated, ("ready_to_assess" if ready else "needs_more_work")
+
+
 async def _investigation_context(state: AgentState, tools: list) -> str:
     if state["agent_name"] != "investigation":
         return ""
@@ -78,7 +137,11 @@ async def _investigation_context(state: AgentState, tools: list) -> str:
         raw = await _call(get_board_fn, {})
         board_context = _format_board_context(raw)
     return (board_context + queue_context).strip()
-def _compact_messages_after_interpret(state: AgentState, ledger: dict, observation: dict) -> list:
+
+
+def _summarize_messages_after_interpret(
+    state: AgentState, ledger: dict, observation: dict
+) -> list:
     """Ready-to-assess handoff context: the interpreted summary PLUS the recent tool-result
     evidence (bounded), MINUS the seed task checklist HumanMessage.
 
@@ -125,7 +188,9 @@ def _compact_messages_after_interpret(state: AgentState, ledger: dict, observati
         summary_lines.append("- Evidence found: " + "; ".join(evidence_found))
     confirmed = _coerce_confirmed_findings(ledger.get("confirmed_findings"), limit=8)
     if confirmed:
-        summary_lines.append("- Confirmed findings: " + "; ".join(f["summary"] for f in confirmed))
+        summary_lines.append(
+            "- Confirmed findings: " + "; ".join(f["summary"] for f in confirmed)
+        )
     gaps = _coerce_string_list(ledger.get("remaining_gaps"), limit=8)
     if gaps:
         summary_lines.append("- Remaining gaps: " + "; ".join(gaps))
@@ -137,6 +202,8 @@ def _compact_messages_after_interpret(state: AgentState, ledger: dict, observati
     compact.append(HumanMessage(content="\n".join(summary_lines)))
     compact.extend(evidence)
     return compact
+
+
 def _format_interpret_note(ledger: dict, observation: dict, status: str) -> str:
     lines = [
         f"Status: {status}",
@@ -159,10 +226,14 @@ def _format_interpret_note(ledger: dict, observation: dict, status: str) -> str:
     if trials:
         by_outcome: dict[str, int] = {}
         for t in trials:
-            by_outcome[t["outcome"]] = by_outcome.get(t["outcome"], 0) + t.get("count", 1)
+            by_outcome[t["outcome"]] = by_outcome.get(t["outcome"], 0) + t.get(
+                "count", 1
+            )
         tally = ", ".join(f"{k}={v}" for k, v in sorted(by_outcome.items()))
         lines.append(f"Trials: {len(trials)} distinct ({tally})")
     return "\n".join(lines)
+
+
 async def interpret(state: AgentState, config) -> dict:
     """Interpret the most recent tool-result batch before allowing another action."""
     src = src_label(state["agent_name"])
@@ -185,8 +256,13 @@ async def interpret(state: AgentState, config) -> dict:
     # the observed 29-52 cycle "wander". Injected as a signal (like STUCK) so it steers this
     # cycle's model call and the deterministic fallback; the remedy is CONVERGE, not re-query.
     no_progress_cycles = state.get("no_progress_cycles", 0) or 0
-    if no_progress_cycles >= _NO_PROGRESS_BRAKE_CYCLES and "NO_PROGRESS" not in (observation.get("signals") or []):
-        observation = {**observation, "signals": [*(observation.get("signals") or []), "NO_PROGRESS"]}
+    if no_progress_cycles >= _NO_PROGRESS_BRAKE_CYCLES and "NO_PROGRESS" not in (
+        observation.get("signals") or []
+    ):
+        observation = {
+            **observation,
+            "signals": [*(observation.get("signals") or []), "NO_PROGRESS"],
+        }
     # The outcome-annotated trial history accumulates across the WHOLE task (not reset on
     # advancement) so the interpreter can reason over every discriminator/window it has
     # tried and what each returned.
@@ -198,9 +274,14 @@ async def interpret(state: AgentState, config) -> dict:
     # Inject a STUCK signal so the prompt, the fallback, and _default_instruction all steer
     # toward a change of approach instead of echoing the dead plan. (Harmless if the task
     # then completes: _compose_instruction returns the report instruction when ready.)
-    stuck = observation_retries >= _STUCK_RETRIES and not observation.get("advanced_objective")
+    stuck = observation_retries >= _STUCK_RETRIES and not observation.get(
+        "advanced_objective"
+    )
     if stuck and "STUCK" not in (observation.get("signals") or []):
-        observation = {**observation, "signals": [*(observation.get("signals") or []), "STUCK"]}
+        observation = {
+            **observation,
+            "signals": [*(observation.get("signals") or []), "STUCK"],
+        }
 
     updated_ledger, status = _fallback_interpretation(
         ledger, observation, observation_retries, is_triage=is_triage
@@ -210,6 +291,7 @@ async def interpret(state: AgentState, config) -> dict:
     # from the model). Surfaced prominently so interpret dispositions them per-cycle.
     try:
         from ..validation import _board_compromise_facts
+
         compromise_facts = _board_compromise_facts(state)
     except Exception:
         compromise_facts = []
@@ -223,13 +305,22 @@ async def interpret(state: AgentState, config) -> dict:
                 "unqueried_clusters": _unqueried_post_peak_clusters(_msgs),
                 "unqueried_time_ranges": _unqueried_time_ranges(_msgs),
             }
-            response = await model.ainvoke([
-                SystemMessage(content=_interpret_system_prompt()),
-                HumanMessage(content=_interpret_context(
-                    task, ledger, observation, extra_context, tool_outputs,
-                    compromise_facts, coverage,
-                )),
-            ])
+            response = await model.ainvoke(
+                [
+                    SystemMessage(content=_interpret_system_prompt()),
+                    HumanMessage(
+                        content=_interpret_context(
+                            task,
+                            ledger,
+                            observation,
+                            extra_context,
+                            tool_outputs,
+                            compromise_facts,
+                            coverage,
+                        )
+                    ),
+                ]
+            )
             parsed = _parse_interpretation_text(getattr(response, "content", "") or "")
             if isinstance(parsed, dict):
                 # Triage completion flows from the model's OWN stop vote (same path as
@@ -243,10 +334,18 @@ async def interpret(state: AgentState, config) -> dict:
                     ledger, observation, parsed, action, observation_retries, is_triage
                 )
         except Exception as exc:
-            emit(src, "warning", "interpretation model failed; using deterministic fallback", detail=str(exc))
+            emit(
+                src,
+                "warning",
+                "interpretation model failed; using deterministic fallback",
+                detail=str(exc),
+            )
 
     reconciled_action, status = _reconcile_terminal_action(
-        observation, str(updated_ledger.get("next_action") or ""), status, updated_ledger
+        observation,
+        str(updated_ledger.get("next_action") or ""),
+        status,
+        updated_ledger,
     )
     updated_ledger["next_action"] = reconciled_action
     ready = status == "ready_to_assess"
@@ -261,7 +360,11 @@ async def interpret(state: AgentState, config) -> dict:
             updated_ledger["forbidden_repeats"] = _merge_string_lists(
                 updated_ledger.get("forbidden_repeats"), [exhausted], limit=8
             )
-    provided = "" if (stuck and not ready) else (updated_ledger.get("next_step_instruction") or "")
+    provided = (
+        ""
+        if (stuck and not ready)
+        else (updated_ledger.get("next_step_instruction") or "")
+    )
     # Recompose the instruction whenever the action changed under reconciliation, or the
     # task is wrapping up, so the imperative always matches the final action.
     updated_ledger["next_step_instruction"] = _compose_instruction(
@@ -275,18 +378,28 @@ async def interpret(state: AgentState, config) -> dict:
         updated_ledger["blocker"] = ""
         if not updated_ledger.get("stop_reason"):
             updated_ledger["stop_reason"] = (
-                updated_ledger.get("evidence_summary") or observation.get("summary") or ""
+                updated_ledger.get("evidence_summary")
+                or observation.get("summary")
+                or ""
             )
 
     # Advance the convergence counter for the next cycle: reset when this cycle crystallized a
     # NEW confirmed finding (genuine progress) or the task is wrapping up; otherwise increment.
     # This is the state the NO_PROGRESS brake reads at the top of the next cycle.
     prior_findings = len(_coerce_confirmed_findings(ledger.get("confirmed_findings")))
-    new_findings = len(_coerce_confirmed_findings(updated_ledger.get("confirmed_findings")))
-    next_no_progress = 0 if (ready or new_findings > prior_findings) else no_progress_cycles + 1
+    new_findings = len(
+        _coerce_confirmed_findings(updated_ledger.get("confirmed_findings"))
+    )
+    next_no_progress = (
+        0 if (ready or new_findings > prior_findings) else no_progress_cycles + 1
+    )
 
     no_new_evidence = "NO_NEW_EVIDENCE" in set(observation.get("signals") or [])
-    next_retries = observation_retries + 1 if (no_new_evidence or not observation.get("advanced_objective")) else 0
+    next_retries = (
+        observation_retries + 1
+        if (no_new_evidence or not observation.get("advanced_objective"))
+        else 0
+    )
 
     emit(
         src,
@@ -303,15 +416,11 @@ async def interpret(state: AgentState, config) -> dict:
     }
     if ready:
         # Wrap-up path: keep the compacted, interpreted evidence for the report writer.
-        result["messages"] = _compact_messages_after_interpret(state, updated_ledger, observation)
+        result["messages"] = _summarize_messages_after_interpret(
+            state, updated_ledger, observation
+        )
     else:
         # Continuation path: keep the accumulated history so the model that picks the
-        # next tool call can SEE its own prior evidence. This used to return [] because
-        # replaying the history re-injected the task's numbered startup checklist as
-        # message[1], and small models restarted orientation every cycle. That conflated
-        # two things sharing one list: INSTRUCTIONS (harmful to replay) and EVIDENCE
-        # (essential to retain). `think` now separates them — the anchor is written once
-        # and ledger steering is transient — so the history can be kept without the
-        # checklist coming back with it.
+        # next tool call can SEE its own prior evidence.
         result["messages"] = list(state.get("messages") or [])
     return result

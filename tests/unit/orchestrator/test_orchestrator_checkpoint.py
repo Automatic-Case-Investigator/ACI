@@ -12,6 +12,7 @@ No real Wazuh, TheHive, LLM, or AVFS needed.
 Run from project root with:
     python .claude/skills/run-aci-backend/tests/test_orchestrator_checkpoint.py
 """
+
 from __future__ import annotations
 
 import os
@@ -21,7 +22,9 @@ import tempfile
 import unittest
 
 # Navigate from .claude/skills/run-aci-backend/tests/ up to project root (4 levels)
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, project_root)
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
 os.environ["SECRET_KEY"] = "test"
@@ -29,10 +32,15 @@ os.environ["TASKQUEUE_DB_PATH"] = tempfile.mktemp(suffix=".db")
 os.environ["BOARD_DB_PATH"] = tempfile.mktemp(suffix=".db")
 
 import django
+
 django.setup()
 
 import agent.runtime.orchestrator as orchestrator
-from agent.runtime.orchestrator import OrchestratorSession, _analyst_requested_investigation, run_orchestrator
+from agent.runtime.orchestrator import (
+    OrchestratorSession,
+    _analyst_requested_investigation,
+    run_orchestrator,
+)
 
 
 class AnalystRequestedInvestigationTest(unittest.TestCase):

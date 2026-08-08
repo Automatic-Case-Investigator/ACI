@@ -12,6 +12,7 @@ events, the graph calls the correlation tool, writes the grounded neighborhood t
 the findings board, and the model reasons over the result instead of choosing to
 produce it. This module holds the pure, testable pieces of that step.
 """
+
 from __future__ import annotations
 
 import json
@@ -40,7 +41,7 @@ _MATCH_FIELDS = {
 
 # Bounds so a noisy broad sweep cannot trigger unbounded SIEM correlation work.
 MAX_CORRELATIONS = 10  # per run (raised slightly to accommodate hop-2 discoveries)
-MAX_PER_BATCH = 3      # seed entities per tool result
+MAX_PER_BATCH = 3  # seed entities per tool result
 # Multi-hop expansion (Fix #2): when correlating an entity surfaces NEW high-value
 # entities among its neighbors, correlate those too — a bounded breadth-first walk
 # that assembles the connected incident graph instead of isolated 1-hop cards.
@@ -52,8 +53,11 @@ MAX_HOP_DEPTH = 2
 # correlation result (so a brute-force srcip whose neighbor is a dstuser expands to
 # that user). Hosts are intentionally absent (see _CORRELATABLE_KINDS).
 _NEIGHBOR_FIELD_KIND = {
-    "data.srcip": "ip", "data.dstip": "ip",
-    "data.srcuser": "user", "data.dstuser": "user", "data.user": "user",
+    "data.srcip": "ip",
+    "data.dstip": "ip",
+    "data.srcuser": "user",
+    "data.dstuser": "user",
+    "data.user": "user",
 }
 
 # Values that are never useful correlation targets.
@@ -131,8 +135,13 @@ def corr_dedup_key(kind: str, value: str) -> str:
     return f"corr:{kind}:{value.lower()}"
 
 
-def select_targets(artifacts, *, covered: set[str], remaining_budget: int,
-                   max_per_batch: int = MAX_PER_BATCH) -> list[tuple[str, str, str]]:
+def select_targets(
+    artifacts,
+    *,
+    covered: set[str],
+    remaining_budget: int,
+    max_per_batch: int = MAX_PER_BATCH,
+) -> list[tuple[str, str, str]]:
     """Pick (kind, value, field) entities to correlate from a batch of artifacts.
 
     Deduped within the batch, skips entities already covered this run, ordered by
@@ -203,7 +212,7 @@ def _render_neighbors(neighbors: dict, max_fields: int = 6, max_vals: int = 3) -
     for field, entries in list(neighbors.items())[:max_fields]:
         vals = []
         for e in entries[:max_vals]:
-            ev = (e.get("event_ids") or [])
+            ev = e.get("event_ids") or []
             anchor = f"[{ev[0]}]" if ev else ""
             vals.append(f"{e.get('value')}×{e.get('count')}{anchor}")
         if vals:
@@ -211,8 +220,9 @@ def _render_neighbors(neighbors: dict, max_fields: int = 6, max_vals: int = 3) -
     return "; ".join(parts)
 
 
-def summarize_correlation(kind: str, value: str, result_raw: str,
-                          via: str | None = None) -> tuple[str, int, bool]:
+def summarize_correlation(
+    kind: str, value: str, result_raw: str, via: str | None = None
+) -> tuple[str, int, bool]:
     """Render a correlate_entity result into a compact board line.
 
     `via` records how this entity was discovered (the parent entity in the
@@ -226,7 +236,11 @@ def summarize_correlation(kind: str, value: str, result_raw: str,
         r = None
     provenance = f" (via {via})" if via else ""
     if not isinstance(r, dict) or "neighbors" not in r:
-        return (f"correlation[{field_for(kind)} {value}]{provenance}: no neighborhood returned", 0, False)
+        return (
+            f"correlation[{field_for(kind)} {value}]{provenance}: no neighborhood returned",
+            0,
+            False,
+        )
 
     neighbors = r.get("neighbors") or {}
     total = r.get("total_events", 0)
@@ -234,7 +248,9 @@ def summarize_correlation(kind: str, value: str, result_raw: str,
     last = (r.get("last_seen") or "")[:19]
     span = f" ({first}→{last})" if first or last else ""
     body = _render_neighbors(neighbors)
-    content = f"correlation[{field_for(kind)} {value}]{provenance} {total} ev{span}: {body}"
+    content = (
+        f"correlation[{field_for(kind)} {value}]{provenance} {total} ev{span}: {body}"
+    )
 
     cross = r.get("cross_role") or {}
     has_cross = bool(cross.get("neighbors"))

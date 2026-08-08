@@ -5,18 +5,22 @@ Verifies the no-auto-promotion rule: a contradicting tp/fp correction spawns a
 PENDING candidate, never a live PatternEntry. Run from project root with:
     python .claude/skills/run-aci-backend/tests/test_feedback_loop.py -v
 """
+
 from __future__ import annotations
 
 import os
 import sys
 import unittest
 
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, project_root)
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
 os.environ.setdefault("SECRET_KEY", "test")
 
 import django
+
 django.setup()
 
 from agent.models import AgentRun, FeedbackEntry, PatternCandidate, PatternEntry
@@ -33,17 +37,25 @@ class TestFeedbackLoop(unittest.TestCase):
             agent_name="triage",
             question="what happened?",
             status=AgentRun.STATUS_COMPLETED,
-            verdict={"verdict": "tp", "confidence": "medium", "supporting_evidence": ["e1"]},
+            verdict={
+                "verdict": "tp",
+                "confidence": "medium",
+                "supporting_evidence": ["e1"],
+            },
         )
 
     def tearDown(self):
-        PatternCandidate.objects.filter(name__startswith="Review: case " + MARK).delete()
+        PatternCandidate.objects.filter(
+            name__startswith="Review: case " + MARK
+        ).delete()
         FeedbackEntry.objects.filter(case_id__startswith=MARK).delete()
         PatternEntry.objects.filter(name__startswith="Review: case " + MARK).delete()
         self.run.delete()
 
     def test_agreement_records_feedback_no_candidate(self):
-        fb, candidate = record_feedback(self.run, analyst_verdict="tp", created_by="alice")
+        fb, candidate = record_feedback(
+            self.run, analyst_verdict="tp", created_by="alice"
+        )
         self.assertIsNotNone(fb.id)
         self.assertIsNone(candidate)
         self.assertEqual(fb.original_verdict["verdict"], "tp")
@@ -79,7 +91,9 @@ class TestFeedbackLoop(unittest.TestCase):
         record_feedback(self.run, analyst_verdict="fp", created_by="dave")
         # The candidate exists but is NOT a live pattern.
         self.assertFalse(
-            PatternEntry.objects.filter(name__startswith="Review: case " + MARK).exists()
+            PatternEntry.objects.filter(
+                name__startswith="Review: case " + MARK
+            ).exists()
         )
 
     def test_reassessment_does_not_duplicate_candidates(self):
@@ -96,9 +110,13 @@ class TestFeedbackLoop(unittest.TestCase):
 
     def test_reassessment_to_agreement_clears_candidate(self):
         # Disputing then confirming the agent verdict drops the pending candidate.
-        fb, candidate = record_feedback(self.run, analyst_verdict="fp", created_by="fred")
+        fb, candidate = record_feedback(
+            self.run, analyst_verdict="fp", created_by="fred"
+        )
         self.assertIsNotNone(candidate)
-        fb, candidate = record_feedback(self.run, analyst_verdict="tp", created_by="fred")
+        fb, candidate = record_feedback(
+            self.run, analyst_verdict="tp", created_by="fred"
+        )
         # Agent verdict is "tp"; confirming it is not a dispute → no candidate.
         self.assertIsNone(candidate)
         self.assertFalse(

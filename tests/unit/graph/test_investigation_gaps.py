@@ -10,6 +10,7 @@
    validator. Four of them duplicated the triage plan at priority 88, outranking the
    plan items they duplicated.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -20,20 +21,26 @@ import unittest
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
 os.environ.setdefault("SECRET_KEY", "test")
 project_root = os.path.dirname(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, project_root)
 import django  # noqa: E402
 
 django.setup()
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage  # noqa: E402
+from langchain_core.messages import (
+    AIMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)  # noqa: E402
 
 from agent.runtime.analysis.kill_chain import drop_covered_specs  # noqa: E402
 from agent.runtime.graph import nodes_loop  # noqa: E402
 from agent.runtime.graph.interpretation.prompt import _coverage_block  # noqa: E402
 
-
 # ── 1. the evidence floor on the think → assess path ────────────────────────────
+
 
 class _StubBound:
     def __init__(self, tools):
@@ -50,7 +57,9 @@ def _orientation_history():
     return [
         SystemMessage(content="SYS"),
         HumanMessage(content="# USER\nanchor"),
-        AIMessage(content="", tool_calls=[{"name": "list_tasks", "args": {}, "id": "c1"}]),
+        AIMessage(
+            content="", tool_calls=[{"name": "list_tasks", "args": {}, "id": "c1"}]
+        ),
         ToolMessage(content="[]", tool_call_id="c1", name="list_tasks"),
     ]
 
@@ -72,26 +81,39 @@ class ThinkEvidenceFloorTest(unittest.TestCase):
 
     def _state(self, **over):
         base = dict(
-            agent_name="investigation", messages=_orientation_history(),
-            current_task={"title": "t", "description": "d"}, task_ledger={},
-            tool_calls_made=4, task_call_floor=0, max_tool_calls=60,
-            ctx_tokens=0, steps=3, default_vicinity_window_hours=24,
-            case_id="~1", run_id="r1",
+            agent_name="investigation",
+            messages=_orientation_history(),
+            current_task={"title": "t", "description": "d"},
+            task_ledger={},
+            tool_calls_made=4,
+            task_call_floor=0,
+            max_tool_calls=60,
+            ctx_tokens=0,
+            steps=3,
+            default_vicinity_window_hours=24,
+            case_id="~1",
+            run_id="r1",
         )
         base.update(over)
         return base
 
     def _config(self):
-        return {"configurable": {"model": _StubModel(), "tools": [], "system_prompt": "SYS"}}
+        return {
+            "configurable": {"model": _StubModel(), "tools": [], "system_prompt": "SYS"}
+        }
 
     def test_a_zero_evidence_conclusion_is_pushed_back_to_the_siem(self):
         self._replies = [
             AIMessage(content="## Findings\n- restated from an earlier task"),
-            AIMessage(content="", tool_calls=[{"name": "search", "args": {}, "id": "c2"}]),
+            AIMessage(
+                content="", tool_calls=[{"name": "search", "args": {}, "id": "c2"}]
+            ),
         ]
         out = asyncio.run(nodes_loop.think(self._state(), self._config()))
-        self.assertTrue(getattr(out["messages"][-1], "tool_calls", None),
-                        "floor must convert the conclusion into an evidence query")
+        self.assertTrue(
+            getattr(out["messages"][-1], "tool_calls", None),
+            "floor must convert the conclusion into an evidence query",
+        )
         nudge = "\n".join(str(getattr(m, "content", "")) for m in self._sent[-1])
         self.assertIn("without having run a single SIEM evidence query", nudge)
 
@@ -107,7 +129,9 @@ class ThinkEvidenceFloorTest(unittest.TestCase):
 
     def test_a_task_with_evidence_is_left_alone(self):
         history = _orientation_history() + [
-            AIMessage(content="", tool_calls=[{"name": "search", "args": {}, "id": "c9"}]),
+            AIMessage(
+                content="", tool_calls=[{"name": "search", "args": {}, "id": "c9"}]
+            ),
             ToolMessage(content='{"total": 2}', tool_call_id="c9", name="search"),
         ]
         self._replies = [AIMessage(content="## Findings\n- grounded")]
@@ -123,12 +147,15 @@ class ThinkEvidenceFloorTest(unittest.TestCase):
 
 # ── 2. coverage gaps reach the completion judge ─────────────────────────────────
 
+
 class CoverageBlockTest(unittest.TestCase):
     def test_unqueried_spans_are_stated_as_blocking_completion(self):
-        text = _coverage_block({
-            "unqueried_time_ranges": ["2022-01-18T13:00:00Z..2022-01-18T18:00:00Z"],
-            "unqueried_post_peak_clusters": [],
-        })
+        text = _coverage_block(
+            {
+                "unqueried_time_ranges": ["2022-01-18T13:00:00Z..2022-01-18T18:00:00Z"],
+                "unqueried_post_peak_clusters": [],
+            }
+        )
         self.assertIn("2022-01-18T13:00:00Z", text)
         self.assertIn("NOT done", text)
 
@@ -141,25 +168,49 @@ class CoverageBlockTest(unittest.TestCase):
         self.assertEqual(_coverage_block({}), "")
         self.assertEqual(_coverage_block(None), "")
         self.assertEqual(
-            _coverage_block({"unqueried_clusters": [], "unqueried_time_ranges": []}), "")
+            _coverage_block({"unqueried_clusters": [], "unqueried_time_ranges": []}), ""
+        )
 
 
 # ── 3. gap leads do not duplicate the queued plan ───────────────────────────────
 
+
 class GapLeadDedupTest(unittest.TestCase):
     def _specs(self):
         return [
-            {"tactic": "Execution", "priority": 88, "title": "Trace forward to Execution on h"},
-            {"tactic": "Command and Control", "priority": 88, "title": "Trace forward to C2 on h"},
-            {"tactic": "Exfiltration", "priority": 88, "title": "Trace forward to Exfiltration on h"},
-            {"tactic": "Impact", "priority": 88, "title": "Trace forward to Impact on h"},
+            {
+                "tactic": "Execution",
+                "priority": 88,
+                "title": "Trace forward to Execution on h",
+            },
+            {
+                "tactic": "Command and Control",
+                "priority": 88,
+                "title": "Trace forward to C2 on h",
+            },
+            {
+                "tactic": "Exfiltration",
+                "priority": 88,
+                "title": "Trace forward to Exfiltration on h",
+            },
+            {
+                "tactic": "Impact",
+                "priority": 88,
+                "title": "Trace forward to Impact on h",
+            },
         ]
 
     def test_the_live_duplication_is_dropped(self):
         # The triage plan already queued an execution item and a C2/callback item.
         queued = [
-            {"title": "Confirm or refute execution after the SSH successes", "description": ""},
-            {"title": "Trace C2 or outbound callback from 172.17.130.196", "description": ""},
+            {
+                "title": "Confirm or refute execution after the SSH successes",
+                "description": "",
+            },
+            {
+                "title": "Trace C2 or outbound callback from 172.17.130.196",
+                "description": "",
+            },
         ]
         kept = [s["tactic"] for s in drop_covered_specs(self._specs(), queued)]
         self.assertEqual(kept, ["Exfiltration", "Impact"])
@@ -173,7 +224,9 @@ class GapLeadDedupTest(unittest.TestCase):
         self.assertEqual(len(drop_covered_specs(self._specs(), [])), 4)
 
     def test_unrelated_tasks_drop_nothing(self):
-        queued = [{"title": "Retrieve syscheck diff for /etc/passwd", "description": ""}]
+        queued = [
+            {"title": "Retrieve syscheck diff for /etc/passwd", "description": ""}
+        ]
         self.assertEqual(len(drop_covered_specs(self._specs(), queued)), 4)
 
 

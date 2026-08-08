@@ -5,6 +5,7 @@ declared `kind` — so a new metric aggregates correctly without any edit here. 
 metric may override `Metric.aggregate` for bespoke behavior; this module honors
 that hook and otherwise applies the `kind` default.
 """
+
 from __future__ import annotations
 
 import statistics
@@ -30,7 +31,9 @@ def _default_rollup(kind: str, values: list) -> dict:
         per_key: dict[str, list[float]] = defaultdict(list)
         for d in values:
             for k, v in (d or {}).items():
-                per_key[k].append(1.0 if v is True else (0.0 if v is False else float(v)))
+                per_key[k].append(
+                    1.0 if v is True else (0.0 if v is False else float(v))
+                )
         rollup = {k: statistics.fmean(vs) for k, vs in per_key.items()}
         return {"per_key": rollup, "n": len(values)}
     raise ValueError(f"unknown MetricResult.kind: {kind!r}")

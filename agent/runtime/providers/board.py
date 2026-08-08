@@ -1,4 +1,5 @@
 """Findings Board provider (stdio subprocess)."""
+
 from __future__ import annotations
 
 import sys
@@ -10,7 +11,11 @@ from .registry import register
 
 
 def _defaults() -> dict:
-    return {"db_path": getattr(settings, "BOARD_DB_PATH", str(settings.BASE_DIR / "board.db"))}
+    return {
+        "db_path": getattr(
+            settings, "BOARD_DB_PATH", str(settings.BASE_DIR / "board.db")
+        )
+    }
 
 
 def _build(resolved: dict, run_ctx: dict | None = None) -> dict:
@@ -30,13 +35,15 @@ def _build(resolved: dict, run_ctx: dict | None = None) -> dict:
     }
 
 
-register(MCPProvider(
-    key="aci-board",
-    kind=KIND_UTILITY,
-    setting_defaults=_defaults,
-    build_config=_build,
-    capabilities={
-        "board_read_findings": ("list_entries",),
-        "board_write_findings": ("add_entry",),
-    },
-))
+register(
+    MCPProvider(
+        key="aci-board",
+        kind=KIND_UTILITY,
+        setting_defaults=_defaults,
+        build_config=_build,
+        capabilities={
+            "board_read_findings": ("list_entries",),
+            "board_write_findings": ("add_entry",),
+        },
+    )
+)

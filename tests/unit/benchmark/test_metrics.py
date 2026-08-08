@@ -2,27 +2,48 @@
 
 Pure functions of a ScoringContext — no Django, no live services.
 """
+
 from __future__ import annotations
 
 import os
 import sys
 import unittest
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, _ROOT)
 
 from benchmark import scoring  # noqa: E402
 from benchmark.scoring import ScenarioSpec, ScoringContext  # noqa: E402
 
-_SPEC = ScenarioSpec.from_dict({
-    "name": "toy",
-    "expected_verdict": {"verdict": "tp", "severity": "critical", "scope": ["wazuh-client"]},
-    "phases": [
-        {"name": "webshell", "start": "2022-01-18T12:38:00Z", "end": "2022-01-18T12:38:30Z"},
-        {"name": "dnsteal", "start": "2022-01-18T13:00:00Z", "end": "2022-01-18T13:10:00Z"},
-        {"name": "network_scans", "start": "2022-01-18T11:59:00Z", "end": "2022-01-18T12:17:00Z"},
-    ],
-})
+_SPEC = ScenarioSpec.from_dict(
+    {
+        "name": "toy",
+        "expected_verdict": {
+            "verdict": "tp",
+            "severity": "critical",
+            "scope": ["wazuh-client"],
+        },
+        "phases": [
+            {
+                "name": "webshell",
+                "start": "2022-01-18T12:38:00Z",
+                "end": "2022-01-18T12:38:30Z",
+            },
+            {
+                "name": "dnsteal",
+                "start": "2022-01-18T13:00:00Z",
+                "end": "2022-01-18T13:10:00Z",
+            },
+            {
+                "name": "network_scans",
+                "start": "2022-01-18T11:59:00Z",
+                "end": "2022-01-18T12:17:00Z",
+            },
+        ],
+    }
+)
 
 
 def _score(metric, *, report="", verdict=None, meta=None):
@@ -39,7 +60,7 @@ class VerdictCorrectnessTest(unittest.TestCase):
 
     def test_under_call_flagged(self):
         r = _score("verdict_correctness", verdict={"verdict": "needs_investigation"})
-        self.assertFalse(r.value)                 # not a match
+        self.assertFalse(r.value)  # not a match
         self.assertTrue(r.detail["under_called"])  # expected tp, called weaker
 
     def test_wrong_disposition(self):
@@ -52,8 +73,8 @@ class ConfidentFalseNegativeTest(unittest.TestCase):
         # webshell + dnsteal are ground truth; the report confidently denies exfiltration.
         report = "The webshell was confirmed. No evidence of exfiltration was found."
         r = _score("confident_false_negative", report=report)
-        self.assertTrue(r.value["dnsteal"])      # denied a phase that occurred
-        self.assertFalse(r.value["webshell"])    # confirmed, not denied
+        self.assertTrue(r.value["dnsteal"])  # denied a phase that occurred
+        self.assertFalse(r.value["webshell"])  # confirmed, not denied
         self.assertEqual(r.detail["count"], 1)
 
     def test_does_not_flag_absence_of_a_non_ground_truth_tactic(self):
@@ -82,23 +103,31 @@ class ConfidentFalseNegativeTest(unittest.TestCase):
 
     def test_webshell_specific_denial_is_still_flagged(self):
         # A genuine confident denial of the webshell phase must still fire.
-        r = _score("confident_false_negative",
-                   report="No evidence of a webshell was found on the host.")
+        r = _score(
+            "confident_false_negative",
+            report="No evidence of a webshell was found on the host.",
+        )
         self.assertTrue(r.value["webshell"])
 
 
 class CostToVerdictTest(unittest.TestCase):
     def test_reads_tokens_from_meta(self):
-        r = _score("cost_to_verdict", meta={"status": "completed",
-                                            "tokens": {"input": 5_000_000, "output": 50_000,
-                                                       "model_calls": 120}})
+        r = _score(
+            "cost_to_verdict",
+            meta={
+                "status": "completed",
+                "tokens": {"input": 5_000_000, "output": 50_000, "model_calls": 120},
+            },
+        )
         self.assertEqual(r.value["input_tokens"], 5_000_000)
         self.assertEqual(r.value["output_tokens"], 50_000)
         self.assertEqual(r.value["model_calls"], 120)
 
     def test_missing_tokens_is_zero(self):
         r = _score("cost_to_verdict", meta={})
-        self.assertEqual(r.value, {"input_tokens": 0, "output_tokens": 0, "model_calls": 0})
+        self.assertEqual(
+            r.value, {"input_tokens": 0, "output_tokens": 0, "model_calls": 0}
+        )
 
 
 if __name__ == "__main__":

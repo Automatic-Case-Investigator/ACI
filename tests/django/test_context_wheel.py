@@ -4,6 +4,7 @@ Covers the three things that made the wheel show a wrong number or cost too much
 to show: which run's reading is picked, that the warning band travels with the
 payload, and that deleting a session drops its readings.
 """
+
 from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
 from django.db import connection
@@ -18,7 +19,9 @@ from agent.runtime.infra import logbus
 class GetCtxTests(TestCase):
     def setUp(self):
         self.orch = AgentRun.objects.create(
-            agent_name="orchestrator", case_id="~1", question="q",
+            agent_name="orchestrator",
+            case_id="~1",
+            question="q",
             status=AgentRun.STATUS_RUNNING,
         )
         self.sid = str(self.orch.id)
@@ -47,8 +50,11 @@ class GetCtxTests(TestCase):
 
     def test_running_specialist_reading_wins(self):
         inv = AgentRun.objects.create(
-            agent_name="investigation", case_id="~1", question="q",
-            status=AgentRun.STATUS_RUNNING, metadata={"session_id": self.sid},
+            agent_name="investigation",
+            case_id="~1",
+            question="q",
+            status=AgentRun.STATUS_RUNNING,
+            metadata={"session_id": self.sid},
         )
         self._record(self.sid, 10000, "orch")
         self._record(str(inv.id), 90000, "inv")
@@ -61,15 +67,21 @@ class GetCtxTests(TestCase):
         # A just-spawned specialist has no reading yet. The wheel should hold the
         # freshest number in the session rather than resetting to empty.
         inv_done = AgentRun.objects.create(
-            agent_name="investigation", case_id="~1", question="q",
-            status=AgentRun.STATUS_COMPLETED, metadata={"session_id": self.sid},
+            agent_name="investigation",
+            case_id="~1",
+            question="q",
+            status=AgentRun.STATUS_COMPLETED,
+            metadata={"session_id": self.sid},
         )
         self._record(self.sid, 10000, "orch")
         self._record(str(inv_done.id), 77000, "inv")
 
         AgentRun.objects.create(
-            agent_name="triage", case_id="~1", question="q",
-            status=AgentRun.STATUS_RUNNING, metadata={"session_id": self.sid},
+            agent_name="triage",
+            case_id="~1",
+            question="q",
+            status=AgentRun.STATUS_RUNNING,
+            metadata={"session_id": self.sid},
         )
         ctx = runner.get_ctx(self.sid)
         self.assertEqual(ctx["tokens"], 77000)
@@ -90,11 +102,15 @@ class GetCtxTests(TestCase):
 class DeletePurgesContextTests(TestCase):
     def test_deleting_a_session_clears_its_readings(self):
         orch = AgentRun.objects.create(
-            agent_name="orchestrator", case_id="~1", question="q",
+            agent_name="orchestrator",
+            case_id="~1",
+            question="q",
         )
         sid = str(orch.id)
         inv = AgentRun.objects.create(
-            agent_name="investigation", case_id="~1", question="q",
+            agent_name="investigation",
+            case_id="~1",
+            question="q",
             metadata={"session_id": sid},
         )
         for run_id, tokens in ((sid, 100), (str(inv.id), 200)):

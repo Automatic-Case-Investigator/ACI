@@ -1,4 +1,5 @@
 """Run finalization: `finish`, the verdict contract, verdict reassessment, and durable publication."""
+
 from __future__ import annotations
 
 from ....workspace.avfs_writer import write_file
@@ -19,13 +20,20 @@ from langchain_core.messages import HumanMessage, SystemMessage
 import asyncio
 import json
 
-from ._const import _REASSESS_TIMEOUT_SECS, _VERDICT_CONTRACT_TIMEOUT_SECS, _VERDICT_FENCE_RE, _VERDICT_REPAIR_TIMEOUT_SECS
+from ._const import (
+    _REASSESS_TIMEOUT_SECS,
+    _VERDICT_CONTRACT_TIMEOUT_SECS,
+    _VERDICT_FENCE_RE,
+    _VERDICT_REPAIR_TIMEOUT_SECS,
+)
 from ._shared import _checkpoint_run
 
 
 def _format_verdict_block(verdict: dict) -> str:
     """Render the canonical fenced JSON block appended to final reports."""
     return "```json\n" + json.dumps(verdict, indent=2, ensure_ascii=False) + "\n```"
+
+
 def _strip_trailing_verdict_block(text: str) -> str:
     """Remove a trailing fenced verdict JSON block so the canonical one is unique."""
     current = (text or "").rstrip()
@@ -42,11 +50,19 @@ def _strip_trailing_verdict_block(text: str) -> str:
             return current
         if not isinstance(obj, dict) or "verdict" not in obj:
             return current
-        current = current[:last.start()].rstrip()
+        current = current[: last.start()].rstrip()
+
+
 def _attach_verdict_block(final_answer: str, verdict: dict) -> str:
     """Ensure the final answer ends with exactly one canonical verdict block."""
     base = _strip_trailing_verdict_block(final_answer)
-    return base.rstrip() + ("\n\n" if base.strip() else "") + _format_verdict_block(verdict)
+    return (
+        base.rstrip()
+        + ("\n\n" if base.strip() else "")
+        + _format_verdict_block(verdict)
+    )
+
+
 def _apply_verdict_policies(
     state: AgentState,
     verdict: dict,
@@ -76,13 +92,21 @@ def _apply_verdict_policies(
         emit(src, kind, msg)
     if not notes:
         if verdict.get("nonblocking_gaps"):
-            emit(src, "note",
-                 f"verdict {verdict.get('verdict','').upper()} accepted with "
-                 "nonblocking gaps")
-        emit(src, "note",
-             f"verdict: {verdict.get('verdict','').upper()} "
-             f"({verdict.get('confidence','?')})")
+            emit(
+                src,
+                "note",
+                f"verdict {verdict.get('verdict','').upper()} accepted with "
+                "nonblocking gaps",
+            )
+        emit(
+            src,
+            "note",
+            f"verdict: {verdict.get('verdict','').upper()} "
+            f"({verdict.get('confidence','?')})",
+        )
     return verdict
+
+
 async def finish(state: AgentState, config) -> dict:
     src = src_label(state["agent_name"])
     _emit_node_entry(src, "finish", state)
@@ -90,7 +114,8 @@ async def finish(state: AgentState, config) -> dict:
         emit(src, "done", "cancelled")
         return {
             "status": "cancelled",
-            "final_answer": state.get("final_answer") or f"{state['agent_name']} cancelled.",
+            "final_answer": state.get("final_answer")
+            or f"{state['agent_name']} cancelled.",
         }
 
     tools = config["configurable"]["tools"]
@@ -115,13 +140,18 @@ async def finish(state: AgentState, config) -> dict:
                     break
             note = (
                 "[Budget exhausted — partial findings]\n\n" + partial
-                if partial else
-                "[Budget exhausted — no findings recorded for this task]"
+                if partial
+                else "[Budget exhausted — no findings recorded for this task]"
             )
-            await _call(complete_fn, {"task_id": current_task["id"], "summary": note}, _dbg=src)
-            emit(src, "note",
-                 f"budget: saved partial work for "
-                 f"'{(current_task.get('title') or current_task['id'])[:60]}'")
+            await _call(
+                complete_fn, {"task_id": current_task["id"], "summary": note}, _dbg=src
+            )
+            emit(
+                src,
+                "note",
+                f"budget: saved partial work for "
+                f"'{(current_task.get('title') or current_task['id'])[:60]}'",
+            )
 
     # Build a structured investigation summary so the orchestrator and analyst
     # always receive complete findings, not just the last task's answer.
@@ -139,14 +169,19 @@ async def finish(state: AgentState, config) -> dict:
         result=final_answer,
         phase="finish",
     )
-    emit(src, "done",
-         f"{status} (steps={state['steps']}/{state['max_steps']}, "
-         f"calls={state['tool_calls_made']}/{state['max_tool_calls']})")
+    emit(
+        src,
+        "done",
+        f"{status} (steps={state['steps']}/{state['max_steps']}, "
+        f"calls={state['tool_calls_made']}/{state['max_tool_calls']})",
+    )
     return {
         "status": status,
         "final_answer": final_answer,
         "verdict": None,
     }
+
+
 async def verdict_contract(state: AgentState, config) -> dict:
     """Triage/investigation node that creates the canonical verdict contract.
 
@@ -166,14 +201,23 @@ async def verdict_contract(state: AgentState, config) -> dict:
 
     if model is None:
         verdict = parse_verdict(final_answer)
-        problems = validate_verdict(verdict) if verdict is not None else ["missing verdict"]
+        problems = (
+            validate_verdict(verdict) if verdict is not None else ["missing verdict"]
+        )
         if verdict is None or problems:
-            emit(src, "error", f"missing valid {state['agent_name']} verdict contract and no model available")
+            emit(
+                src,
+                "error",
+                f"missing valid {state['agent_name']} verdict contract and no model available",
+            )
             return {"status": "failed", "verdict": None, "final_answer": final_answer}
         verdict = _apply_verdict_policies(
             state, verdict, final_answer, normalize_followups=True
         )
-        return {"verdict": verdict, "final_answer": _attach_verdict_block(final_answer, verdict)}
+        return {
+            "verdict": verdict,
+            "final_answer": _attach_verdict_block(final_answer, verdict),
+        }
 
     system = (
         "You are a senior SOC verdict controller. Return ONLY a fenced JSON "
@@ -235,16 +279,22 @@ async def verdict_contract(state: AgentState, config) -> dict:
 
     try:
         resp = await asyncio.wait_for(
-            model.bind_tools([]).ainvoke([
-                SystemMessage(content=system),
-                HumanMessage(content=prompt),
-            ]),
+            model.bind_tools([]).ainvoke(
+                [
+                    SystemMessage(content=system),
+                    HumanMessage(content=prompt),
+                ]
+            ),
             timeout=_VERDICT_CONTRACT_TIMEOUT_SECS,
         )
         _sanitize_message(resp)
         contract_text = (getattr(resp, "content", "") or "").strip()
     except asyncio.TimeoutError:
-        emit(src, "error", f"verdict contract timed out ({_VERDICT_CONTRACT_TIMEOUT_SECS}s)")
+        emit(
+            src,
+            "error",
+            f"verdict contract timed out ({_VERDICT_CONTRACT_TIMEOUT_SECS}s)",
+        )
         return {"status": "failed", "verdict": None, "final_answer": final_answer}
     except Exception as exc:
         emit(src, "error", f"verdict contract failed ({exc})")
@@ -275,18 +325,34 @@ async def verdict_contract(state: AgentState, config) -> dict:
         "verdict": verdict,
         "final_answer": _attach_verdict_block(final_answer, verdict),
     }
-async def _repair_verdict_output(state: AgentState, config, final_answer: str, verdict, problems: list[str]) -> tuple[str, dict | None, list[str]]:
+
+
+async def _repair_verdict_output(
+    state: AgentState, config, final_answer: str, verdict, problems: list[str]
+) -> tuple[str, dict | None, list[str]]:
     """Attempt one text-only repair pass for a missing/invalid verdict contract."""
     src = src_label(state["agent_name"])
     model = config["configurable"].get("model")
     sys_prompt = config["configurable"].get("system_prompt", "")
     if model is None:
         if verdict is None:
-            emit(src, "warning", "missing structured verdict and no model available for repair")
+            emit(
+                src,
+                "warning",
+                "missing structured verdict and no model available for repair",
+            )
         else:
-            emit(src, "warning", "invalid structured verdict and no model available for repair")
+            emit(
+                src,
+                "warning",
+                "invalid structured verdict and no model available for repair",
+            )
         return final_answer, verdict, problems
-    issue = "missing structured verdict block" if verdict is None else f"invalid verdict block: {'; '.join(problems)}"
+    issue = (
+        "missing structured verdict block"
+        if verdict is None
+        else f"invalid verdict block: {'; '.join(problems)}"
+    )
     emit(src, "warning", f"attempting verdict repair ({issue[:200]})")
     prompt = (
         "Your previous final answer did not produce a valid diagnosis verdict contract. "
@@ -313,28 +379,42 @@ async def _repair_verdict_output(state: AgentState, config, final_answer: str, v
     )
     try:
         resp = await asyncio.wait_for(
-            model.bind_tools([]).ainvoke([
-                SystemMessage(content=sys_prompt),
-                HumanMessage(content=prompt),
-            ]),
+            model.bind_tools([]).ainvoke(
+                [
+                    SystemMessage(content=sys_prompt),
+                    HumanMessage(content=prompt),
+                ]
+            ),
             timeout=_VERDICT_REPAIR_TIMEOUT_SECS,
         )
         _sanitize_message(resp)
         repair_text = (getattr(resp, "content", "") or "").strip()
-        repaired_answer = final_answer.rstrip() + ("\n\n" if final_answer.strip() else "") + repair_text
+        repaired_answer = (
+            final_answer.rstrip()
+            + ("\n\n" if final_answer.strip() else "")
+            + repair_text
+        )
         repaired_verdict = parse_verdict(repaired_answer)
-        repaired_problems = validate_verdict(repaired_verdict) if repaired_verdict is not None else []
+        repaired_problems = (
+            validate_verdict(repaired_verdict) if repaired_verdict is not None else []
+        )
         if repaired_verdict is not None and not repaired_problems:
             emit(src, "note", "verdict repair succeeded")
             return repaired_answer, repaired_verdict, repaired_problems
         emit(src, "warning", "verdict repair did not yield a valid contract")
         return repaired_answer, repaired_verdict, repaired_problems
     except asyncio.TimeoutError:
-        emit(src, "warning", f"verdict repair timed out ({_VERDICT_REPAIR_TIMEOUT_SECS}s)")
+        emit(
+            src,
+            "warning",
+            f"verdict repair timed out ({_VERDICT_REPAIR_TIMEOUT_SECS}s)",
+        )
         return final_answer, verdict, problems
     except Exception as exc:
         emit(src, "warning", f"verdict repair failed ({exc})")
         return final_answer, verdict, problems
+
+
 async def reassess_verdict(state: AgentState, config) -> dict:
     """Post-finish node: compare synthesis verdict against triage verdict.
 
@@ -374,8 +454,11 @@ async def reassess_verdict(state: AgentState, config) -> dict:
     if triage_v == synthesis_v:
         updated = dict(synthesis_verdict)
         updated["triage_verdict"] = triage_v
-        emit(src, "note",
-             f"reassess_verdict: triage and investigation agree ({(synthesis_v or '').upper()})")
+        emit(
+            src,
+            "note",
+            f"reassess_verdict: triage and investigation agree ({(synthesis_v or '').upper()})",
+        )
         return {"verdict": updated}
 
     if (
@@ -389,9 +472,12 @@ async def reassess_verdict(state: AgentState, config) -> dict:
         updated["reassessment_reason"] = (
             "Investigation produced a cited TP/FP verdict with no classification-blocking gaps."
         )
-        emit(src, "note",
-             f"reassess_verdict: accepted investigation {synthesis_v.upper()} "
-             f"over triage {triage_v.upper()} without model call")
+        emit(
+            src,
+            "note",
+            f"reassess_verdict: accepted investigation {synthesis_v.upper()} "
+            f"over triage {triage_v.upper()} without model call",
+        )
         return {"verdict": updated}
 
     # Conflict — one focused model call to resolve it.
@@ -399,14 +485,20 @@ async def reassess_verdict(state: AgentState, config) -> dict:
     if model is None:
         updated = dict(synthesis_verdict)
         updated["triage_verdict"] = triage_v
-        emit(src, "note",
-             f"reassess_verdict: conflict triage={triage_v} vs synthesis={synthesis_v} "
-             "— no model available, keeping synthesis verdict")
+        emit(
+            src,
+            "note",
+            f"reassess_verdict: conflict triage={triage_v} vs synthesis={synthesis_v} "
+            "— no model available, keeping synthesis verdict",
+        )
         return {"verdict": updated}
 
-    emit(src, "note",
-         f"reassess_verdict: conflict triage={triage_v.upper()} vs "
-         f"synthesis={synthesis_v.upper()} — resolving")
+    emit(
+        src,
+        "note",
+        f"reassess_verdict: conflict triage={triage_v.upper()} vs "
+        f"synthesis={synthesis_v.upper()} — resolving",
+    )
 
     final_answer = state.get("final_answer") or ""
     _NARRATIVE_LIMIT = 8000
@@ -468,10 +560,12 @@ async def reassess_verdict(state: AgentState, config) -> dict:
 
     try:
         resp = await asyncio.wait_for(
-            model.bind_tools([]).ainvoke([
-                SystemMessage(content=system),
-                HumanMessage(content=prompt),
-            ]),
+            model.bind_tools([]).ainvoke(
+                [
+                    SystemMessage(content=system),
+                    HumanMessage(content=prompt),
+                ]
+            ),
             timeout=_REASSESS_TIMEOUT_SECS,
         )
         _sanitize_message(resp)
@@ -480,32 +574,50 @@ async def reassess_verdict(state: AgentState, config) -> dict:
         if resolved:
             if "triage_verdict" not in resolved:
                 resolved["triage_verdict"] = triage_v
-            emit(src, "note",
-                 f"reassess_verdict: resolved to {resolved.get('verdict', '?').upper()} "
-                 f"(triage={triage_v.upper()}, synthesis={synthesis_v.upper()}); "
-                 f"reason={resolved.get('reassessment_reason', '—')}")
+            emit(
+                src,
+                "note",
+                f"reassess_verdict: resolved to {resolved.get('verdict', '?').upper()} "
+                f"(triage={triage_v.upper()}, synthesis={synthesis_v.upper()}); "
+                f"reason={resolved.get('reassessment_reason', '—')}",
+            )
             return {"verdict": resolved}
         # Unparseable — fall back to synthesis with triage tag
         updated = dict(synthesis_verdict)
         updated["triage_verdict"] = triage_v
-        emit(src, "warning",
-             "reassess_verdict: model returned unparseable response — keeping synthesis verdict")
+        emit(
+            src,
+            "warning",
+            "reassess_verdict: model returned unparseable response — keeping synthesis verdict",
+        )
         return {"verdict": updated}
 
     except asyncio.TimeoutError:
         updated = dict(synthesis_verdict)
         updated["triage_verdict"] = triage_v
-        emit(src, "warning",
-             f"reassess_verdict: timed out ({_REASSESS_TIMEOUT_SECS}s) — keeping synthesis verdict")
+        emit(
+            src,
+            "warning",
+            f"reassess_verdict: timed out ({_REASSESS_TIMEOUT_SECS}s) — keeping synthesis verdict",
+        )
         return {"verdict": updated}
     except Exception as exc:
         updated = dict(synthesis_verdict)
         updated["triage_verdict"] = triage_v
-        emit(src, "warning",
-             f"reassess_verdict: error — keeping synthesis verdict ({exc})")
+        emit(
+            src,
+            "warning",
+            f"reassess_verdict: error — keeping synthesis verdict ({exc})",
+        )
         return {"verdict": updated}
-def _build_session_note(state: AgentState, verdict: dict | None, final_answer: str) -> str:
+
+
+def _build_session_note(
+    state: AgentState, verdict: dict | None, final_answer: str
+) -> str:
     return _build_publication_session_note(state, verdict, final_answer)
+
+
 async def publish_finish(state: AgentState, config) -> dict:
     """Publish the final investigation report after verdict reassessment."""
     if state["agent_name"] != "investigation":
@@ -584,7 +696,9 @@ async def publish_finish(state: AgentState, config) -> dict:
         state["run_id"],
         status=state.get("status"),
         result=final_answer,
-        verdict=(floored_verdict_update if floored_verdict_update is not None else verdict),
+        verdict=(
+            floored_verdict_update if floored_verdict_update is not None else verdict
+        ),
         phase="publish_finish",
     )
     return result

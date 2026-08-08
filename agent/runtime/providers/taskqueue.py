@@ -1,4 +1,5 @@
 """Task-queue provider (stdio subprocess)."""
+
 from __future__ import annotations
 
 import sys
@@ -32,13 +33,20 @@ def _build(resolved: dict, run_ctx: dict | None = None) -> dict:
     }
 
 
-register(MCPProvider(
-    key="aci-taskqueue",
-    kind=KIND_UTILITY,
-    setting_defaults=_defaults,
-    build_config=_build,
-    capabilities={
-        "queue_read_tasks": ("list_tasks", "get_task"),
-        "queue_write_tasks": ("create_task", "update_task", "claim_next", "complete_task"),
-    },
-))
+register(
+    MCPProvider(
+        key="aci-taskqueue",
+        kind=KIND_UTILITY,
+        setting_defaults=_defaults,
+        build_config=_build,
+        capabilities={
+            "queue_read_tasks": ("list_tasks", "get_task"),
+            "queue_write_tasks": (
+                "create_task",
+                "update_task",
+                "claim_next",
+                "complete_task",
+            ),
+        },
+    )
+)

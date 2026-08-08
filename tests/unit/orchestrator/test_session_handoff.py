@@ -3,6 +3,7 @@
 Covers the workspace folder helpers and the session-note builder that lets the next
 run resume per the AVFS prompt's "read /sessions first" guidance.
 """
+
 from __future__ import annotations
 
 import os
@@ -11,13 +12,18 @@ import unittest
 from unittest.mock import patch
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 sys.path.insert(0, project_root)
 import django  # noqa: E402
 
 django.setup()
 
-from agent.runtime.graph.nodes_flow import _build_session_note, _extract_section  # noqa: E402
+from agent.runtime.graph.nodes_flow import (
+    _build_session_note,
+    _extract_section,
+)  # noqa: E402
 from agent.runtime.infra.avfs import (  # noqa: E402
     home_dir,
     knowledge_dir,
@@ -28,8 +34,12 @@ from agent.runtime.infra.avfs import (  # noqa: E402
 )
 from agent.models import AgentRun  # noqa: E402
 from agent.runtime.orchestrator.session import OrchestratorSession  # noqa: E402
-from agent.runtime.orchestrator.specialist_sync import apply_specialist_run_to_session  # noqa: E402
-from agent.dashboard.runner.lifecycle import start_investigation_from_triage  # noqa: E402
+from agent.runtime.orchestrator.specialist_sync import (
+    apply_specialist_run_to_session,
+)  # noqa: E402
+from agent.dashboard.runner.lifecycle import (
+    start_investigation_from_triage,
+)  # noqa: E402
 
 
 class WorkspaceDirsTest(unittest.TestCase):
@@ -89,9 +99,11 @@ class SessionNoteBuilderTest(unittest.TestCase):
 
     def test_note_carries_verdict_summary_and_gaps(self):
         verdict = {
-            "verdict": "needs_investigation", "confidence": "high",
+            "verdict": "needs_investigation",
+            "confidence": "high",
             "triage_verdict": "needs_investigation",
-            "impact_state": "active", "scope_state": "lateral_spread",
+            "impact_state": "active",
+            "scope_state": "lateral_spread",
             "blocking_gaps": ["cannot confirm C2"],
             "nonblocking_gaps": ["initial access vector"],
             "recommended_action": "escalate to tier 2",
@@ -108,7 +120,9 @@ class SessionNoteBuilderTest(unittest.TestCase):
         self.assertIn("~449101824", note)
 
     def test_note_without_verdict_still_builds(self):
-        note = _build_session_note(self._state(), None, "## Executive Summary\nDid X.\n")
+        note = _build_session_note(
+            self._state(), None, "## Executive Summary\nDid X.\n"
+        )
         self.assertIn("Session handoff", note)
         self.assertIn("Did X.", note)
 
@@ -126,7 +140,9 @@ class TriageHandoffValidityTest(unittest.TestCase):
         )
         apply_specialist_run_to_session(session, run)
         self.assertEqual(session.last_triage_status, AgentRun.STATUS_COMPLETED)
-        self.assertEqual(session.last_triage_report, "## Triage Summary\nComplete report")
+        self.assertEqual(
+            session.last_triage_report, "## Triage Summary\nComplete report"
+        )
 
     def test_incomplete_budget_triage_does_not_persist_handoff_report(self):
         session = OrchestratorSession(last_triage_report="older report")
@@ -163,10 +179,15 @@ class TriageHandoffValidityTest(unittest.TestCase):
             status=AgentRun.STATUS_COMPLETED,
             result="## Triage Summary\nComplete report",
         )
-        with patch("agent.dashboard.runner.lifecycle.start_session", return_value="sess-1") as start:
+        with patch(
+            "agent.dashboard.runner.lifecycle.start_session", return_value="sess-1"
+        ) as start:
             session_id = start_investigation_from_triage(source_run)
         self.assertEqual(session_id, "sess-1")
-        self.assertEqual(start.call_args.kwargs["orch_state"]["last_triage_status"], AgentRun.STATUS_COMPLETED)
+        self.assertEqual(
+            start.call_args.kwargs["orch_state"]["last_triage_status"],
+            AgentRun.STATUS_COMPLETED,
+        )
 
 
 if __name__ == "__main__":

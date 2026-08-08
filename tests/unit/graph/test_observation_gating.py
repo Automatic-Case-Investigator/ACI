@@ -7,18 +7,32 @@ import sys
 import unittest
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, project_root)
 import django  # noqa: E402
 
 django.setup()
 
-from agent.runtime.graph.builder import _route_interpret, _route_think, _route_use_tools  # noqa: E402
-from agent.runtime.graph.interpretation import _NO_PROGRESS_BRAKE_CYCLES, interpret  # noqa: E402
+from agent.runtime.graph.builder import (
+    _route_interpret,
+    _route_think,
+    _route_use_tools,
+)  # noqa: E402
+from agent.runtime.graph.interpretation import (
+    _NO_PROGRESS_BRAKE_CYCLES,
+    interpret,
+)  # noqa: E402
 from agent.runtime.graph.nodes_loop import _MAX_TASK_TOOL_CALLS  # noqa: E402
 from agent.runtime.graph.observation import build_observation  # noqa: E402
 from langchain_core.language_models import BaseChatModel  # noqa: E402
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage  # noqa: E402
+from langchain_core.messages import (
+    AIMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)  # noqa: E402
 
 
 def _run(coro):
@@ -29,46 +43,62 @@ def _history():
     """A task mid-flight: one tool call and its raw result."""
     return [
         AIMessage(content="", tool_calls=[{"name": "search", "args": {}, "id": "c1"}]),
-        ToolMessage(content='{"total": 3, "events": [{"_id": "evt-1"}]}',
-                    tool_call_id="c1", name="search"),
+        ToolMessage(
+            content='{"total": 3, "events": [{"_id": "evt-1"}]}',
+            tool_call_id="c1",
+            name="search",
+        ),
     ]
 
 
 class ObservationRoutingTest(unittest.TestCase):
     def test_use_tools_routes_to_interpret(self):
         self.assertEqual(
-            _route_use_tools({"status": "", "agent_name": "investigation"}), "interpret",
+            _route_use_tools({"status": "", "agent_name": "investigation"}),
+            "interpret",
         )
 
     def test_triage_use_tools_routes_back_to_its_flat_loop(self):
         # Triage has no interpret node: its raw tool results go straight back to the
         # model that acts on them next, which is the point of the flat loop.
         self.assertEqual(
-            _route_use_tools({"status": "", "agent_name": "triage"}), "triage_think",
+            _route_use_tools({"status": "", "agent_name": "triage"}),
+            "triage_think",
         )
 
     def test_cancelled_use_tools_finishes(self):
         self.assertEqual(
-            _route_use_tools({"status": "cancelled", "agent_name": "triage"}), "finish",
+            _route_use_tools({"status": "cancelled", "agent_name": "triage"}),
+            "finish",
         )
 
     def test_ready_interpret_routes_to_assess(self):
-        self.assertEqual(_route_interpret({
-            "status": "ready_to_assess",
-            "steps": 1,
-            "max_steps": 10,
-            "tool_calls_made": 1,
-            "max_tool_calls": 10,
-        }), "assess")
+        self.assertEqual(
+            _route_interpret(
+                {
+                    "status": "ready_to_assess",
+                    "steps": 1,
+                    "max_steps": 10,
+                    "tool_calls_made": 1,
+                    "max_tool_calls": 10,
+                }
+            ),
+            "assess",
+        )
 
     def test_continue_interpret_routes_to_think(self):
-        self.assertEqual(_route_interpret({
-            "status": "needs_more_work",
-            "steps": 1,
-            "max_steps": 10,
-            "tool_calls_made": 1,
-            "max_tool_calls": 10,
-        }), "think")
+        self.assertEqual(
+            _route_interpret(
+                {
+                    "status": "needs_more_work",
+                    "steps": 1,
+                    "max_steps": 10,
+                    "tool_calls_made": 1,
+                    "max_tool_calls": 10,
+                }
+            ),
+            "think",
+        )
 
     def test_per_task_cap_fires_on_the_counter_not_on_history(self):
         # The cap must key on the deterministic per-task counter, never on whether a
@@ -88,7 +118,11 @@ class ObservationRoutingTest(unittest.TestCase):
     def test_under_cap_still_routes_to_use_tools_on_tool_calls(self):
         state = {
             "agent_name": "investigation",
-            "messages": [AIMessage(content="", tool_calls=[{"id": "1", "name": "search", "args": {}}])],
+            "messages": [
+                AIMessage(
+                    content="", tool_calls=[{"id": "1", "name": "search", "args": {}}]
+                )
+            ],
             "steps": 5,
             "max_steps": 60,
             "tool_calls_made": 60,
@@ -100,116 +134,188 @@ class ObservationRoutingTest(unittest.TestCase):
 
 class ObservationNormalizationTest(unittest.TestCase):
     def test_truncated_search_becomes_truncated_signal(self):
-        obs = build_observation([{
-            "name": "search",
-            "raw": json.dumps({
-                "total": 10000,
-                "total_relation": "gte",
-                "truncated": True,
-                "events": [{"_id": "e1"}],
-            }),
-            "artifacts": [],
-        }], objective="find event")
+        obs = build_observation(
+            [
+                {
+                    "name": "search",
+                    "raw": json.dumps(
+                        {
+                            "total": 10000,
+                            "total_relation": "gte",
+                            "truncated": True,
+                            "events": [{"_id": "e1"}],
+                        }
+                    ),
+                    "artifacts": [],
+                }
+            ],
+            objective="find event",
+        )
         self.assertIn("TRUNCATED", obs["signals"])
 
     def test_saturated_volume_becomes_saturated_signal(self):
-        obs = build_observation([{
-            "name": "get_event_volume",
-            "raw": json.dumps({"total": 42, "saturated": True}),
-            "artifacts": [],
-        }], objective="profile tail")
+        obs = build_observation(
+            [
+                {
+                    "name": "get_event_volume",
+                    "raw": json.dumps({"total": 42, "saturated": True}),
+                    "artifacts": [],
+                }
+            ],
+            objective="profile tail",
+        )
         self.assertIn("SATURATED", obs["signals"])
 
     def test_multi_regime_volume_becomes_multi_regime_signal(self):
-        obs = build_observation([{
-            "name": "get_event_volume",
-            "raw": json.dumps({
-                "total": 1000,
-                "saturated": True,
-                "bursts": [
-                    {"start": "2022-01-18T12:17:30Z", "end": "2022-01-18T12:40:00Z", "peak_count": 300, "total": 600},
-                    {"start": "2022-01-19T09:00:00Z", "end": "2022-01-19T10:00:00Z", "peak_count": 900, "total": 1200},
-                ],
-            }),
-            "artifacts": [],
-        }], objective="pick burst")
+        obs = build_observation(
+            [
+                {
+                    "name": "get_event_volume",
+                    "raw": json.dumps(
+                        {
+                            "total": 1000,
+                            "saturated": True,
+                            "bursts": [
+                                {
+                                    "start": "2022-01-18T12:17:30Z",
+                                    "end": "2022-01-18T12:40:00Z",
+                                    "peak_count": 300,
+                                    "total": 600,
+                                },
+                                {
+                                    "start": "2022-01-19T09:00:00Z",
+                                    "end": "2022-01-19T10:00:00Z",
+                                    "peak_count": 900,
+                                    "total": 1200,
+                                },
+                            ],
+                        }
+                    ),
+                    "artifacts": [],
+                }
+            ],
+            objective="pick burst",
+        )
         self.assertIn("MULTI_REGIME", obs["signals"])
         self.assertNotIn("SATURATED", obs["signals"])
         self.assertEqual(len(obs["volume_regimes"]), 2)
         self.assertEqual(obs["volume_regimes"][0]["start"], "2022-01-18T12:17:30Z")
 
     def test_entity_flood_becomes_flooded_signal(self):
-        obs = build_observation([{
-            "name": "search",
-            "raw": json.dumps({
-                "total": 10000,
-                "rule_groups_breakdown": [{"group": "ids", "count": 745000}],
-                "events": [{"_id": "e1"}],
-            }),
-            "artifacts": [],
-        }], objective="scope flood")
+        obs = build_observation(
+            [
+                {
+                    "name": "search",
+                    "raw": json.dumps(
+                        {
+                            "total": 10000,
+                            "rule_groups_breakdown": [
+                                {"group": "ids", "count": 745000}
+                            ],
+                            "events": [{"_id": "e1"}],
+                        }
+                    ),
+                    "artifacts": [],
+                }
+            ],
+            objective="scope flood",
+        )
         self.assertIn("FLOODED", obs["signals"])
 
     def test_orientation_only_becomes_orientation_signal(self):
-        obs = build_observation([{
-            "name": "get_case",
-            "raw": json.dumps({"id": "~1"}),
-            "artifacts": [],
-        }], objective="read case")
+        obs = build_observation(
+            [
+                {
+                    "name": "get_case",
+                    "raw": json.dumps({"id": "~1"}),
+                    "artifacts": [],
+                }
+            ],
+            objective="read case",
+        )
         self.assertIn("ORIENTATION_ONLY", obs["signals"])
 
     def test_repeated_no_findings_becomes_no_new_evidence(self):
-        prior = build_observation([{
-            "name": "search",
-            "raw": json.dumps({"total": 0, "events": []}),
-            "artifacts": [],
-        }], objective="same objective")
-        current = build_observation([{
-            "name": "search",
-            "raw": json.dumps({"total": 0, "events": []}),
-            "artifacts": [],
-        }], prior_observation=prior, objective="same objective")
+        prior = build_observation(
+            [
+                {
+                    "name": "search",
+                    "raw": json.dumps({"total": 0, "events": []}),
+                    "artifacts": [],
+                }
+            ],
+            objective="same objective",
+        )
+        current = build_observation(
+            [
+                {
+                    "name": "search",
+                    "raw": json.dumps({"total": 0, "events": []}),
+                    "artifacts": [],
+                }
+            ],
+            prior_observation=prior,
+            objective="same objective",
+        )
         self.assertIn("NO_NEW_EVIDENCE", current["signals"])
 
     def test_search_events_emit_compact_evidence_snapshots(self):
-        obs = build_observation([{
-            "name": "search",
-            "raw": json.dumps({
-                "total": 1,
-                "events": [{
-                    "_id": "e1",
-                    "timestamp": "2022-01-18T12:24:26Z",
-                    "agent.name": "wazuh-client",
-                    "rule.id": "30301",
-                    "rule.description": "Apache error",
-                    "data.srcip": "172.17.130.196",
-                    "data.url": "/wp-content/themes/go/admin.php",
-                    "full_log": "php7:error script admin.php not found",
-                }],
-            }),
-            "artifacts": [],
-        }], objective="drill scan tail")
+        obs = build_observation(
+            [
+                {
+                    "name": "search",
+                    "raw": json.dumps(
+                        {
+                            "total": 1,
+                            "events": [
+                                {
+                                    "_id": "e1",
+                                    "timestamp": "2022-01-18T12:24:26Z",
+                                    "agent.name": "wazuh-client",
+                                    "rule.id": "30301",
+                                    "rule.description": "Apache error",
+                                    "data.srcip": "172.17.130.196",
+                                    "data.url": "/wp-content/themes/go/admin.php",
+                                    "full_log": "php7:error script admin.php not found",
+                                }
+                            ],
+                        }
+                    ),
+                    "artifacts": [],
+                }
+            ],
+            objective="drill scan tail",
+        )
         self.assertEqual(obs["evidence_snapshots"][0]["event_id"], "e1")
         self.assertEqual(obs["evidence_snapshots"][0]["rule_id"], "30301")
         self.assertIn("admin.php", obs["evidence_snapshots"][0]["url"])
 
     def test_evidence_digest_and_summary_carry_event_semantics(self):
-        obs = build_observation([{
-            "name": "search",
-            "raw": json.dumps({
-                "total": 8,
-                "events": [{
-                    "_id": "e1",
-                    "rule.id": "5304",
-                    "rule.description": "User successfully changed UID",
-                    "rule.groups": "audit",
-                    "data.srcuser": "www-data",
-                    "data.dstuser": "phopkins",
-                    "full_log": "su[28816]: + /dev/pts/1 www-data:phopkins",
-                }],
-            }),
-            "artifacts": [],
-        }], objective="trace execution")
+        obs = build_observation(
+            [
+                {
+                    "name": "search",
+                    "raw": json.dumps(
+                        {
+                            "total": 8,
+                            "events": [
+                                {
+                                    "_id": "e1",
+                                    "rule.id": "5304",
+                                    "rule.description": "User successfully changed UID",
+                                    "rule.groups": "audit",
+                                    "data.srcuser": "www-data",
+                                    "data.dstuser": "phopkins",
+                                    "full_log": "su[28816]: + /dev/pts/1 www-data:phopkins",
+                                }
+                            ],
+                        }
+                    ),
+                    "artifacts": [],
+                }
+            ],
+            objective="trace execution",
+        )
         # The digest carries the actual event meaning, not just a count.
         self.assertTrue(obs["evidence_digest"])
         digest = obs["evidence_digest"][0]
@@ -220,52 +326,66 @@ class ObservationNormalizationTest(unittest.TestCase):
         self.assertIn("5304", obs["summary"])
 
     def test_no_digest_when_batch_has_no_events(self):
-        obs = build_observation([{
-            "name": "profile_field",
-            "raw": json.dumps({"values": [{"key": "web", "doc_count": 10}]}),
-            "artifacts": [],
-        }], objective="profile")
+        obs = build_observation(
+            [
+                {
+                    "name": "profile_field",
+                    "raw": json.dumps({"values": [{"key": "web", "doc_count": 10}]}),
+                    "artifacts": [],
+                }
+            ],
+            objective="profile",
+        )
         self.assertEqual(obs["evidence_digest"], [])
 
     def test_time_windows_extract_from_supported_tool_args(self):
-        obs = build_observation([
-            {
-                "name": "search",
-                "args": {
-                    "time_range": {
-                        "from": "2022-01-18T12:19:10Z",
-                        "to": "2022-01-18T12:24:30Z",
+        obs = build_observation(
+            [
+                {
+                    "name": "search",
+                    "args": {
+                        "time_range": {
+                            "from": "2022-01-18T12:19:10Z",
+                            "to": "2022-01-18T12:24:30Z",
+                        },
                     },
+                    "raw": json.dumps({"total": 0, "events": []}),
+                    "artifacts": [],
                 },
-                "raw": json.dumps({"total": 0, "events": []}),
-                "artifacts": [],
-            },
-            {
-                "name": "profile_field",
-                "args": {
-                    "field": "rule.id",
-                    "query": {
-                        "bool": {"filter": [
-                            {"range": {"@timestamp": {
-                                "gte": "2022-01-18T12:24:30Z",
-                                "lte": "2022-01-18T12:30:00Z",
-                            }}}
-                        ]}
+                {
+                    "name": "profile_field",
+                    "args": {
+                        "field": "rule.id",
+                        "query": {
+                            "bool": {
+                                "filter": [
+                                    {
+                                        "range": {
+                                            "@timestamp": {
+                                                "gte": "2022-01-18T12:24:30Z",
+                                                "lte": "2022-01-18T12:30:00Z",
+                                            }
+                                        }
+                                    }
+                                ]
+                            }
+                        },
                     },
+                    "raw": json.dumps({"values": [{"key": "web", "doc_count": 10}]}),
+                    "artifacts": [],
                 },
-                "raw": json.dumps({"values": [{"key": "web", "doc_count": 10}]}),
-                "artifacts": [],
-            },
-            {
-                "name": "get_event_volume",
-                "args": {
-                    "start_time": "2022-01-18T12:30:00Z",
-                    "end_time": "2022-01-18T12:40:00Z",
+                {
+                    "name": "get_event_volume",
+                    "args": {
+                        "start_time": "2022-01-18T12:30:00Z",
+                        "end_time": "2022-01-18T12:40:00Z",
+                    },
+                    "raw": json.dumps({"total": 42}),
+                    "artifacts": [],
                 },
-                "raw": json.dumps({"total": 42}),
-                "artifacts": [],
-            },
-        ], objective="track coverage")
+            ],
+            objective="track coverage",
+        )
         self.assertEqual(
             [(w["tool"], w["from"], w["to"]) for w in obs["time_windows"]],
             [
@@ -280,89 +400,139 @@ class ObservationNormalizationTest(unittest.TestCase):
         )
 
     def test_time_window_extraction_ignores_malformed_windows(self):
-        obs = build_observation([{
-            "name": "search",
-            "args": {"time_range": {"from": "not-a-date", "to": "2022-01-18T12:24:30Z"}},
-            "raw": json.dumps({"total": 0, "events": []}),
-            "artifacts": [],
-        }], objective="track coverage")
+        obs = build_observation(
+            [
+                {
+                    "name": "search",
+                    "args": {
+                        "time_range": {
+                            "from": "not-a-date",
+                            "to": "2022-01-18T12:24:30Z",
+                        }
+                    },
+                    "raw": json.dumps({"total": 0, "events": []}),
+                    "artifacts": [],
+                }
+            ],
+            objective="track coverage",
+        )
         self.assertEqual(obs["time_windows"], [])
 
     def test_prompt_surfaces_notable_events_block(self):
         from agent.runtime.graph.interpretation import _prompt
-        obs = build_observation([{
-            "name": "search",
-            "raw": json.dumps({
-                "total": 2,
-                "events": [{
-                    "_id": "e1", "rule.id": "31108",
-                    "rule.description": "Ignored URLs", "rule.groups": "web",
-                    "data.url": "/wp-content/uploads/2022/01/x.php", "data.id": "200",
-                }],
-            }),
-            "artifacts": [],
-        }], objective="find webshell")
+
+        obs = build_observation(
+            [
+                {
+                    "name": "search",
+                    "raw": json.dumps(
+                        {
+                            "total": 2,
+                            "events": [
+                                {
+                                    "_id": "e1",
+                                    "rule.id": "31108",
+                                    "rule.description": "Ignored URLs",
+                                    "rule.groups": "web",
+                                    "data.url": "/wp-content/uploads/2022/01/x.php",
+                                    "data.id": "200",
+                                }
+                            ],
+                        }
+                    ),
+                    "artifacts": [],
+                }
+            ],
+            objective="find webshell",
+        )
         text = _prompt({"title": "t"}, {"objective": "find webshell"}, obs, "")
         self.assertIn("Notable events retrieved this batch", text)
         self.assertIn("/wp-content/uploads/2022/01/x.php", text)
 
     def test_case_context_emits_orientation_facts_not_event_snapshots(self):
-        obs = build_observation([{
-            "name": "get_case",
-            "raw": json.dumps({
-                "_id": "~1",
-                "title": "Multiple web server 400 error codes from same source ip.",
-                "description": (
-                    "### @timestamp\n| key | val |\n| @timestamp | 2022-01-18T12:19:10.000000Z |\n"
-                    "### Agent\n| key | val |\n| agent.ip | 10.35.35.206 |\n| agent.name | wazuh-client |\n"
-                    "### Data\n| key | val |\n| data.srcip | 172.17.130.196 |\n| data.url | /wp-content/create_account |\n"
-                    "### Rule\n| key | val |\n| rule.id | 31151 |\n"
-                ),
-            }),
-            "artifacts": [],
-        }], objective="triage")
+        obs = build_observation(
+            [
+                {
+                    "name": "get_case",
+                    "raw": json.dumps(
+                        {
+                            "_id": "~1",
+                            "title": "Multiple web server 400 error codes from same source ip.",
+                            "description": (
+                                "### @timestamp\n| key | val |\n| @timestamp | 2022-01-18T12:19:10.000000Z |\n"
+                                "### Agent\n| key | val |\n| agent.ip | 10.35.35.206 |\n| agent.name | wazuh-client |\n"
+                                "### Data\n| key | val |\n| data.srcip | 172.17.130.196 |\n| data.url | /wp-content/create_account |\n"
+                                "### Rule\n| key | val |\n| rule.id | 31151 |\n"
+                            ),
+                        }
+                    ),
+                    "artifacts": [],
+                }
+            ],
+            objective="triage",
+        )
         self.assertEqual(obs["evidence_snapshots"], [])
         self.assertEqual(obs["orientation_facts"][0]["case_id"], "~1")
         self.assertEqual(obs["orientation_facts"][0]["src_ip"], "172.17.130.196")
         self.assertEqual(obs["orientation_facts"][0]["rule_id"], "31151")
 
     def test_case_url_becomes_exemplar_pivot_candidate(self):
-        obs = build_observation([{
-            "name": "get_case",
-            "raw": json.dumps({
-                "_id": "~1",
-                "title": "Multiple web server 400 error codes from same source ip.",
-                "description": (
-                    "### Data\n| key | val |\n| data.srcip | 172.17.130.196 |\n"
-                    "| data.url | /wp-content/create_account |\n"
-                    "### Rule\n| key | val |\n| rule.id | 31151 |\n"
-                ),
-            }),
-            "artifacts": [],
-        }], objective="triage")
-        url_pivot = next(item for item in obs["pivot_candidates"] if item["field"] == "url")
+        obs = build_observation(
+            [
+                {
+                    "name": "get_case",
+                    "raw": json.dumps(
+                        {
+                            "_id": "~1",
+                            "title": "Multiple web server 400 error codes from same source ip.",
+                            "description": (
+                                "### Data\n| key | val |\n| data.srcip | 172.17.130.196 |\n"
+                                "| data.url | /wp-content/create_account |\n"
+                                "### Rule\n| key | val |\n| rule.id | 31151 |\n"
+                            ),
+                        }
+                    ),
+                    "artifacts": [],
+                }
+            ],
+            objective="triage",
+        )
+        url_pivot = next(
+            item for item in obs["pivot_candidates"] if item["field"] == "url"
+        )
         self.assertEqual(url_pivot["source_level"], "case")
         self.assertEqual(url_pivot["role"], "exemplar")
         self.assertEqual(url_pivot["confidence"], "low")
         self.assertEqual(url_pivot["broader_alternative"], "/wp-content/*")
 
     def test_raw_event_url_becomes_discriminator_pivot_candidate(self):
-        obs = build_observation([{
-            "name": "search",
-            "raw": json.dumps({
-                "total": 1,
-                "events": [{
-                    "_id": "e1",
-                    "timestamp": "2022-01-18T12:24:26Z",
-                    "agent.name": "wazuh-client",
-                    "data.srcip": "172.17.130.196",
-                    "data.url": "/wp-content/themes/go/admin.php",
-                    "full_log": "php7:error script admin.php not found",
-                }],
-            }),
-            "artifacts": [],
-        }], objective="drill scan tail")
-        url_pivot = next(item for item in obs["pivot_candidates"] if item["field"] == "url")
+        obs = build_observation(
+            [
+                {
+                    "name": "search",
+                    "raw": json.dumps(
+                        {
+                            "total": 1,
+                            "events": [
+                                {
+                                    "_id": "e1",
+                                    "timestamp": "2022-01-18T12:24:26Z",
+                                    "agent.name": "wazuh-client",
+                                    "data.srcip": "172.17.130.196",
+                                    "data.url": "/wp-content/themes/go/admin.php",
+                                    "full_log": "php7:error script admin.php not found",
+                                }
+                            ],
+                        }
+                    ),
+                    "artifacts": [],
+                }
+            ],
+            objective="drill scan tail",
+        )
+        url_pivot = next(
+            item for item in obs["pivot_candidates"] if item["field"] == "url"
+        )
         self.assertEqual(url_pivot["source_level"], "raw_event")
         self.assertEqual(url_pivot["role"], "discriminator")
         self.assertEqual(url_pivot["confidence"], "high")
@@ -392,7 +562,10 @@ class InterpretContractTest(unittest.TestCase):
             "agent_name": "investigation",
             "question": "investigate",
             "handoff": None,
-            "current_task": {"title": "Check callback", "description": "Investigate callback"},
+            "current_task": {
+                "title": "Check callback",
+                "description": "Investigate callback",
+            },
             "last_completed_task": None,
             "messages": [] if messages is None else messages,
             "steps": 1,
@@ -443,18 +616,27 @@ class InterpretContractTest(unittest.TestCase):
             "advanced_objective": False,
         }
         history = _history()
-        result = _run(interpret(
-            self._state(obs, messages=history),
-            {"configurable": {"model": _StubModel({
-                "what_showed": "search returned a truncated sample",
-                "advanced_objective": False,
-                "blocker": "query too broad",
-                "progress_status": "needs refinement",
-                "next_action": "refine_query",
-                "hypothesis": "",
-                "confirm_if": "retrieve a specific event",
-            }), "tools": []}},
-        ))
+        result = _run(
+            interpret(
+                self._state(obs, messages=history),
+                {
+                    "configurable": {
+                        "model": _StubModel(
+                            {
+                                "what_showed": "search returned a truncated sample",
+                                "advanced_objective": False,
+                                "blocker": "query too broad",
+                                "progress_status": "needs refinement",
+                                "next_action": "refine_query",
+                                "hypothesis": "",
+                                "confirm_if": "retrieve a specific event",
+                            }
+                        ),
+                        "tools": [],
+                    }
+                },
+            )
+        )
         self.assertEqual(result["status"], "needs_more_work")
         self.assertEqual(result["task_ledger"]["next_action"], "refine_query")
         # Continuation contract: interpret hands the accumulated history forward so the
@@ -474,19 +656,28 @@ class InterpretContractTest(unittest.TestCase):
             "evidence_queries": 0,
         }
         history = _history()
-        cont = _run(interpret(
-            self._state(cont_obs, messages=history),
-            {"configurable": {"model": _StubModel({
-                "what_showed": "orientation metadata only",
-                "advanced_objective": False,
-                "blocker": "no evidence query run yet",
-                "progress_status": "needs_more_work",
-                "next_action": "retrieve_specific_event",
-                "next_step_instruction": "Query the SIEM for the anchor host/source in the window.",
-                "hypothesis": "",
-                "confirm_if": "retrieve a nearby raw event",
-            }), "tools": []}},
-        ))
+        cont = _run(
+            interpret(
+                self._state(cont_obs, messages=history),
+                {
+                    "configurable": {
+                        "model": _StubModel(
+                            {
+                                "what_showed": "orientation metadata only",
+                                "advanced_objective": False,
+                                "blocker": "no evidence query run yet",
+                                "progress_status": "needs_more_work",
+                                "next_action": "retrieve_specific_event",
+                                "next_step_instruction": "Query the SIEM for the anchor host/source in the window.",
+                                "hypothesis": "",
+                                "confirm_if": "retrieve a nearby raw event",
+                            }
+                        ),
+                        "tools": [],
+                    }
+                },
+            )
+        )
         self.assertEqual(cont["status"], "needs_more_work")
         self.assertEqual(cont["messages"], history)
         self.assertTrue(cont["task_ledger"].get("next_step_instruction"))
@@ -500,18 +691,27 @@ class InterpretContractTest(unittest.TestCase):
             "event_ids": ["e1"],
             "evidence_markers": ["event:e1"],
         }
-        done = _run(interpret(
-            self._state(done_obs),
-            {"configurable": {"model": _StubModel({
-                "what_showed": "event e1 confirms the callback",
-                "advanced_objective": True,
-                "blocker": "",
-                "progress_status": "complete",
-                "next_action": "stop_completed",
-                "hypothesis": "callback confirmed",
-                "confirm_if": "event e1 is sufficient",
-            }), "tools": []}},
-        ))
+        done = _run(
+            interpret(
+                self._state(done_obs),
+                {
+                    "configurable": {
+                        "model": _StubModel(
+                            {
+                                "what_showed": "event e1 confirms the callback",
+                                "advanced_objective": True,
+                                "blocker": "",
+                                "progress_status": "complete",
+                                "next_action": "stop_completed",
+                                "hypothesis": "callback confirmed",
+                                "confirm_if": "event e1 is sufficient",
+                            }
+                        ),
+                        "tools": [],
+                    }
+                },
+            )
+        )
         self.assertEqual(done["status"], "ready_to_assess")
         self.assertTrue(done["messages"])
 
@@ -520,21 +720,32 @@ class InterpretContractTest(unittest.TestCase):
             "tools": ["search"],
             "signals": ["EMPTY", "NO_NEW_EVIDENCE"],
             "summary": "search=0 hit(s); signals=EMPTY, NO_NEW_EVIDENCE",
-            "recommended_moves": ["change the angle instead of repeating the same query shape"],
+            "recommended_moves": [
+                "change the angle instead of repeating the same query shape"
+            ],
             "advanced_objective": False,
         }
-        result = _run(interpret(
-            self._state(obs, retries=1),
-            {"configurable": {"model": _StubModel({
-                "what_showed": "two scoped searches returned no events",
-                "advanced_objective": False,
-                "blocker": "no corroborating evidence remains",
-                "progress_status": "exhausted",
-                "next_action": "stop_negative",
-                "hypothesis": "",
-                "confirm_if": "no more evidence appears in this window",
-            }), "tools": []}},
-        ))
+        result = _run(
+            interpret(
+                self._state(obs, retries=1),
+                {
+                    "configurable": {
+                        "model": _StubModel(
+                            {
+                                "what_showed": "two scoped searches returned no events",
+                                "advanced_objective": False,
+                                "blocker": "no corroborating evidence remains",
+                                "progress_status": "exhausted",
+                                "next_action": "stop_negative",
+                                "hypothesis": "",
+                                "confirm_if": "no more evidence appears in this window",
+                            }
+                        ),
+                        "tools": [],
+                    }
+                },
+            )
+        )
         self.assertEqual(result["status"], "ready_to_assess")
 
     def test_concrete_event_can_route_to_stop_completed(self):
@@ -547,18 +758,27 @@ class InterpretContractTest(unittest.TestCase):
             "event_ids": ["e1"],
             "evidence_markers": ["event:e1"],
         }
-        result = _run(interpret(
-            self._state(obs),
-            {"configurable": {"model": _StubModel({
-                "what_showed": "event e1 confirms the callback",
-                "advanced_objective": True,
-                "blocker": "",
-                "progress_status": "complete",
-                "next_action": "stop_completed",
-                "hypothesis": "callback confirmed",
-                "confirm_if": "event e1 is sufficient",
-            }), "tools": []}},
-        ))
+        result = _run(
+            interpret(
+                self._state(obs),
+                {
+                    "configurable": {
+                        "model": _StubModel(
+                            {
+                                "what_showed": "event e1 confirms the callback",
+                                "advanced_objective": True,
+                                "blocker": "",
+                                "progress_status": "complete",
+                                "next_action": "stop_completed",
+                                "hypothesis": "callback confirmed",
+                                "confirm_if": "event e1 is sufficient",
+                            }
+                        ),
+                        "tools": [],
+                    }
+                },
+            )
+        )
         self.assertEqual(result["status"], "ready_to_assess")
         self.assertEqual(result["task_ledger"]["next_action"], "stop_completed")
 
@@ -567,6 +787,7 @@ class InterpretContractTest(unittest.TestCase):
         # with new evidence must not escalate the model's continue vote into
         # stop_completed (regression: a decode task completed after one retrieval).
         from agent.runtime.graph.interpretation import _action_from_review
+
         obs = {
             "signals": [],
             "advanced_objective": True,
@@ -582,6 +803,7 @@ class InterpretContractTest(unittest.TestCase):
 
     def test_success_criteria_section_parses_into_stop_condition(self):
         from agent.runtime.graph.interpretation import _parse_interpretation_text
+
         parsed = _parse_interpretation_text(
             "What the last batch showed:\n48 web hits retrieved, none decoded.\n\n"
             "Did it advance the task:\nyes — narrowed the candidate set\n\n"
@@ -601,7 +823,9 @@ class InterpretContractTest(unittest.TestCase):
             "tools": ["profile_field"],
             "signals": ["TRUNCATED"],
             "summary": "profiled nearby rule family and found a capped aggregate signal",
-            "recommended_moves": ["hand off exact raw-event retrieval to investigation"],
+            "recommended_moves": [
+                "hand off exact raw-event retrieval to investigation"
+            ],
             "advanced_objective": True,
             "evidence_queries": 1,
         }
@@ -612,16 +836,25 @@ class InterpretContractTest(unittest.TestCase):
             "description": "Write a bounded triage handoff.",
         }
         state["task_ledger"]["objective"] = "Triage case ~1"
-        result = _run(interpret(
-            state,
-            {"configurable": {"model": _StubModel({
-                "what_showed": "A scoped aggregate query grounded the alert; raw drilldown is investigation work.",
-                "advanced_objective": True,
-                "blocker": "",
-                "stop_state": "complete",
-                "next_step_instruction": "Write the handoff.",
-            }), "tools": []}},
-        ))
+        result = _run(
+            interpret(
+                state,
+                {
+                    "configurable": {
+                        "model": _StubModel(
+                            {
+                                "what_showed": "A scoped aggregate query grounded the alert; raw drilldown is investigation work.",
+                                "advanced_objective": True,
+                                "blocker": "",
+                                "stop_state": "complete",
+                                "next_step_instruction": "Write the handoff.",
+                            }
+                        ),
+                        "tools": [],
+                    }
+                },
+            )
+        )
         self.assertEqual(result["status"], "ready_to_assess")
         self.assertEqual(result["task_ledger"]["next_action"], "stop_completed")
         self.assertEqual(result["task_ledger"]["evidence_state"], "sufficient_handoff")
@@ -636,19 +869,28 @@ class InterpretContractTest(unittest.TestCase):
             "event_ids": ["e1", "e2", "e3"],
             "evidence_markers": ["event:e1", "event:e2", "event:e3"],
         }
-        result = _run(interpret(
-            self._state(obs),
-            {"configurable": {"model": _StubModel({
-                "what_showed": "three scoped hits match the target entity",
-                "advanced_objective": True,
-                "blocker": "raw event semantics have not been interpreted",
-                "next_action": "retrieve_specific_event",
-                "hypothesis": "the hit set likely contains direct evidence",
-                "evidence_state": "scoped_hits",
-                "next_step_instruction": "Retrieve raw events e1-e3 and interpret payload semantics.",
-                "stop_condition": "Raw events directly prove or disprove the task objective.",
-            }), "tools": []}},
-        ))
+        result = _run(
+            interpret(
+                self._state(obs),
+                {
+                    "configurable": {
+                        "model": _StubModel(
+                            {
+                                "what_showed": "three scoped hits match the target entity",
+                                "advanced_objective": True,
+                                "blocker": "raw event semantics have not been interpreted",
+                                "next_action": "retrieve_specific_event",
+                                "hypothesis": "the hit set likely contains direct evidence",
+                                "evidence_state": "scoped_hits",
+                                "next_step_instruction": "Retrieve raw events e1-e3 and interpret payload semantics.",
+                                "stop_condition": "Raw events directly prove or disprove the task objective.",
+                            }
+                        ),
+                        "tools": [],
+                    }
+                },
+            )
+        )
         ledger = result["task_ledger"]
         self.assertEqual(ledger["evidence_state"], "scoped_hits")
         self.assertIn("Retrieve raw events", ledger["next_step_instruction"])
@@ -665,17 +907,28 @@ class InterpretContractTest(unittest.TestCase):
             "advanced_objective": False,
         }
         state = self._state(obs)
-        state["task_ledger"]["evidence_found"] = ["Payload execution behavior observed in event e1"]
-        result = _run(interpret(
-            state,
-            {"configurable": {"model": _StubModel({
-                "what_showed": "follow-up query returned no hits in this representation",
-                "advanced_objective": False,
-                "blocker": "the field representation may be wrong",
-                "next_action": "retrieve_specific_event",
-                "hypothesis": "prior evidence still stands",
-            }), "tools": []}},
-        ))
+        state["task_ledger"]["evidence_found"] = [
+            "Payload execution behavior observed in event e1"
+        ]
+        result = _run(
+            interpret(
+                state,
+                {
+                    "configurable": {
+                        "model": _StubModel(
+                            {
+                                "what_showed": "follow-up query returned no hits in this representation",
+                                "advanced_objective": False,
+                                "blocker": "the field representation may be wrong",
+                                "next_action": "retrieve_specific_event",
+                                "hypothesis": "prior evidence still stands",
+                            }
+                        ),
+                        "tools": [],
+                    }
+                },
+            )
+        )
         evidence_found = result["task_ledger"]["evidence_found"]
         self.assertIn("Payload execution behavior observed in event e1", evidence_found)
 
@@ -689,18 +942,31 @@ class InterpretContractTest(unittest.TestCase):
             "event_ids": ["e1"],
             "evidence_markers": ["event:e1"],
         }
-        result = _run(interpret(
-            self._state(obs),
-            {"configurable": {"model": _StubModel({
-                "what_showed": "event e1 contains a timestamp, rule id, URL, and PHP error body",
-                "advanced_objective": True,
-                "blocker": "success or payload execution is not proven",
-                "next_action": "retrieve_specific_event",
-                "hypothesis": "scan tail reached application probing but not confirmed execution",
-                "evidence_found": ["PHP error event e1 for admin.php under rule 30301"],
-                "remaining_gaps": ["No successful payload or callback is proven by this event."],
-            }), "tools": []}},
-        ))
+        result = _run(
+            interpret(
+                self._state(obs),
+                {
+                    "configurable": {
+                        "model": _StubModel(
+                            {
+                                "what_showed": "event e1 contains a timestamp, rule id, URL, and PHP error body",
+                                "advanced_objective": True,
+                                "blocker": "success or payload execution is not proven",
+                                "next_action": "retrieve_specific_event",
+                                "hypothesis": "scan tail reached application probing but not confirmed execution",
+                                "evidence_found": [
+                                    "PHP error event e1 for admin.php under rule 30301"
+                                ],
+                                "remaining_gaps": [
+                                    "No successful payload or callback is proven by this event."
+                                ],
+                            }
+                        ),
+                        "tools": [],
+                    }
+                },
+            )
+        )
         ledger = result["task_ledger"]
         self.assertIn("admin.php", ledger["evidence_found"][0])
         self.assertIn("payload", ledger["remaining_gaps"][0])
@@ -717,26 +983,37 @@ class InterpretContractTest(unittest.TestCase):
             "advanced_objective": False,
         }
         state = self._state(obs)
-        state["task_ledger"]["confirmed_findings"] = [{
-            "summary": "event e1 confirmed privileged command execution",
-            "event_ids": ["e1"],
-            "time_range": {},
-            "entities": [],
-            "kind": "raw_event_evidence",
-            "confidence": "high",
-            "status": "confirmed",
-        }]
-        result = _run(interpret(
-            state,
-            {"configurable": {"model": _StubModel({
-                "what_showed": "follow-up query returned nothing",
-                "advanced_objective": False,
-                "blocker": "persistence remains unproven",
-                "next_action": "pivot_entity",
-                "hypothesis": "confirmed command still stands",
-                "remaining_gaps": ["No persistence event yet."],
-            }), "tools": []}},
-        ))
+        state["task_ledger"]["confirmed_findings"] = [
+            {
+                "summary": "event e1 confirmed privileged command execution",
+                "event_ids": ["e1"],
+                "time_range": {},
+                "entities": [],
+                "kind": "raw_event_evidence",
+                "confidence": "high",
+                "status": "confirmed",
+            }
+        ]
+        result = _run(
+            interpret(
+                state,
+                {
+                    "configurable": {
+                        "model": _StubModel(
+                            {
+                                "what_showed": "follow-up query returned nothing",
+                                "advanced_objective": False,
+                                "blocker": "persistence remains unproven",
+                                "next_action": "pivot_entity",
+                                "hypothesis": "confirmed command still stands",
+                                "remaining_gaps": ["No persistence event yet."],
+                            }
+                        ),
+                        "tools": [],
+                    }
+                },
+            )
+        )
         confirmed = result["task_ledger"]["confirmed_findings"]
         self.assertEqual(len(confirmed), 1)
         self.assertIn("privileged command", confirmed[0]["summary"])
@@ -754,12 +1031,19 @@ class InterpretContractTest(unittest.TestCase):
         }
         state = self._state(obs, retries=2)
         state["task_ledger"]["next_adjacent_evidence_path"] = {
-            "entity": "hwarren", "representation_hint": "rule.id=5715 auth"}
-        state["task_ledger"]["next_step_instruction"] = (
-            "Inspect the post-peak authentication window for data.srcuser=hwarren with rule.id=5715")
+            "entity": "hwarren",
+            "representation_hint": "rule.id=5715 auth",
+        }
+        state["task_ledger"][
+            "next_step_instruction"
+        ] = "Inspect the post-peak authentication window for data.srcuser=hwarren with rule.id=5715"
         state["task_ledger"]["primary_pivot"] = {
-            "field": "data.srcuser", "value": "hwarren", "status": "active",
-            "confidence": "medium", "failure_count": 2}
+            "field": "data.srcuser",
+            "value": "hwarren",
+            "status": "active",
+            "confidence": "medium",
+            "failure_count": 2,
+        }
         result = _run(interpret(state, {"configurable": {"model": None, "tools": []}}))
         ledger = result["task_ledger"]
         self.assertEqual(ledger["next_adjacent_evidence_path"], {})
@@ -834,10 +1118,16 @@ class InterpretContractTest(unittest.TestCase):
             "summary": "search=10000 hit(s); signals=TRUNCATED, FLOODED",
             "recommended_moves": [],
             "advanced_objective": False,
-            "discriminator": {"field": "data.id", "dominant": "404", "minority": "200",
-                              "sample_event_ids": ["ws1"]},
+            "discriminator": {
+                "field": "data.id",
+                "dominant": "404",
+                "minority": "200",
+                "sample_event_ids": ["ws1"],
+            },
         }
-        result = _run(interpret(self._state(obs), {"configurable": {"model": None, "tools": []}}))
+        result = _run(
+            interpret(self._state(obs), {"configurable": {"model": None, "tools": []}})
+        )
         instr = result["task_ledger"]["next_step_instruction"]
         # The instruction routes to the flood's minority axis (read the sample, then
         # query the minority / must_not the dominant) — not the alert's own rule.id.
@@ -856,23 +1146,32 @@ class InterpretContractTest(unittest.TestCase):
             "event_ids": ["e1"],
             "evidence_markers": ["event:e1"],
         }
-        result = _run(interpret(
-            self._state(obs),
-            {"configurable": {"model": _StubModel({
-                "what_showed": "scan on wazuh-client confirmed",
-                "advanced_objective": True,
-                "next_action": "retrieve_specific_event",
-                "hypothesis": "recon confirmed; execution not yet proven",
-                "evidence_state": "scoped_hits",
-                "next_adjacent_evidence_path": {
-                    "entity": "agent.name=wazuh-client AND data.srcip=172.17.130.196",
-                    "time_direction": "forward",
-                    "window_hint": "start just after the last confirmed scan event; expand until payload-bearing events appear",
-                    "representation_hint": "raw web events with suspicious PHP paths, encoded params",
-                    "junk_key": "dropped",
+        result = _run(
+            interpret(
+                self._state(obs),
+                {
+                    "configurable": {
+                        "model": _StubModel(
+                            {
+                                "what_showed": "scan on wazuh-client confirmed",
+                                "advanced_objective": True,
+                                "next_action": "retrieve_specific_event",
+                                "hypothesis": "recon confirmed; execution not yet proven",
+                                "evidence_state": "scoped_hits",
+                                "next_adjacent_evidence_path": {
+                                    "entity": "agent.name=wazuh-client AND data.srcip=172.17.130.196",
+                                    "time_direction": "forward",
+                                    "window_hint": "start just after the last confirmed scan event; expand until payload-bearing events appear",
+                                    "representation_hint": "raw web events with suspicious PHP paths, encoded params",
+                                    "junk_key": "dropped",
+                                },
+                            }
+                        ),
+                        "tools": [],
+                    }
                 },
-            }), "tools": []}},
-        ))
+            )
+        )
         adj = result["task_ledger"]["next_adjacent_evidence_path"]
         self.assertEqual(adj["time_direction"], "forward")
         self.assertIn("wazuh-client", adj["entity"])
@@ -896,15 +1195,24 @@ class InterpretContractTest(unittest.TestCase):
             "window_hint": "post-scan tail",
             "representation_hint": "process/audit events",
         }
-        result = _run(interpret(
-            state,
-            {"configurable": {"model": _StubModel({
-                "what_showed": "no hits in this representation",
-                "advanced_objective": False,
-                "next_action": "pivot_entity",
-                "hypothesis": "wrong representation",
-            }), "tools": []}},
-        ))
+        result = _run(
+            interpret(
+                state,
+                {
+                    "configurable": {
+                        "model": _StubModel(
+                            {
+                                "what_showed": "no hits in this representation",
+                                "advanced_objective": False,
+                                "next_action": "pivot_entity",
+                                "hypothesis": "wrong representation",
+                            }
+                        ),
+                        "tools": [],
+                    }
+                },
+            )
+        )
         adj = result["task_ledger"]["next_adjacent_evidence_path"]
         self.assertEqual(adj["window_hint"], "post-scan tail")
         self.assertEqual(adj["time_direction"], "forward")
@@ -914,30 +1222,43 @@ class InterpretContractTest(unittest.TestCase):
             "tools": ["get_case", "list_case_alerts"],
             "signals": ["ORIENTATION_ONLY"],
             "summary": "no concrete evidence returned; signals=ORIENTATION_ONLY",
-            "recommended_moves": ["run a concrete SIEM evidence query for this task objective"],
+            "recommended_moves": [
+                "run a concrete SIEM evidence query for this task objective"
+            ],
             "advanced_objective": False,
-            "orientation_facts": [{
-                "case_id": "~1",
-                "alert_time": "2022-01-18T12:19:10Z",
-                "host": "wazuh-client",
-                "src_ip": "172.17.130.196",
-                "rule_id": "31151",
-            }],
+            "orientation_facts": [
+                {
+                    "case_id": "~1",
+                    "alert_time": "2022-01-18T12:19:10Z",
+                    "host": "wazuh-client",
+                    "src_ip": "172.17.130.196",
+                    "rule_id": "31151",
+                }
+            ],
         }
-        result = _run(interpret(
-            self._state(obs),
-            {"configurable": {"model": _StubModel({
-                "what_showed": "case and alert context were loaded",
-                "advanced_objective": False,
-                "blocker": "no SIEM evidence query has run",
-                "progress_status": "needs evidence",
-                "next_action": "retrieve_specific_event",
-                "next_step_instruction": "Run one concrete SIEM search for host wazuh-client and source 172.17.130.196 after 2022-01-18T12:19:10Z; do not repeat get_case or list_case_alerts.",
-                "forbidden_repeats": ["get_case", "list_case_alerts"],
-                "hypothesis": "recon is established; progression remains unknown",
-                "confirm_if": "retrieve nearby events on the same host/source",
-            }), "tools": []}},
-        ))
+        result = _run(
+            interpret(
+                self._state(obs),
+                {
+                    "configurable": {
+                        "model": _StubModel(
+                            {
+                                "what_showed": "case and alert context were loaded",
+                                "advanced_objective": False,
+                                "blocker": "no SIEM evidence query has run",
+                                "progress_status": "needs evidence",
+                                "next_action": "retrieve_specific_event",
+                                "next_step_instruction": "Run one concrete SIEM search for host wazuh-client and source 172.17.130.196 after 2022-01-18T12:19:10Z; do not repeat get_case or list_case_alerts.",
+                                "forbidden_repeats": ["get_case", "list_case_alerts"],
+                                "hypothesis": "recon is established; progression remains unknown",
+                                "confirm_if": "retrieve nearby events on the same host/source",
+                            }
+                        ),
+                        "tools": [],
+                    }
+                },
+            )
+        )
         ledger = result["task_ledger"]
         self.assertIn("concrete SIEM search", ledger["next_step_instruction"])
         self.assertIn("get_case", ledger["forbidden_repeats"])
@@ -951,41 +1272,71 @@ class InterpretContractTest(unittest.TestCase):
             "tools": ["get_event_volume"],
             "signals": ["MULTI_REGIME"],
             "summary": "get_event_volume=1000 event(s), regimes=2; signals=MULTI_REGIME",
-            "recommended_moves": ["compare candidate regimes against the alert anchor before narrowing"],
+            "recommended_moves": [
+                "compare candidate regimes against the alert anchor before narrowing"
+            ],
             "advanced_objective": False,
-            "orientation_facts": [{
-                "case_id": "~1",
-                "alert_time": "2022-01-18T12:19:10Z",
-                "host": "wazuh-client",
-                "src_ip": "172.17.130.196",
-            }],
+            "orientation_facts": [
+                {
+                    "case_id": "~1",
+                    "alert_time": "2022-01-18T12:19:10Z",
+                    "host": "wazuh-client",
+                    "src_ip": "172.17.130.196",
+                }
+            ],
             "volume_regimes": [
-                {"start": "2022-01-18T12:17:30Z", "end": "2022-01-18T12:40:00Z", "peak_count": 300, "total": 600},
-                {"start": "2022-01-19T09:00:00Z", "end": "2022-01-19T10:00:00Z", "peak_count": 900, "total": 1200},
+                {
+                    "start": "2022-01-18T12:17:30Z",
+                    "end": "2022-01-18T12:40:00Z",
+                    "peak_count": 300,
+                    "total": 600,
+                },
+                {
+                    "start": "2022-01-19T09:00:00Z",
+                    "end": "2022-01-19T10:00:00Z",
+                    "peak_count": 900,
+                    "total": 1200,
+                },
             ],
         }
-        result = _run(interpret(
-            self._state(obs),
-            {"configurable": {"model": _StubModel({
-                "what_showed": "the profile surfaced two distinct regimes",
-                "advanced_objective": False,
-                "next_action": "profile_window",
-                "next_step_instruction": "Drill the 2022-01-18T12:17:30Z to 2022-01-18T12:40:00Z regime because it is adjacent to the alert anchor on the same host/source; do not follow the larger Jan 19 burst.",
-                "next_adjacent_evidence_path": {
-                    "entity": "wazuh-client / 172.17.130.196",
-                    "time_direction": "forward",
-                    "window_hint": "2022-01-18T12:17:30Z to 2022-01-18T12:40:00Z",
-                    "representation_hint": "raw web access events with full URI and parameters",
+        result = _run(
+            interpret(
+                self._state(obs),
+                {
+                    "configurable": {
+                        "model": _StubModel(
+                            {
+                                "what_showed": "the profile surfaced two distinct regimes",
+                                "advanced_objective": False,
+                                "next_action": "profile_window",
+                                "next_step_instruction": "Drill the 2022-01-18T12:17:30Z to 2022-01-18T12:40:00Z regime because it is adjacent to the alert anchor on the same host/source; do not follow the larger Jan 19 burst.",
+                                "next_adjacent_evidence_path": {
+                                    "entity": "wazuh-client / 172.17.130.196",
+                                    "time_direction": "forward",
+                                    "window_hint": "2022-01-18T12:17:30Z to 2022-01-18T12:40:00Z",
+                                    "representation_hint": "raw web access events with full URI and parameters",
+                                },
+                                "forbidden_repeats": [
+                                    "shrink around peak_time",
+                                    "largest burst by default",
+                                ],
+                                "hypothesis": "the Jan 18 regime is the relevant attack chain",
+                                "blocker": "the wrong burst would derail the investigation",
+                                "evidence_state": "aggregate_signal",
+                                "evidence_found": [
+                                    "Two separate activity regimes exist in the window."
+                                ],
+                                "remaining_gaps": [
+                                    "Need raw events from the Jan 18 regime to confirm payload semantics."
+                                ],
+                                "stop_condition": "retrieve the right regime's raw events",
+                            }
+                        ),
+                        "tools": [],
+                    }
                 },
-                "forbidden_repeats": ["shrink around peak_time", "largest burst by default"],
-                "hypothesis": "the Jan 18 regime is the relevant attack chain",
-                "blocker": "the wrong burst would derail the investigation",
-                "evidence_state": "aggregate_signal",
-                "evidence_found": ["Two separate activity regimes exist in the window."],
-                "remaining_gaps": ["Need raw events from the Jan 18 regime to confirm payload semantics."],
-                "stop_condition": "retrieve the right regime's raw events",
-            }), "tools": []}},
-        ))
+            )
+        )
         ledger = result["task_ledger"]
         self.assertIn("2022-01-18T12:17:30Z", ledger["next_step_instruction"])
         self.assertIn("Jan 19", ledger["next_step_instruction"])
@@ -1008,39 +1359,66 @@ class InterpretContractTest(unittest.TestCase):
         state = self._state(obs)
         state["messages"] = [
             SystemMessage(content="system"),
-            HumanMessage(content="1. Load the case record. 2. ... original seed checklist"),
-            AIMessage(content="", tool_calls=[{
-                "name": "search",
-                "args": {},
-                "id": "call-1",
-            }]),
-            ToolMessage(content="raw search result for e1", tool_call_id="call-1", name="search"),
+            HumanMessage(
+                content="1. Load the case record. 2. ... original seed checklist"
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search",
+                        "args": {},
+                        "id": "call-1",
+                    }
+                ],
+            ),
+            ToolMessage(
+                content="raw search result for e1", tool_call_id="call-1", name="search"
+            ),
         ]
-        result = _run(interpret(
-            state,
-            {"configurable": {"model": _StubModel({
-                "what_showed": "event e1 answers the task",
-                "advanced_objective": True,
-                "blocker": "",
-                "progress_status": "complete",
-                "next_action": "stop_completed",
-                "hypothesis": "task answered",
-                "confirm_if": "event e1 is sufficient",
-                "task_progress": "answered",
-                "evidence_found": ["event e1 answers the task"],
-                "stop_reason": "event e1 is sufficient",
-            }), "tools": []}},
-        ))
+        result = _run(
+            interpret(
+                state,
+                {
+                    "configurable": {
+                        "model": _StubModel(
+                            {
+                                "what_showed": "event e1 answers the task",
+                                "advanced_objective": True,
+                                "blocker": "",
+                                "progress_status": "complete",
+                                "next_action": "stop_completed",
+                                "hypothesis": "task answered",
+                                "confirm_if": "event e1 is sufficient",
+                                "task_progress": "answered",
+                                "evidence_found": ["event e1 answers the task"],
+                                "stop_reason": "event e1 is sufficient",
+                            }
+                        ),
+                        "tools": [],
+                    }
+                },
+            )
+        )
         msgs = result["messages"]
         # Recent tool evidence is preserved for assess/report synthesis.
-        self.assertTrue(any(isinstance(m, ToolMessage) and "raw search result" in m.content for m in msgs))
+        self.assertTrue(
+            any(
+                isinstance(m, ToolMessage) and "raw search result" in m.content
+                for m in msgs
+            )
+        )
         # The tail is a ToolMessage so assess routes into report synthesis, not "summary as report".
         self.assertIsInstance(msgs[-1], ToolMessage)
         self.assertTrue(any(isinstance(m, SystemMessage) for m in msgs))
         # The interpreted summary is carried as context.
-        self.assertTrue(any("event e1 answers the task" in (m.content or "") for m in msgs))
+        self.assertTrue(
+            any("event e1 answers the task" in (m.content or "") for m in msgs)
+        )
         # The seed checklist HumanMessage is dropped.
-        self.assertFalse(any("original seed checklist" in (m.content or "") for m in msgs))
+        self.assertFalse(
+            any("original seed checklist" in (m.content or "") for m in msgs)
+        )
 
     def test_fallback_emits_stop_completed_for_concrete_satisfying_evidence(self):
         obs = {
@@ -1052,10 +1430,12 @@ class InterpretContractTest(unittest.TestCase):
             "event_ids": ["e1"],
             "evidence_markers": ["event:e1"],
         }
-        result = _run(interpret(
-            self._state(obs),
-            {"configurable": {"model": None, "tools": []}},
-        ))
+        result = _run(
+            interpret(
+                self._state(obs),
+                {"configurable": {"model": None, "tools": []}},
+            )
+        )
         self.assertEqual(result["status"], "ready_to_assess")
         self.assertEqual(result["task_ledger"]["next_action"], "stop_completed")
 
@@ -1072,18 +1452,27 @@ class InterpretContractTest(unittest.TestCase):
         }
         state = self._state(obs)
         state["agent_name"] = "triage"
-        result = _run(interpret(
-            state,
-            {"configurable": {"model": _StubModel({
-                "what_showed": "nearby events were checked and the task is complete",
-                "advanced_objective": True,
-                "blocker": "",
-                "progress_status": "complete",
-                "next_action": "stop_completed",
-                "hypothesis": "triage complete",
-                "confirm_if": "report can be written from gathered evidence",
-            }), "tools": []}},
-        ))
+        result = _run(
+            interpret(
+                state,
+                {
+                    "configurable": {
+                        "model": _StubModel(
+                            {
+                                "what_showed": "nearby events were checked and the task is complete",
+                                "advanced_objective": True,
+                                "blocker": "",
+                                "progress_status": "complete",
+                                "next_action": "stop_completed",
+                                "hypothesis": "triage complete",
+                                "confirm_if": "report can be written from gathered evidence",
+                            }
+                        ),
+                        "tools": [],
+                    }
+                },
+            )
+        )
         self.assertEqual(result["status"], "ready_to_assess")
         self.assertEqual(result["task_ledger"]["next_action"], "stop_completed")
 
@@ -1101,18 +1490,27 @@ class InterpretContractTest(unittest.TestCase):
         }
         state = self._state(obs)
         state["agent_name"] = "triage"
-        result = _run(interpret(
-            state,
-            {"configurable": {"model": _StubModel({
-                "what_showed": "scoped evidence is sufficient to summarize and hand off",
-                "advanced_objective": True,
-                "blocker": "No case-linked alert summary has been loaded into the ledger yet",
-                "progress_status": "evidence_collected",
-                "next_action": "stop_completed",
-                "hypothesis": "enough evidence exists for triage handoff",
-                "confirm_if": "report can be written from gathered evidence",
-            }), "tools": []}},
-        ))
+        result = _run(
+            interpret(
+                state,
+                {
+                    "configurable": {
+                        "model": _StubModel(
+                            {
+                                "what_showed": "scoped evidence is sufficient to summarize and hand off",
+                                "advanced_objective": True,
+                                "blocker": "No case-linked alert summary has been loaded into the ledger yet",
+                                "progress_status": "evidence_collected",
+                                "next_action": "stop_completed",
+                                "hypothesis": "enough evidence exists for triage handoff",
+                                "confirm_if": "report can be written from gathered evidence",
+                            }
+                        ),
+                        "tools": [],
+                    }
+                },
+            )
+        )
         self.assertEqual(result["status"], "ready_to_assess")
         self.assertEqual(result["task_ledger"]["next_action"], "stop_completed")
         self.assertEqual(result["task_ledger"]["blocker"], "")
@@ -1127,18 +1525,27 @@ class InterpretContractTest(unittest.TestCase):
             "event_ids": ["e1"],
             "evidence_markers": ["event:e1"],
         }
-        result = _run(interpret(
-            self._state(obs),
-            {"configurable": {"model": _StubModel({
-                "what_showed": "an event was found but the batch is still truncated",
-                "advanced_objective": True,
-                "blocker": "query still too broad",
-                "progress_status": "working",
-                "next_action": "stop_completed",
-                "hypothesis": "a key event exists",
-                "confirm_if": "retrieve a usable sample first",
-            }), "tools": []}},
-        ))
+        result = _run(
+            interpret(
+                self._state(obs),
+                {
+                    "configurable": {
+                        "model": _StubModel(
+                            {
+                                "what_showed": "an event was found but the batch is still truncated",
+                                "advanced_objective": True,
+                                "blocker": "query still too broad",
+                                "progress_status": "working",
+                                "next_action": "stop_completed",
+                                "hypothesis": "a key event exists",
+                                "confirm_if": "retrieve a usable sample first",
+                            }
+                        ),
+                        "tools": [],
+                    }
+                },
+            )
+        )
         self.assertEqual(result["status"], "needs_more_work")
         self.assertEqual(result["task_ledger"]["next_action"], "refine_query")
 
@@ -1153,18 +1560,27 @@ class InterpretContractTest(unittest.TestCase):
         }
         state = self._state(obs)
         state["agent_name"] = "triage"
-        result = _run(interpret(
-            state,
-            {"configurable": {"model": _StubModel({
-                "what_showed": "the result is truncated and cannot support completion",
-                "advanced_objective": False,
-                "blocker": "query too broad",
-                "progress_status": "needs refinement",
-                "next_action": "refine_query",
-                "hypothesis": "",
-                "confirm_if": "retrieve a usable sample",
-            }), "tools": []}},
-        ))
+        result = _run(
+            interpret(
+                state,
+                {
+                    "configurable": {
+                        "model": _StubModel(
+                            {
+                                "what_showed": "the result is truncated and cannot support completion",
+                                "advanced_objective": False,
+                                "blocker": "query too broad",
+                                "progress_status": "needs refinement",
+                                "next_action": "refine_query",
+                                "hypothesis": "",
+                                "confirm_if": "retrieve a usable sample",
+                            }
+                        ),
+                        "tools": [],
+                    }
+                },
+            )
+        )
         self.assertEqual(result["status"], "needs_more_work")
         self.assertEqual(result["task_ledger"]["next_action"], "refine_query")
 
@@ -1184,18 +1600,27 @@ class InterpretContractTest(unittest.TestCase):
         }
         state = self._state(obs)
         state["agent_name"] = "triage"
-        result = _run(interpret(
-            state,
-            {"configurable": {"model": _StubModel({
-                "what_showed": "small scoped set retrieved; want to correlate the entity next",
-                "advanced_objective": True,
-                "blocker": "",
-                "progress_status": "working",
-                "next_action": "pivot_entity",
-                "hypothesis": "not yet grounded — correlate before concluding",
-                "confirm_if": "surrounding activity read",
-            }), "tools": []}},
-        ))
+        result = _run(
+            interpret(
+                state,
+                {
+                    "configurable": {
+                        "model": _StubModel(
+                            {
+                                "what_showed": "small scoped set retrieved; want to correlate the entity next",
+                                "advanced_objective": True,
+                                "blocker": "",
+                                "progress_status": "working",
+                                "next_action": "pivot_entity",
+                                "hypothesis": "not yet grounded — correlate before concluding",
+                                "confirm_if": "surrounding activity read",
+                            }
+                        ),
+                        "tools": [],
+                    }
+                },
+            )
+        )
         self.assertEqual(result["status"], "needs_more_work")
         self.assertEqual(result["task_ledger"]["next_action"], "pivot_entity")
 
@@ -1219,32 +1644,56 @@ class InterpretContractTest(unittest.TestCase):
         # handoff even on a FLOODED/TRUNCATED batch (its triage-only tolerance is preserved).
         state = self._state(self._flood_with_evidence_obs())
         state["agent_name"] = "triage"
-        result = _run(interpret(
-            state,
-            {"configurable": {"model": _StubModel({
-                "what_showed": "flooded, but the alert is grounded in the events already read",
-                "advanced_objective": False,
-                "blocker": "",
-                "stop_state": "complete",
-                "hypothesis": "scanning + lateral movement",
-                "confirm_if": "enough scoped evidence to route",
-            }), "tools": []}},
-        ))
+        result = _run(
+            interpret(
+                state,
+                {
+                    "configurable": {
+                        "model": _StubModel(
+                            {
+                                "what_showed": "flooded, but the alert is grounded in the events already read",
+                                "advanced_objective": False,
+                                "blocker": "",
+                                "stop_state": "complete",
+                                "hypothesis": "scanning + lateral movement",
+                                "confirm_if": "enough scoped evidence to route",
+                            }
+                        ),
+                        "tools": [],
+                    }
+                },
+            )
+        )
         self.assertEqual(result["status"], "ready_to_assess")
         self.assertEqual(result["task_ledger"]["next_action"], "stop_completed")
 
     def test_investigation_does_not_complete_on_flood_even_with_evidence(self):
         # The triage handoff shortcut is triage-only: investigation must NOT conclude a
         # finding on a flooded batch — it keeps refining.
-        state = self._state(self._flood_with_evidence_obs())  # agent_name stays investigation
-        result = _run(interpret(
-            state,
-            {"configurable": {"model": _StubModel({
-                "what_showed": "flooded", "advanced_objective": False,
-                "blocker": "too broad", "progress_status": "needs refinement",
-                "next_action": "refine_query", "hypothesis": "", "confirm_if": "narrow it",
-            }), "tools": []}},
-        ))
+        state = self._state(
+            self._flood_with_evidence_obs()
+        )  # agent_name stays investigation
+        result = _run(
+            interpret(
+                state,
+                {
+                    "configurable": {
+                        "model": _StubModel(
+                            {
+                                "what_showed": "flooded",
+                                "advanced_objective": False,
+                                "blocker": "too broad",
+                                "progress_status": "needs refinement",
+                                "next_action": "refine_query",
+                                "hypothesis": "",
+                                "confirm_if": "narrow it",
+                            }
+                        ),
+                        "tools": [],
+                    }
+                },
+            )
+        )
         self.assertEqual(result["status"], "needs_more_work")
         self.assertNotEqual(result["task_ledger"]["next_action"], "stop_completed")
 
@@ -1254,19 +1703,23 @@ class InterpretContractTest(unittest.TestCase):
             "evidence_queries": 1,
             "signals": ["FLOODED", "NO_NEW_EVIDENCE"],
             "summary": "search_keyword flooded without new evidence",
-            "recommended_moves": ["change the angle instead of repeating the same query shape"],
+            "recommended_moves": [
+                "change the angle instead of repeating the same query shape"
+            ],
             "advanced_objective": False,
-            "pivot_candidates": [{
-                "field": "url",
-                "value": "/wp-content/create_account",
-                "source_level": "case",
-                "role": "exemplar",
-                "confidence": "low",
-                "status": "active",
-                "failure_count": 1,
-                "last_failure_reason": "flooded",
-                "broader_alternative": "/wp-content/*",
-            }],
+            "pivot_candidates": [
+                {
+                    "field": "url",
+                    "value": "/wp-content/create_account",
+                    "source_level": "case",
+                    "role": "exemplar",
+                    "confidence": "low",
+                    "status": "active",
+                    "failure_count": 1,
+                    "last_failure_reason": "flooded",
+                    "broader_alternative": "/wp-content/*",
+                }
+            ],
         }
         state = self._state(obs)
         state["task_ledger"]["primary_pivot"] = {
@@ -1280,17 +1733,28 @@ class InterpretContractTest(unittest.TestCase):
             "last_failure_reason": "flooded",
             "broader_alternative": "/wp-content/*",
         }
-        state["task_ledger"]["active_pivots"] = [dict(state["task_ledger"]["primary_pivot"])]
-        result = _run(interpret(
-            state,
-            {"configurable": {"model": _StubModel({
-                "what_showed": "the exact path kept flooding and did not add new evidence",
-                "advanced_objective": False,
-                "blocker": "exact path is too specific",
-                "next_action": "refine_query",
-                "hypothesis": "web probing is broader than one path",
-            }), "tools": []}},
-        ))
+        state["task_ledger"]["active_pivots"] = [
+            dict(state["task_ledger"]["primary_pivot"])
+        ]
+        result = _run(
+            interpret(
+                state,
+                {
+                    "configurable": {
+                        "model": _StubModel(
+                            {
+                                "what_showed": "the exact path kept flooding and did not add new evidence",
+                                "advanced_objective": False,
+                                "blocker": "exact path is too specific",
+                                "next_action": "refine_query",
+                                "hypothesis": "web probing is broader than one path",
+                            }
+                        ),
+                        "tools": [],
+                    }
+                },
+            )
+        )
         ledger = result["task_ledger"]
         self.assertEqual(ledger["next_pivot_strategy"], "broaden")
         self.assertEqual(ledger["primary_pivot"]["value"], "/wp-content/*")
@@ -1308,18 +1772,40 @@ class QueryTrialsTest(unittest.TestCase):
             "summary": f"search={hits or 0} hit(s)",
             "recommended_moves": [],
             "advanced_objective": outcome == "scoped_hits",
-            "trials": [{"discriminator": discriminator, "window": window,
-                        "outcome": outcome, **({"hits": hits} if hits is not None else {})}],
+            "trials": [
+                {
+                    "discriminator": discriminator,
+                    "window": window,
+                    "outcome": outcome,
+                    **({"hits": hits} if hits is not None else {}),
+                }
+            ],
         }
 
     def test_observation_records_trial_from_search_args(self):
-        obs = build_observation([{
-            "name": "search",
-            "args": {"query": {"bool": {"must": [{"term": {"url": "/wp-content/create_account"}}]}},
-                     "time_range": {"from": "2022-01-18T12:19:10Z", "to": "2022-01-18T12:24:30Z"}},
-            "raw": json.dumps({"total": 0, "events": []}),
-            "artifacts": [],
-        }], objective="trace tail")
+        obs = build_observation(
+            [
+                {
+                    "name": "search",
+                    "args": {
+                        "query": {
+                            "bool": {
+                                "must": [
+                                    {"term": {"url": "/wp-content/create_account"}}
+                                ]
+                            }
+                        },
+                        "time_range": {
+                            "from": "2022-01-18T12:19:10Z",
+                            "to": "2022-01-18T12:24:30Z",
+                        },
+                    },
+                    "raw": json.dumps({"total": 0, "events": []}),
+                    "artifacts": [],
+                }
+            ],
+            objective="trace tail",
+        )
         self.assertEqual(len(obs["trials"]), 1)
         t = obs["trials"][0]
         self.assertIn("url=/wp-content/create_account", t["discriminator"])
@@ -1329,30 +1815,56 @@ class QueryTrialsTest(unittest.TestCase):
     def test_trial_preserves_retrieved_event_semantics(self):
         # A trial that returned events keeps a compact digest of WHAT it retrieved, so the
         # interpreter can analyze past queries' content after the events scroll out.
-        obs = build_observation([{
-            "name": "search",
-            "args": {"query": {"bool": {"must": [{"term": {"rule.groups": "web"}}]}},
-                     "time_range": {"from": "2022-01-18T12:38:00Z", "to": "2022-01-18T12:40:00Z"}},
-            "raw": json.dumps({"total": 2, "events": [{
-                "_id": "ws1", "rule.id": "31108", "rule.description": "Ignored URLs",
-                "rule.groups": "web", "data.url": "/wp-content/uploads/2022/01/x.php",
-                "data.id": "200"}]}),
-            "artifacts": [],
-        }], objective="find webshell")
+        obs = build_observation(
+            [
+                {
+                    "name": "search",
+                    "args": {
+                        "query": {"bool": {"must": [{"term": {"rule.groups": "web"}}]}},
+                        "time_range": {
+                            "from": "2022-01-18T12:38:00Z",
+                            "to": "2022-01-18T12:40:00Z",
+                        },
+                    },
+                    "raw": json.dumps(
+                        {
+                            "total": 2,
+                            "events": [
+                                {
+                                    "_id": "ws1",
+                                    "rule.id": "31108",
+                                    "rule.description": "Ignored URLs",
+                                    "rule.groups": "web",
+                                    "data.url": "/wp-content/uploads/2022/01/x.php",
+                                    "data.id": "200",
+                                }
+                            ],
+                        }
+                    ),
+                    "artifacts": [],
+                }
+            ],
+            objective="find webshell",
+        )
         t = obs["trials"][0]
         self.assertEqual(t["outcome"], "scoped_hits")
         self.assertTrue(t.get("evidence"))
         self.assertIn("/wp-content/uploads/2022/01/x.php", t["evidence"][0])
         # ...and it renders under the trial line for the interpreter to read.
         from agent.runtime.graph.interpretation import _render_query_trials
+
         rendered = _render_query_trials(obs["trials"])
         self.assertIn("31108", rendered)
         self.assertIn("/wp-content/uploads/2022/01/x.php", rendered)
 
     def test_trials_accumulate_and_repeat_increments_count(self):
         state = InterpretContractTest()._state(
-            self._obs_with_trial("dsl:url=/wp-content/create_account",
-                                 "2022-01-18T12:19:10Z..2022-01-18T12:24:30Z", "empty", hits=0),
+            self._obs_with_trial(
+                "dsl:url=/wp-content/create_account",
+                "2022-01-18T12:19:10Z..2022-01-18T12:24:30Z",
+                "empty",
+                hits=0,
+            ),
             retries=1,
         )
         cfg = {"configurable": {"model": None, "tools": []}}
@@ -1362,8 +1874,12 @@ class QueryTrialsTest(unittest.TestCase):
         self.assertEqual(trials[0]["count"], 1)
         # Feed the same trial again with the accumulated ledger → count increments, not dup.
         state2 = InterpretContractTest()._state(
-            self._obs_with_trial("dsl:url=/wp-content/create_account",
-                                 "2022-01-18T12:19:10Z..2022-01-18T12:24:30Z", "empty", hits=0),
+            self._obs_with_trial(
+                "dsl:url=/wp-content/create_account",
+                "2022-01-18T12:19:10Z..2022-01-18T12:24:30Z",
+                "empty",
+                hits=0,
+            ),
             retries=2,
         )
         state2["task_ledger"]["query_trials"] = trials
@@ -1377,23 +1893,34 @@ class QueryTrialsTest(unittest.TestCase):
         # with a must-disposition instruction — even if the raw event was past the 24KB cap
         # (diagnosed: a decoded webshell cracking command was boarded but never addressed).
         from agent.runtime.graph.interpretation import _prompt, _compromise_block
-        facts = ["command: [decoded] ./wphashcrack-0.1/wphashcrack.sh -w $PWD/rockyou.txt -u phopkins [EavD3M2o]"]
+
+        facts = [
+            "command: [decoded] ./wphashcrack-0.1/wphashcrack.sh -w $PWD/rockyou.txt -u phopkins [EavD3M2o]"
+        ]
         block = _compromise_block(facts)
         self.assertIn("CONFIRMED COMPROMISE INDICATORS", block)
         self.assertIn("wphashcrack", block)
         self.assertIn("disposition", block.lower())
-        text = _prompt({"title": "t"}, {"objective": "x"}, {"trials": []}, "", "", facts)
+        text = _prompt(
+            {"title": "t"}, {"objective": "x"}, {"trials": []}, "", "", facts
+        )
         self.assertIn("wphashcrack", text)
         # Empty when there are none.
         self.assertEqual(_compromise_block([]), "")
 
     def test_full_tool_outputs_passed_to_interpret_untruncated(self):
         from agent.runtime.graph.interpretation import _batch_tool_outputs, _prompt
-        raw = ('{"total":1,"events":[{"_id":"ws1","data":{"url":'
-               '"/wp-content/uploads/2022/01/x.php?wp_meta=W10=","id":"200"}}]}')
+
+        raw = (
+            '{"total":1,"events":[{"_id":"ws1","data":{"url":'
+            '"/wp-content/uploads/2022/01/x.php?wp_meta=W10=","id":"200"}}]}'
+        )
         msgs = [
-            SystemMessage(content="s"), HumanMessage(content="h"),
-            AIMessage(content="", tool_calls=[{"id": "1", "name": "search", "args": {}}]),
+            SystemMessage(content="s"),
+            HumanMessage(content="h"),
+            AIMessage(
+                content="", tool_calls=[{"id": "1", "name": "search", "args": {}}]
+            ),
             ToolMessage(content=raw, tool_call_id="1", name="search"),
         ]
         outputs = _batch_tool_outputs(msgs)
@@ -1407,10 +1934,24 @@ class QueryTrialsTest(unittest.TestCase):
         # query_trials is rendered once (the trials block), not again in the ledger JSON
         # dump; observation trials/evidence_digest/evidence_snapshots are not re-dumped.
         from agent.runtime.graph.interpretation import _prompt
-        ledger = {"objective": "x", "query_trials": [
-            {"discriminator": "dsl:url=UNIQUEDISCRIM", "window": "w", "outcome": "empty", "count": 1}]}
-        obs = {"signals": ["EMPTY"], "trials": [], "evidence_digest": ["DIGESTONLYMARKER"],
-               "evidence_snapshots": [{"url": "SNAPSHOTMARKER"}]}
+
+        ledger = {
+            "objective": "x",
+            "query_trials": [
+                {
+                    "discriminator": "dsl:url=UNIQUEDISCRIM",
+                    "window": "w",
+                    "outcome": "empty",
+                    "count": 1,
+                }
+            ],
+        }
+        obs = {
+            "signals": ["EMPTY"],
+            "trials": [],
+            "evidence_digest": ["DIGESTONLYMARKER"],
+            "evidence_snapshots": [{"url": "SNAPSHOTMARKER"}],
+        }
         text = _prompt({"title": "t"}, ledger, obs, "")
         # The trial's discriminator appears exactly once (the block), not twice (block + dump).
         self.assertEqual(text.count("UNIQUEDISCRIM"), 1)
@@ -1421,12 +1962,17 @@ class QueryTrialsTest(unittest.TestCase):
 
     def test_prompt_renders_trials_block_with_autocorrect_guidance(self):
         from agent.runtime.graph.interpretation import _prompt
+
         ledger = {
             "objective": "trace tail",
             "query_trials": [
-                {"discriminator": "dsl:url=/wp-content/create_account",
-                 "window": "2022-01-18T12:19:10Z..2022-01-18T12:24:30Z",
-                 "outcome": "empty", "count": 14, "hits": 0},
+                {
+                    "discriminator": "dsl:url=/wp-content/create_account",
+                    "window": "2022-01-18T12:19:10Z..2022-01-18T12:24:30Z",
+                    "outcome": "empty",
+                    "count": 14,
+                    "hits": 0,
+                },
             ],
         }
         text = _prompt({"title": "t"}, ledger, {"trials": []}, "")

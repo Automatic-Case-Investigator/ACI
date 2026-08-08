@@ -6,6 +6,7 @@ module imports `agent.*`. Tests can also still be run as standalone scripts
 running the whole tree with `python -m pytest tests/unit tests/django` is the
 supported path.
 """
+
 from __future__ import annotations
 
 import os

@@ -2,6 +2,7 @@
 
 Run as stdio: python -m aci_taskqueue.server
 """
+
 from __future__ import annotations
 
 import json
@@ -16,6 +17,7 @@ from . import store as _store
 app = Server("aci-taskqueue")
 _store.init_db()
 
+
 def _identity_overrides() -> dict:
     """Queue identity (case/run/agent) is owned by the platform, not the model.
 
@@ -25,8 +27,11 @@ def _identity_overrides() -> dict:
     id into agent_name). Absent env (ad-hoc use), model-supplied values are kept.
     """
     out: dict = {}
-    for key, env in (("case_id", "ACI_CASE_ID"), ("run_id", "ACI_RUN_ID"),
-                     ("agent_name", "ACI_AGENT_NAME")):
+    for key, env in (
+        ("case_id", "ACI_CASE_ID"),
+        ("run_id", "ACI_RUN_ID"),
+        ("agent_name", "ACI_AGENT_NAME"),
+    ):
         val = os.environ.get(env)
         if val:
             out[key] = val
@@ -36,7 +41,9 @@ def _identity_overrides() -> dict:
 def _ident(arguments: dict, overrides: dict, key: str) -> str:
     val = overrides.get(key) or arguments.get(key)
     if not val:
-        raise ValueError(f"{key} is required but was not supplied by the platform or caller.")
+        raise ValueError(
+            f"{key} is required but was not supplied by the platform or caller."
+        )
     return val
 
 
@@ -147,8 +154,16 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "title": {"type": "string"},
                     "description": {"type": "string", "default": ""},
-                    "priority": {"type": "integer", "default": 50, "description": "0–100; higher = earlier."},
-                    "origin": {"type": "string", "default": "agent", "enum": ["agent", "human"]},
+                    "priority": {
+                        "type": "integer",
+                        "default": 50,
+                        "description": "0–100; higher = earlier.",
+                    },
+                    "origin": {
+                        "type": "string",
+                        "default": "agent",
+                        "enum": ["agent", "human"],
+                    },
                 },
                 "required": ["title"],
             },
@@ -236,8 +251,14 @@ async def list_tools() -> list[Tool]:
                     "task_id": {"type": "string"},
                     "title": {"type": "string"},
                     "description": {"type": "string"},
-                    "priority": {"type": "integer", "description": "0–100; higher = claimed earlier."},
-                    "status": {"type": "string", "enum": ["pending", "failed", "dismissed", "blocked"]},
+                    "priority": {
+                        "type": "integer",
+                        "description": "0–100; higher = claimed earlier.",
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": ["pending", "failed", "dismissed", "blocked"],
+                    },
                 },
                 "required": ["task_id"],
             },
@@ -259,15 +280,17 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     ov = _identity_overrides()
     try:
         if name == "create_task":
-            result = _store.agent_visible_task(_store.create_task(
-                case_id=_ident(arguments, ov, "case_id"),
-                run_id=_ident(arguments, ov, "run_id"),
-                agent_name=_ident(arguments, ov, "agent_name"),
-                title=arguments["title"],
-                description=arguments.get("description", ""),
-                priority=int(arguments.get("priority", 50)),
-                origin=arguments.get("origin", "agent"),
-            ))
+            result = _store.agent_visible_task(
+                _store.create_task(
+                    case_id=_ident(arguments, ov, "case_id"),
+                    run_id=_ident(arguments, ov, "run_id"),
+                    agent_name=_ident(arguments, ov, "agent_name"),
+                    title=arguments["title"],
+                    description=arguments.get("description", ""),
+                    priority=int(arguments.get("priority", 50)),
+                    origin=arguments.get("origin", "agent"),
+                )
+            )
         elif name == "list_tasks":
             tasks = _store.list_tasks(
                 _ident(arguments, ov, "case_id"),
@@ -283,24 +306,34 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             )
             result = {"task": _store.agent_visible_task(task)}
         elif name == "complete_task":
-            result = _store.agent_visible_task(_store.complete_task(
-                arguments["task_id"],
-                arguments["summary"],
-                arguments.get("avfs_paths"),
-            ))
+            result = _store.agent_visible_task(
+                _store.complete_task(
+                    arguments["task_id"],
+                    arguments["summary"],
+                    arguments.get("avfs_paths"),
+                )
+            )
         elif name == "fail_task":
-            result = _store.agent_visible_task(_store.fail_task(arguments["task_id"], arguments["reason"]))
+            result = _store.agent_visible_task(
+                _store.fail_task(arguments["task_id"], arguments["reason"])
+            )
         elif name == "dismiss_task":
-            result = _store.agent_visible_task(_store.dismiss_task(arguments["task_id"], arguments.get("reason", "")))
+            result = _store.agent_visible_task(
+                _store.dismiss_task(arguments["task_id"], arguments.get("reason", ""))
+            )
         elif name == "delete_task":
             result = {"deleted": _store.delete_task(arguments["task_id"])}
         elif name == "update_task":
             kw = {k: v for k, v in arguments.items() if k != "task_id"}
             # claimed/completed are graph-managed; never let a caller set them here.
             if kw.get("status") in {"claimed", "completed"}:
-                result = {"error": "status 'claimed'/'completed' is managed by the platform; not settable via update_task"}
+                result = {
+                    "error": "status 'claimed'/'completed' is managed by the platform; not settable via update_task"
+                }
             else:
-                result = _store.agent_visible_task(_store.update_task(arguments["task_id"], **kw))
+                result = _store.agent_visible_task(
+                    _store.update_task(arguments["task_id"], **kw)
+                )
         elif name == "reopen_task":
             result = _store.agent_visible_task(_store.reopen_task(arguments["task_id"]))
         else:
@@ -318,4 +351,5 @@ async def main() -> None:
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(main())

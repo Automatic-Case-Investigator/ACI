@@ -4,6 +4,7 @@ tasks from a "## New Leads" section without applying a lead budget cap.
 
 No real Wazuh, TheHive, LLM, or AVFS needed.
 """
+
 from __future__ import annotations
 
 import json
@@ -13,7 +14,9 @@ import tempfile
 import unittest
 
 # Navigate from .claude/skills/run-aci-backend/tests/ up to project root (4 levels)
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, project_root)
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
 os.environ["SECRET_KEY"] = "test"
@@ -21,6 +24,7 @@ os.environ["TASKQUEUE_DB_PATH"] = tempfile.mktemp(suffix=".db")
 os.environ["BOARD_DB_PATH"] = tempfile.mktemp(suffix=".db")
 
 import django
+
 django.setup()
 
 from aci_taskqueue.store import init_db, list_tasks as sq_list, create_task, list_tasks
@@ -43,21 +47,24 @@ def _lead_dicts(priorities):
     out = []
     for i, p in enumerate(priorities):
         ip = f"10.0.0.{i + 1}"
-        out.append({
-            "title": f"Investigate C2 callback activity for {ip}",
-            "pivots": f"ip={ip}, time=2025-04-20T03:{i:02d}:00Z",
-            "evidence": f"event=evt-{i}, {ip} appeared in the current task output",
-            "priority": p,
-            "approved": True,
-            "category": "approved",
-            "reason": "evidence-backed callback",
-        })
+        out.append(
+            {
+                "title": f"Investigate C2 callback activity for {ip}",
+                "pivots": f"ip={ip}, time=2025-04-20T03:{i:02d}:00Z",
+                "evidence": f"event=evt-{i}, {ip} appeared in the current task output",
+                "priority": p,
+                "approved": True,
+                "category": "approved",
+                "reason": "evidence-backed callback",
+            }
+        )
     return out
 
 
 class StubLeadModel:
     """Returns a fixed validated-lead JSON array regardless of prompt — the lead
     model is now responsible for extraction+validation."""
+
     def __init__(self, leads):
         self._payload = json.dumps(leads)
 
@@ -69,10 +76,15 @@ class StubLeadModel:
 
 
 def _config(priorities):
-    return {"configurable": {
-        "tools": [TQTool("create_task", create_task), TQTool("list_tasks", list_tasks)],
-        "model": StubLeadModel(_lead_dicts(priorities)),
-    }}
+    return {
+        "configurable": {
+            "tools": [
+                TQTool("create_task", create_task),
+                TQTool("list_tasks", list_tasks),
+            ],
+            "model": StubLeadModel(_lead_dicts(priorities)),
+        }
+    }
 
 
 def _leads_block(priorities):
@@ -83,7 +95,9 @@ def _leads_block(priorities):
         lines.append(f"- Event evt-{i} observed callback artifact 10.0.0.{i + 1}.")
     lines += ["", "## New Leads"]
     for i, p in enumerate(priorities):
-        lines.append(f"- Investigate C2 callback activity for 10.0.0.{i + 1} (priority {p})")
+        lines.append(
+            f"- Investigate C2 callback activity for 10.0.0.{i + 1} (priority {p})"
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -102,6 +116,7 @@ class PivotLeadQueueTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         init_db()
         import sqlite3
+
         con = sqlite3.connect(os.environ["TASKQUEUE_DB_PATH"])
         con.execute("DELETE FROM tasks")
         con.commit()

@@ -8,6 +8,7 @@ later), wasting a full task cycle. `run_seeder` now runs each Phase-2
 node's lead validator already trusts (leads.duplicate_existing_task) before
 executing it.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -17,7 +18,9 @@ import sys
 import unittest
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, project_root)
 import django  # noqa: E402
 
@@ -27,9 +30,13 @@ from langchain_core.language_models.chat_models import BaseChatModel  # noqa: E4
 from langchain_core.messages import AIMessage  # noqa: E402
 
 from agent.agents.base import Handoff  # noqa: E402
-from agent.runtime.graph import GRAPH  # noqa: E402,F401 (import graph before seeder_runner: avoids a circular import — see graph/nodes_loop.py)
+from agent.runtime.graph import (
+    GRAPH,
+)  # noqa: E402,F401 (import graph before seeder_runner: avoids a circular import — see graph/nodes_loop.py)
 from agent.runtime.engine.seeder_runner import (  # noqa: E402
-    _extract_plan_items, _item_priority, run_seeder,
+    _extract_plan_items,
+    _item_priority,
+    run_seeder,
 )
 
 
@@ -68,10 +75,13 @@ class _DuplicateProposingModel(BaseChatModel):
                 "description": "pivot to all SIEM events to/from it",
                 "priority": 90,
             }
-            return AIMessage(content="", tool_calls=[
-                {"name": "create_task", "id": "c1", "args": dup_args},
-                {"name": "create_task", "id": "c2", "args": dict(dup_args)},
-            ])
+            return AIMessage(
+                content="",
+                tool_calls=[
+                    {"name": "create_task", "id": "c1", "args": dup_args},
+                    {"name": "create_task", "id": "c2", "args": dict(dup_args)},
+                ],
+            )
         return AIMessage(content="")
 
 
@@ -113,7 +123,9 @@ class SeederDedupTest(unittest.TestCase):
         _run(run_seeder(handoff, tools, _DuplicateProposingModel(), vicinity_hours=24))
 
         # Only ONE of the two identical create_task calls should have executed.
-        matching = [c for c in created if "attacker-controlled destination" in c["title"]]
+        matching = [
+            c for c in created if "attacker-controlled destination" in c["title"]
+        ]
         self.assertEqual(len(matching), 1)
 
 
@@ -150,7 +162,9 @@ class SeederPriorityTest(unittest.TestCase):
         self.assertEqual(_item_priority(item), 95)
 
     def test_default_when_neither_stated_nor_keyword(self):
-        self.assertEqual(_item_priority("Summarize the overall investigation timeline"), 65)
+        self.assertEqual(
+            _item_priority("Summarize the overall investigation timeline"), 65
+        )
 
 
 class SeederTimelineTest(unittest.TestCase):
@@ -176,30 +190,71 @@ class SeederTimelineTest(unittest.TestCase):
     def test_seeds_one_coverage_map_with_every_burst(self):
         created: list[dict] = []
         bursts = [
-            {"start": "2022-01-18T11:59:00Z", "end": "2022-01-18T12:38:00Z", "total": 400},
-            {"start": "2022-01-18T13:13:50Z", "end": "2022-01-18T13:14:53Z", "total": 30},
+            {
+                "start": "2022-01-18T11:59:00Z",
+                "end": "2022-01-18T12:38:00Z",
+                "total": 400,
+            },
+            {
+                "start": "2022-01-18T13:13:50Z",
+                "end": "2022-01-18T13:14:53Z",
+                "total": 30,
+            },
         ]
-        report = ("## Triage Summary\nActivity observed from 2022-01-18T11:59:00Z through "
-                  "2022-01-18T13:14:53Z on the host.\n")
-        _run(run_seeder(Handoff(triage_report=report), self._tools(created, bursts),
-                        _NoopModel(), vicinity_hours=24))
+        report = (
+            "## Triage Summary\nActivity observed from 2022-01-18T11:59:00Z through "
+            "2022-01-18T13:14:53Z on the host.\n"
+        )
+        _run(
+            run_seeder(
+                Handoff(triage_report=report),
+                self._tools(created, bursts),
+                _NoopModel(),
+                vicinity_hours=24,
+            )
+        )
 
-        timeline = [c for c in created if c["title"].startswith("Account for timeline coverage")]
+        timeline = [
+            c for c in created if c["title"].startswith("Account for timeline coverage")
+        ]
         self.assertEqual(len(timeline), 1)
         self.assertEqual(timeline[0]["priority"], 70)
-        self.assertIn("2022-01-18T11:59:00Z to 2022-01-18T12:38:00Z", timeline[0]["description"])
-        self.assertIn("2022-01-18T13:13:50Z to 2022-01-18T13:14:53Z", timeline[0]["description"])
+        self.assertIn(
+            "2022-01-18T11:59:00Z to 2022-01-18T12:38:00Z", timeline[0]["description"]
+        )
+        self.assertIn(
+            "2022-01-18T13:13:50Z to 2022-01-18T13:14:53Z", timeline[0]["description"]
+        )
         self.assertIn("covered by a cited finding", timeline[0]["description"])
         self.assertIn("converted into a concrete New Lead", timeline[0]["description"])
 
     def test_single_burst_is_not_decomposed(self):
         # One burst that fills the window is not a decomposition — seed nothing here.
         created: list[dict] = []
-        bursts = [{"start": "2022-01-18T11:59:00Z", "end": "2022-01-18T13:14:53Z", "total": 400}]
+        bursts = [
+            {
+                "start": "2022-01-18T11:59:00Z",
+                "end": "2022-01-18T13:14:53Z",
+                "total": 400,
+            }
+        ]
         report = "Activity from 2022-01-18T11:59:00Z to 2022-01-18T13:14:53Z."
-        _run(run_seeder(Handoff(triage_report=report), self._tools(created, bursts),
-                        _NoopModel(), vicinity_hours=24))
-        self.assertEqual([c for c in created if c["title"].startswith("Account for timeline coverage")], [])
+        _run(
+            run_seeder(
+                Handoff(triage_report=report),
+                self._tools(created, bursts),
+                _NoopModel(),
+                vicinity_hours=24,
+            )
+        )
+        self.assertEqual(
+            [
+                c
+                for c in created
+                if c["title"].startswith("Account for timeline coverage")
+            ],
+            [],
+        )
 
     def test_no_incident_window_skips_decomposition(self):
         # Fewer than two distinct timestamps → nothing to decompose (and no volume call).
@@ -214,12 +269,28 @@ class SeederTimelineTest(unittest.TestCase):
             called["vol"] += 1
             return {"bursts": []}
 
-        tools = [_Tool("create_task", _create_task), _Tool("list_tasks", lambda **_k: created),
-                 _Tool("get_event_volume", _get_event_volume)]
-        _run(run_seeder(Handoff(triage_report="No timestamps here."), tools,
-                        _NoopModel(), vicinity_hours=24))
+        tools = [
+            _Tool("create_task", _create_task),
+            _Tool("list_tasks", lambda **_k: created),
+            _Tool("get_event_volume", _get_event_volume),
+        ]
+        _run(
+            run_seeder(
+                Handoff(triage_report="No timestamps here."),
+                tools,
+                _NoopModel(),
+                vicinity_hours=24,
+            )
+        )
         self.assertEqual(called["vol"], 0)
-        self.assertEqual([c for c in created if c["title"].startswith("Account for timeline coverage")], [])
+        self.assertEqual(
+            [
+                c
+                for c in created
+                if c["title"].startswith("Account for timeline coverage")
+            ],
+            [],
+        )
 
 
 if __name__ == "__main__":

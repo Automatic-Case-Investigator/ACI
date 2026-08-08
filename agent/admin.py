@@ -23,7 +23,13 @@ from .models import (
 
 @admin.register(AgentConfig)
 class AgentConfigAdmin(admin.ModelAdmin):
-    list_display = ("agent_name", "max_steps", "max_tool_calls", "stream_intent", "updated_at")
+    list_display = (
+        "agent_name",
+        "max_steps",
+        "max_tool_calls",
+        "stream_intent",
+        "updated_at",
+    )
 
 
 @admin.register(WorkflowConfig)
@@ -33,7 +39,15 @@ class WorkflowConfigAdmin(admin.ModelAdmin):
 
 @admin.register(WorkflowTriggerConfig)
 class WorkflowTriggerConfigAdmin(admin.ModelAdmin):
-    list_display = ("id", "name", "provider_key", "event_type", "enabled", "dedupe_window", "updated_at")
+    list_display = (
+        "id",
+        "name",
+        "provider_key",
+        "event_type",
+        "enabled",
+        "dedupe_window",
+        "updated_at",
+    )
     list_filter = ("provider_key", "enabled")
     search_fields = ("id", "name", "provider_key", "event_type")
 
@@ -60,7 +74,15 @@ class IntegrationConnectionAdmin(admin.ModelAdmin):
 
 @admin.register(AgentRun)
 class AgentRunAdmin(admin.ModelAdmin):
-    list_display = ("id", "agent_name", "case_id", "status", "verdict_value", "trigger", "created_at")
+    list_display = (
+        "id",
+        "agent_name",
+        "case_id",
+        "status",
+        "verdict_value",
+        "trigger",
+        "created_at",
+    )
     list_filter = ("agent_name", "status", "trigger")
     search_fields = ("case_id", "id")
 
@@ -87,7 +109,14 @@ class MCPServerConfigAdmin(admin.ModelAdmin):
 
 @admin.register(ModelProviderConfig)
 class ModelProviderConfigAdmin(admin.ModelAdmin):
-    list_display = ("id", "model", "base_url", "tool_calling_mode", "enabled", "updated_at")
+    list_display = (
+        "id",
+        "model",
+        "base_url",
+        "tool_calling_mode",
+        "enabled",
+        "updated_at",
+    )
     list_filter = ("tool_calling_mode", "enabled")
     search_fields = ("id", "model", "base_url")
 
@@ -105,7 +134,15 @@ class FeedbackEntryAdmin(admin.ModelAdmin):
 
 @admin.register(PatternEntry)
 class PatternEntryAdmin(admin.ModelAdmin):
-    list_display = ("name", "verdict", "confidence", "enabled", "owner", "expires_at", "updated_at")
+    list_display = (
+        "name",
+        "verdict",
+        "confidence",
+        "enabled",
+        "owner",
+        "expires_at",
+        "updated_at",
+    )
     list_filter = ("verdict", "confidence", "enabled")
     search_fields = ("name", "owner")
 
@@ -125,7 +162,9 @@ def _promote_candidate(candidate: PatternCandidate, reviewer: str) -> PatternEnt
     candidate.reviewer = reviewer or candidate.reviewer
     candidate.reviewed_at = timezone.now()
     candidate.promoted_pattern = pattern
-    candidate.save(update_fields=["status", "reviewer", "reviewed_at", "promoted_pattern"])
+    candidate.save(
+        update_fields=["status", "reviewer", "reviewed_at", "promoted_pattern"]
+    )
     return pattern
 
 
@@ -143,7 +182,9 @@ class PatternCandidateAdmin(admin.ModelAdmin):
         for candidate in queryset.filter(status=PatternCandidate.STATUS_PENDING):
             _promote_candidate(candidate, reviewer)
             promoted += 1
-        self.message_user(request, f"Promoted {promoted} candidate(s) to live patterns.")
+        self.message_user(
+            request, f"Promoted {promoted} candidate(s) to live patterns."
+        )
 
     @admin.action(description="Reject selected")
     def reject_candidates(self, request, queryset):
@@ -158,7 +199,14 @@ class PatternCandidateAdmin(admin.ModelAdmin):
 
 @admin.register(BaselineSnapshot)
 class BaselineSnapshotAdmin(admin.ModelAdmin):
-    list_display = ("subject_type", "subject_id", "feature", "health", "window_days", "computed_at")
+    list_display = (
+        "subject_type",
+        "subject_id",
+        "feature",
+        "health",
+        "window_days",
+        "computed_at",
+    )
     list_filter = ("subject_type", "health")
     search_fields = ("subject_id", "feature")
 

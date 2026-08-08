@@ -6,6 +6,7 @@ backend-specific, so we pull the (small) set of recent verdicts and tally them i
 Python. Demoted verdicts count under their final value (`inconclusive`), which is
 the honest tally an analyst wants.
 """
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -42,9 +43,11 @@ def _runs_since(days: int):
     from agent.models import AgentRun
 
     since = datetime.now(timezone.utc) - timedelta(days=max(1, days))
-    runs = list(AgentRun.objects.filter(
-        created_at__gte=since, verdict__isnull=False
-    ).only("id", "agent_name", "trigger", "verdict", "created_at", "metadata"))
+    runs = list(
+        AgentRun.objects.filter(created_at__gte=since, verdict__isnull=False).only(
+            "id", "agent_name", "trigger", "verdict", "created_at", "metadata"
+        )
+    )
     # Exclude all interactive child runs (triage/investigation sub-agents owned by
     # an orchestrator session). Their verdict is propagated to the session row which
     # IS counted. Counting children separately causes double-counting and makes the
@@ -69,7 +72,9 @@ def _build_feedback_map(run_ids: list) -> dict:
 
     return {
         fb.run_id: fb.analyst_verdict
-        for fb in FeedbackEntry.objects.filter(run_id__in=run_ids).only("run_id", "analyst_verdict")
+        for fb in FeedbackEntry.objects.filter(run_id__in=run_ids).only(
+            "run_id", "analyst_verdict"
+        )
         if fb.analyst_verdict is not None
     }
 
@@ -96,7 +101,9 @@ def _finalize_rows(buckets: dict, key_field: str, *, sort_by_total: bool) -> lis
     return out
 
 
-def verdict_trend(days: int = 7, *, runs: list | None = None, feedback_map: dict | None = None) -> list[dict]:
+def verdict_trend(
+    days: int = 7, *, runs: list | None = None, feedback_map: dict | None = None
+) -> list[dict]:
     """Per-day counts of each verdict value over the window (oldest first).
 
     Uses the analyst-corrected verdict where available, falling back to the
@@ -105,7 +112,9 @@ def verdict_trend(days: int = 7, *, runs: list | None = None, feedback_map: dict
     """
     if runs is None or feedback_map is None:
         runs, feedback_map = load_verdict_runs(days)
-    buckets: dict[str, dict[str, int]] = defaultdict(lambda: {v: 0 for v in VERDICT_VALUES})
+    buckets: dict[str, dict[str, int]] = defaultdict(
+        lambda: {v: 0 for v in VERDICT_VALUES}
+    )
     for run in runs:
         v = _verdict_of(run, feedback_map)
         if v is None:
@@ -115,7 +124,13 @@ def verdict_trend(days: int = 7, *, runs: list | None = None, feedback_map: dict
     return _finalize_rows(buckets, "date", sort_by_total=False)
 
 
-def verdict_breakdown(days: int = 7, group_by: str = "agent_name", *, runs: list | None = None, feedback_map: dict | None = None) -> list[dict]:
+def verdict_breakdown(
+    days: int = 7,
+    group_by: str = "agent_name",
+    *,
+    runs: list | None = None,
+    feedback_map: dict | None = None,
+) -> list[dict]:
     """Counts of each verdict value grouped by a run/verdict attribute.
 
     Uses the analyst-corrected verdict where available.
@@ -124,7 +139,9 @@ def verdict_breakdown(days: int = 7, group_by: str = "agent_name", *, runs: list
         group_by = "agent_name"
     if runs is None or feedback_map is None:
         runs, feedback_map = load_verdict_runs(days)
-    groups: dict[str, dict[str, int]] = defaultdict(lambda: {v: 0 for v in VERDICT_VALUES})
+    groups: dict[str, dict[str, int]] = defaultdict(
+        lambda: {v: 0 for v in VERDICT_VALUES}
+    )
     for run in runs:
         v = _verdict_of(run, feedback_map)
         if v is None:

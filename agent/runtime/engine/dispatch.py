@@ -10,6 +10,7 @@ No Channels / threading / event-loop assumptions live here — `runner.py` owns 
 interactive event-loop plumbing and calls into this; headless callers can use
 `dispatch_run_sync`.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -24,11 +25,13 @@ from .run import run_agent
 # Terminal states that get a response decision. `failed` and `incomplete_budget`
 # are included so an unattended workflow always leaves a trace on the case; a
 # `cancelled` run is excluded because the analyst deliberately stopped it.
-_RESPONDABLE_STATES = frozenset({
-    AgentRun.STATUS_COMPLETED,
-    AgentRun.STATUS_FAILED,
-    AgentRun.STATUS_INCOMPLETE_BUDGET,
-})
+_RESPONDABLE_STATES = frozenset(
+    {
+        AgentRun.STATUS_COMPLETED,
+        AgentRun.STATUS_FAILED,
+        AgentRun.STATUS_INCOMPLETE_BUDGET,
+    }
+)
 
 
 async def _refresh_run_or_none(run: AgentRun, stage: str) -> AgentRun | None:
@@ -74,8 +77,11 @@ async def dispatch_run(
             case_id, agent_name, dedupe_window
         )
         if existing is not None:
-            emit("workflow", AUDIT_DEDUPED,
-                 f"case {case_id}: {agent_name} already active ({str(existing.id)[:8]}), skipped")
+            emit(
+                "workflow",
+                AUDIT_DEDUPED,
+                f"case {case_id}: {agent_name} already active ({str(existing.id)[:8]}), skipped",
+            )
             return existing
 
     meta = dict(metadata or {})

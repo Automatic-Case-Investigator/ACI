@@ -6,7 +6,9 @@ import unittest
 
 import httpx
 
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 sys.path.insert(0, project_root)
 sys.path.insert(0, os.path.join(project_root, "aci-mcp-servers", "aci-wazuh"))
 
@@ -58,7 +60,9 @@ class TestWazuhSearchKeyword(unittest.TestCase):
         fake = _FakeOpenSearchClient(and_hits=(3, [{"_id": "a"}]))
         client = self._client(fake)
 
-        client.search_keyword("powershell mimikatz svchost", time_range=_WINDOW, max_results=250)
+        client.search_keyword(
+            "powershell mimikatz svchost", time_range=_WINDOW, max_results=250
+        )
 
         self.assertEqual(len(fake.posts), 1)
         self.assertEqual(fake.posts[0][0], "/wazuh-alerts-*/_search")

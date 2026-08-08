@@ -24,6 +24,7 @@ inverting the graph→analysis import direction. Mirrors their contract: one bou
 model call, fail-open (returns None on unavailable/timeout/unparseable so the caller falls
 back to a regex check and the run never stalls).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -98,6 +99,7 @@ class TaskReview:
     serialized into `last_findings_verification` unchanged so the pivot node needs no
     edits. `decision` drives the single keep-working re-injection.
     """
+
     findings: FindingsVerification
     decision: str  # "conclude" | "keep_working"
     feedback_text: str
@@ -127,7 +129,8 @@ class TaskReview:
 
     def findings_state(self) -> dict:
         """Serializable findings verdicts for `AgentState.last_findings_verification`
-        (identical shape to `FindingsVerification.to_state`, so board gating is unchanged)."""
+        (identical shape to `FindingsVerification.to_state`, so board gating is unchanged).
+        """
         return self.findings.to_state()
 
 
@@ -160,13 +163,17 @@ def _build_review_prompt(
     if hit_count is not None:
         signal_lines.append(
             f"- Most recent search returned {hit_count:,} hits"
-            + (" (AT/NEAR the result ceiling — likely truncated)"
-               if signals.get("hit_ceiling") else "")
+            + (
+                " (AT/NEAR the result ceiling — likely truncated)"
+                if signals.get("hit_ceiling")
+                else ""
+            )
         )
     unpivoted = signals.get("unpivoted_iocs") or []
     if unpivoted:
         signal_lines.append(
-            "- Confirmed network IOC(s) with no New Leads pivot: " + ", ".join(unpivoted)
+            "- Confirmed network IOC(s) with no New Leads pivot: "
+            + ", ".join(unpivoted)
         )
     clusters = signals.get("unqueried_clusters") or []
     if clusters:
@@ -179,7 +186,8 @@ def _build_review_prompt(
     if time_gaps:
         signal_lines.append(
             "- Time range(s) INSIDE a window the agent profiled but never searched for raw "
-            "events: " + ", ".join(time_gaps)
+            "events: "
+            + ", ".join(time_gaps)
             + " — use this as a coverage signal, then judge whether the gap could change "
             "the task conclusion."
         )
@@ -273,19 +281,30 @@ async def review_task_model(
     )
     try:
         resp = await asyncio.wait_for(
-            model.ainvoke([
-                SystemMessage(content=_REVIEW_SYSTEM),
-                HumanMessage(content=prompt),
-            ]),
+            model.ainvoke(
+                [
+                    SystemMessage(content=_REVIEW_SYSTEM),
+                    HumanMessage(content=prompt),
+                ]
+            ),
             timeout=_REVIEW_MODEL_TIMEOUT_SECS,
         )
         _sanitize_message(resp)
         data = _parse_review(getattr(resp, "content", "") or "")
     except asyncio.TimeoutError:
-        emit(src, "warning", f"task review: model timed out ({_REVIEW_MODEL_TIMEOUT_SECS}s) — falling back")
+        emit(
+            src,
+            "warning",
+            f"task review: model timed out ({_REVIEW_MODEL_TIMEOUT_SECS}s) — falling back",
+        )
         return None
     except Exception as exc:
-        emit(src, "warning", "task review: model call failed — falling back", detail=str(exc))
+        emit(
+            src,
+            "warning",
+            "task review: model call failed — falling back",
+            detail=str(exc),
+        )
         return None
 
     if data is None:

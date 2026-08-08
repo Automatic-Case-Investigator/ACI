@@ -7,6 +7,7 @@ phrase a subject ID for that SIEM). The active adapter is selected by the
 SIEM = drop a module in this package that calls `register_adapter` and import it
 from `__init__`.
 """
+
 from __future__ import annotations
 
 from typing import Callable

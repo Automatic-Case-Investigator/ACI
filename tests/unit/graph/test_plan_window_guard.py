@@ -9,6 +9,7 @@ Session 6b96293a: plan item 5 stated `2022-01-18T12:10 – 12:40` with no justif
 Every query in that task fell inside the box; the payload landed at 13:14 and was never
 looked at.
 """
+
 from __future__ import annotations
 
 import os
@@ -19,7 +20,8 @@ import unittest
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
 os.environ.setdefault("SECRET_KEY", "test")
 project_root = os.path.dirname(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, project_root)
 import django  # noqa: E402
 
@@ -42,11 +44,16 @@ class WidenUnjustifiedWindowTest(unittest.TestCase):
         self.assertIn("Window correction", out)
         # The corrected range must reach past the original box.
         stamps = re.findall(r"2022-01-\d\dT\d\d:\d\d:\d\dZ", out)
-        self.assertTrue(any(s > "2022-01-18T13:00:00Z" for s in stamps),
-                        "widened window must cover the post-burst tail")
+        self.assertTrue(
+            any(s > "2022-01-18T13:00:00Z" for s in stamps),
+            "widened window must cover the post-burst tail",
+        )
 
     def test_a_justified_narrow_window_is_left_alone(self):
-        justified = _NARROW + "\n- This narrower range is used because the burst is fully bounded by it."
+        justified = (
+            _NARROW
+            + "\n- This narrower range is used because the burst is fully bounded by it."
+        )
         self.assertEqual(_widen_unjustified_window(justified, 24), justified)
 
     def test_a_window_already_at_vicinity_is_left_alone(self):
@@ -70,7 +77,9 @@ class PlanContractTest(unittest.TestCase):
     """The prompt rules the guard backs up — pinned so they cannot silently vanish."""
 
     def setUp(self):
-        path = os.path.join(project_root, "agent", "prompts", "triage", "instructions.md")
+        path = os.path.join(
+            project_root, "agent", "prompts", "triage", "instructions.md"
+        )
         with open(path, encoding="utf-8") as fh:
             self.text = fh.read()
 

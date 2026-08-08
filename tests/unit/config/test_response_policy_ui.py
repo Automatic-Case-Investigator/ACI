@@ -5,13 +5,16 @@ Every cell renders identically — the grid states what is configured and does n
 editorialise about how it differs from the shipped defaults. A "revert to defaults"
 button drops the stored rows so the code defaults apply again.
 """
+
 from __future__ import annotations
 
 import os
 import sys
 import unittest
 
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, project_root)
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
 os.environ.setdefault("SECRET_KEY", "test")
@@ -62,9 +65,11 @@ class GridShapeTests(_CleanMatrix):
 
     def test_no_raw_slug_is_rendered_in_the_grid(self):
         """Slugs are identifiers, not operator-facing vocabulary."""
-        html = self.client.get("/dashboard/settings/").content.decode("utf-8", "replace")
-        grid = html[html.index("rp-grid"):]
-        grid = grid[:grid.index("</form>")]
+        html = self.client.get("/dashboard/settings/").content.decode(
+            "utf-8", "replace"
+        )
+        grid = html[html.index("rp-grid") :]
+        grid = grid[: grid.index("</form>")]
         for slug in policy.POLICY_ROWS:
             self.assertNotIn(f">{slug}<", grid, slug)
 
@@ -72,7 +77,8 @@ class GridShapeTests(_CleanMatrix):
         r = self.client.post(
             "/dashboard/settings/response-policy",
             {f"action_{policy.FAILURE_FALLBACK}__case": policy.INVESTIGATE},
-            follow=True)
+            follow=True,
+        )
         message = [str(m) for m in r.context["messages"]][-1]
         self.assertIn("Failure fallback", message)
         self.assertNotIn(policy.FAILURE_FALLBACK, message)
@@ -106,7 +112,9 @@ class NoDefaultDiffDisplayTests(_CleanMatrix):
     """The grid must not signal which cells differ from the shipped defaults."""
 
     def test_cells_carry_no_diff_or_status_keys(self):
-        ResponsePolicy.objects.create(verdict="tp", subject="case", action=policy.RESOLVE)
+        ResponsePolicy.objects.create(
+            verdict="tp", subject="case", action=policy.RESOLVE
+        )
         grid = _response_policy_rows()
         self.assertNotIn("changed", grid)
         self.assertNotIn("editable", grid)
@@ -116,12 +124,21 @@ class NoDefaultDiffDisplayTests(_CleanMatrix):
                     self.assertNotIn(key, cell, f"{row['verdict']}/{cell['subject']}")
 
     def test_the_rendered_grid_styles_every_cell_the_same(self):
-        ResponsePolicy.objects.create(verdict="tp", subject="case", action=policy.RESOLVE)
-        html = self.client.get("/dashboard/settings/").content.decode("utf-8", "replace")
-        grid = html[html.index("rp-grid"):]
-        grid = grid[:grid.index("</form>")]
+        ResponsePolicy.objects.create(
+            verdict="tp", subject="case", action=policy.RESOLVE
+        )
+        html = self.client.get("/dashboard/settings/").content.decode(
+            "utf-8", "replace"
+        )
+        grid = html[html.index("rp-grid") :]
+        grid = grid[: grid.index("</form>")]
         self.assertEqual(grid.count('class="rp-cell"'), len(policy.cells()))
-        for stale in ("rp-cell-state", "rp-cell-compute", "rp-flag", "changed from defaults"):
+        for stale in (
+            "rp-cell-state",
+            "rp-cell-compute",
+            "rp-flag",
+            "changed from defaults",
+        ):
             self.assertNotIn(stale, grid, stale)
 
 
@@ -132,33 +149,40 @@ class MergedAlertSubjectTests(_CleanMatrix):
         from agent.runtime.config.overrides import resolve_response_policy
 
         ResponsePolicy.objects.create(
-            verdict="tp", subject="soar_alert", action=policy.PROMOTE_CASE)
+            verdict="tp", subject="soar_alert", action=policy.PROMOTE_CASE
+        )
         self.assertEqual(
-            resolve_response_policy()[("tp", policy.ALERT)], policy.PROMOTE_CASE)
+            resolve_response_policy()[("tp", policy.ALERT)], policy.PROMOTE_CASE
+        )
 
     def test_a_current_row_wins_over_a_legacy_one(self):
         from agent.runtime.config.overrides import resolve_response_policy
 
         ResponsePolicy.objects.create(
-            verdict="tp", subject="siem_alert", action=policy.PROMOTE_CASE)
-        ResponsePolicy.objects.create(
-            verdict="tp", subject="alert", action=policy.NONE)
+            verdict="tp", subject="siem_alert", action=policy.PROMOTE_CASE
+        )
+        ResponsePolicy.objects.create(verdict="tp", subject="alert", action=policy.NONE)
         self.assertEqual(resolve_response_policy()[("tp", policy.ALERT)], policy.NONE)
 
     def test_a_legacy_row_naming_a_retired_action_is_still_dropped(self):
         from agent.runtime.config.overrides import resolve_response_policy
 
         ResponsePolicy.objects.create(
-            verdict="tp", subject="soar_alert", action="document_alert")
-        self.assertEqual(resolve_response_policy()[("tp", policy.ALERT)],
-                         policy.default_action("tp", policy.ALERT))
+            verdict="tp", subject="soar_alert", action="document_alert"
+        )
+        self.assertEqual(
+            resolve_response_policy()[("tp", policy.ALERT)],
+            policy.default_action("tp", policy.ALERT),
+        )
 
     def test_the_grid_shows_one_alert_column(self):
         # Read the label rather than hardcode it, so wording changes are not breakages.
         alert_label = dict(ResponsePolicy.SUBJECT_CHOICES)[policy.ALERT]
         grid = _response_policy_rows()
-        self.assertEqual(grid["subject_headers"], [
-            dict(ResponsePolicy.SUBJECT_CHOICES)[policy.CASE], alert_label])
+        self.assertEqual(
+            grid["subject_headers"],
+            [dict(ResponsePolicy.SUBJECT_CHOICES)[policy.CASE], alert_label],
+        )
 
 
 class FailureFallbackRowTests(_CleanMatrix):
@@ -181,19 +205,23 @@ class FailureFallbackRowTests(_CleanMatrix):
 
     def test_defaults_leave_a_trace_on_cases_and_stay_quiet_on_alerts(self):
         self.assertEqual(
-            policy.default_action(policy.FAILURE_FALLBACK, policy.CASE), policy.DOCUMENT)
+            policy.default_action(policy.FAILURE_FALLBACK, policy.CASE), policy.DOCUMENT
+        )
         self.assertEqual(
-            policy.default_action(policy.FAILURE_FALLBACK, policy.ALERT), policy.NONE)
+            policy.default_action(policy.FAILURE_FALLBACK, policy.ALERT), policy.NONE
+        )
 
     def test_it_is_configurable_like_any_other_row(self):
         from agent.runtime.config.overrides import resolve_response_policy
 
         self.client.post(
             "/dashboard/settings/response-policy",
-            {f"action_{policy.FAILURE_FALLBACK}__case": policy.INVESTIGATE})
+            {f"action_{policy.FAILURE_FALLBACK}__case": policy.INVESTIGATE},
+        )
         self.assertEqual(
             resolve_response_policy()[(policy.FAILURE_FALLBACK, policy.CASE)],
-            policy.INVESTIGATE)
+            policy.INVESTIGATE,
+        )
 
 
 class RevertToDefaultsTests(_CleanMatrix):
@@ -202,7 +230,9 @@ class RevertToDefaultsTests(_CleanMatrix):
     def test_it_drops_stored_rows_so_the_code_defaults_apply(self):
         from agent.runtime.config.overrides import resolve_response_policy
 
-        ResponsePolicy.objects.create(verdict="tp", subject="case", action=policy.RESOLVE)
+        ResponsePolicy.objects.create(
+            verdict="tp", subject="case", action=policy.RESOLVE
+        )
         self.client.post(self.URL)
         self.assertEqual(ResponsePolicy.objects.count(), 0)
         # Deleting rather than rewriting means a later change to the shipped defaults
@@ -213,10 +243,14 @@ class RevertToDefaultsTests(_CleanMatrix):
 
     def test_reverting_an_untouched_policy_is_harmless(self):
         r = self.client.post(self.URL, follow=True)
-        self.assertIn("already at defaults", [str(m) for m in r.context["messages"]][-1])
+        self.assertIn(
+            "already at defaults", [str(m) for m in r.context["messages"]][-1]
+        )
 
     def test_the_button_is_rendered_in_the_form(self):
-        html = self.client.get("/dashboard/settings/").content.decode("utf-8", "replace")
+        html = self.client.get("/dashboard/settings/").content.decode(
+            "utf-8", "replace"
+        )
         self.assertIn("Revert to defaults", html)
         self.assertIn("/dashboard/settings/response-policy/reset", html)
 
@@ -248,18 +282,23 @@ class SaveDiffTests(_CleanMatrix):
         self.assertIn("unchanged", self._latest(r).lower())
 
     def test_a_value_outside_the_cell_menu_is_ignored(self):
-        r = self.client.post(self.URL, {"action_needs_investigation__case": "resolve"},
-                             follow=True)
+        r = self.client.post(
+            self.URL, {"action_needs_investigation__case": "resolve"}, follow=True
+        )
         self.assertIn("unchanged", self._latest(r).lower())
         self.assertFalse(ResponsePolicy.objects.filter(action="resolve").exists())
 
     def test_long_change_sets_are_summarised(self):
-        r = self.client.post(self.URL, {
-            "action_tp__case": "resolve",
-            "action_fp__case": "resolve",
-            "action_inconclusive__case": "investigate",
-            "action_needs_investigation__case": "document",
-        }, follow=True)
+        r = self.client.post(
+            self.URL,
+            {
+                "action_tp__case": "resolve",
+                "action_fp__case": "resolve",
+                "action_inconclusive__case": "investigate",
+                "action_needs_investigation__case": "document",
+            },
+            follow=True,
+        )
         self.assertIn("and 1 more", self._latest(r))
 
 

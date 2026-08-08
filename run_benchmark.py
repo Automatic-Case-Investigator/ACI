@@ -19,6 +19,7 @@ Wazuh/TheHive connections configured in the dashboard, `elasticdump` on PATH, an
 services running. This drives the same stages as `python -m benchmark <stage>` in-process,
 so connection/config resolution is shared — there is no duplicated logic here.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -85,7 +86,7 @@ def run_scenario(scenario: str, trials: int | None = None) -> Exception | None:
 
 # ── token/cost summary ────────────────────────────────────────────────────────
 def _token_cost(scenarios: list[str]) -> None:
-    pricing = (cli._run_cfg().get("pricing") or {})
+    pricing = cli._run_cfg().get("pricing") or {}
     in_price = float(pricing.get("input_per_mtok", 0.0))
     out_price = float(pricing.get("output_per_mtok", 0.0))
     print("\n== tokens / cost ==")
@@ -93,7 +94,7 @@ def _token_cost(scenarios: list[str]) -> None:
     for s in scenarios:
         s_in = s_out = trials = 0
         for meta_path in sorted((_DATA / "runs" / s).rglob("meta.json")):
-            tok = (json.loads(meta_path.read_text(encoding="utf-8")).get("tokens") or {})
+            tok = json.loads(meta_path.read_text(encoding="utf-8")).get("tokens") or {}
             s_in += int(tok.get("input") or 0)
             s_out += int(tok.get("output") or 0)
             trials += 1
@@ -101,8 +102,10 @@ def _token_cost(scenarios: list[str]) -> None:
             print(f"  {s}: (no runs)")
             continue
         cost = s_in / 1e6 * in_price + s_out / 1e6 * out_price
-        print(f"  {s}: {trials} trials | input={s_in:,} output={s_out:,} tok"
-              f" | ${cost:,.2f} (${cost / trials:,.2f}/run @ ${in_price}/${out_price} per Mtok)")
+        print(
+            f"  {s}: {trials} trials | input={s_in:,} output={s_out:,} tok"
+            f" | ${cost:,.2f} (${cost / trials:,.2f}/run @ ${in_price}/${out_price} per Mtok)"
+        )
         grand_in += s_in
         grand_out += s_out
     if len(scenarios) > 1 and (grand_in or grand_out):
@@ -124,14 +127,19 @@ def _summary(scenarios: list[str]) -> None:
             per_key = block.get("metrics", {}).get("phase_recall", {}).get("per_key")
             if per_key:
                 reached = sum(1 for rate in per_key.values() if rate > 0)
-                print(f"    {entry_point}: phase_recall {reached}/{len(per_key)} phases "
-                      f"reached in >=1 of {block.get('trials')} trials")
+                print(
+                    f"    {entry_point}: phase_recall {reached}/{len(per_key)} phases "
+                    f"reached in >=1 of {block.get('trials')} trials"
+                )
     _token_cost(scenarios)
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="run_benchmark.py", description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        prog="run_benchmark.py",
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     ap.add_argument("--scenarios", nargs="+", default=["fox"])
     ap.add_argument("--trials", type=int, default=None)
     ap.add_argument("--skip-prepare", action="store_true")

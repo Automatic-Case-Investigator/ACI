@@ -6,7 +6,9 @@ import unittest
 
 import httpx
 
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 sys.path.insert(0, project_root)
 sys.path.insert(0, os.path.join(project_root, "aci-mcp-servers", "aci-wazuh"))
 
@@ -120,14 +122,18 @@ class TestWazuhCorrelateEntity(unittest.TestCase):
         )
 
         aggs = fake.posts[0][1]["aggs"]
-        neighbor_terms = {v["terms"]["field"] for k, v in aggs.items() if k.startswith("nf")}
+        neighbor_terms = {
+            v["terms"]["field"] for k, v in aggs.items() if k.startswith("nf")
+        }
         self.assertEqual(neighbor_terms, {"agent.name"})
 
     def test_pinned_term_and_range_filter_applied(self):
         fake = _FakeOpenSearchClient()
         client = self._client(fake)
 
-        client.correlate_entity("data.srcuser", "victim", _START, _END, link_fields=_LINKS)
+        client.correlate_entity(
+            "data.srcuser", "victim", _START, _END, link_fields=_LINKS
+        )
 
         body = fake.posts[0][1]
         self.assertEqual(self._pinned_term(body), {"data.srcuser": "victim"})
@@ -140,7 +146,12 @@ class TestWazuhCorrelateEntity(unittest.TestCase):
         client = self._client(fake)
 
         result = client.correlate_entity(
-            "data.srcuser", "victim", _START, _END, link_fields=_LINKS, min_cooccurrence=5
+            "data.srcuser",
+            "victim",
+            _START,
+            _END,
+            link_fields=_LINKS,
+            min_cooccurrence=5,
         )
 
         values = [e["value"] for e in result["neighbors"]["data.dstuser"]]
@@ -165,7 +176,11 @@ class TestWazuhCorrelateEntity(unittest.TestCase):
         client = self._client(fake)
 
         result = client.correlate_entity(
-            "data.srcip", "10.0.2.5", _START, _END, link_fields=_LINKS,
+            "data.srcip",
+            "10.0.2.5",
+            _START,
+            _END,
+            link_fields=_LINKS,
             match_fields=["data.srcip", "data.dstip"],
         )
 
@@ -184,11 +199,17 @@ class TestWazuhCorrelateEntity(unittest.TestCase):
 
         # data.dstuser is both a match field and a link field → must be dropped as a neighbor.
         client.correlate_entity(
-            "data.srcuser", "joe", _START, _END, link_fields=_LINKS,
+            "data.srcuser",
+            "joe",
+            _START,
+            _END,
+            link_fields=_LINKS,
             match_fields=["data.srcuser", "data.dstuser"],
         )
         aggs = fake.posts[0][1]["aggs"]
-        neighbor_terms = {v["terms"]["field"] for k, v in aggs.items() if k.startswith("nf")}
+        neighbor_terms = {
+            v["terms"]["field"] for k, v in aggs.items() if k.startswith("nf")
+        }
         self.assertEqual(neighbor_terms, {"agent.name"})  # data.dstuser excluded
 
     def test_non_ip_entity_has_no_cross_role(self):
@@ -196,7 +217,11 @@ class TestWazuhCorrelateEntity(unittest.TestCase):
         client = self._client(fake)
 
         result = client.correlate_entity(
-            "agent.name", "web-01", _START, _END, link_fields=["data.dstuser", "data.srcip"]
+            "agent.name",
+            "web-01",
+            _START,
+            _END,
+            link_fields=["data.dstuser", "data.srcip"],
         )
 
         self.assertEqual(len(fake.posts), 1)
@@ -217,7 +242,9 @@ class TestWazuhCorrelateEntity(unittest.TestCase):
         fake = _FakeOpenSearchClient()
         client = self._client(fake)
 
-        client.correlate_entity("data.srcuser", "victim", _START, _END, link_fields=_LINKS)
+        client.correlate_entity(
+            "data.srcuser", "victim", _START, _END, link_fields=_LINKS
+        )
 
         nf0 = fake.posts[0][1]["aggs"]["nf0"]
         self.assertIn("samples", nf0["aggs"])

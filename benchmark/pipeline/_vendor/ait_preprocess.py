@@ -59,7 +59,8 @@ ALERT_ID_SEQ_START = 100000
 # Wazuh $BAD_WORDS list (0020-syslog_rules.xml, rule 1002).
 BAD_WORDS = re.compile(
     r"core_dumped|failure|error|attack| bad |illegal |denied|refused|"
-    r"unauthorized|fatal|failed|Segmentation Fault|Corrupted")
+    r"unauthorized|fatal|failed|Segmentation Fault|Corrupted"
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -88,104 +89,247 @@ def wrap(source: dict) -> dict:
     """Add the native "timestamp" field and wrap a _source in the OpenSearch doc."""
     if "timestamp" not in source and "@timestamp" in source:
         source["timestamp"] = to_wazuh_timestamp(source["@timestamp"])
-    return {"_index": make_index(source), "_id": make_id(), "_score": 1, "_source": source}
+    return {
+        "_index": make_index(source),
+        "_id": make_id(),
+        "_score": 1,
+        "_source": source,
+    }
 
 
 # --------------------------------------------------------------------------- #
 # Wazuh default ruleset definitions (verbatim from wazuh-ruleset rules/*.xml). #
 # --------------------------------------------------------------------------- #
 RULE_DEFS = {
-    "1": {"level": 0, "description": "Generic template for all syslog rules.",
-          "groups": ["syslog"]},
-    "1002": {"level": 2, "description": "Unknown problem somewhere in the system.",
-             "groups": ["syslog", "errors"], "gpg13": ["4.3"]},
-    "5100": {"level": 0, "description": "Pre-match rule for kernel messages.",
-             "groups": ["syslog"]},
-    "5500": {"level": 0, "description": "Grouping of the pam_unix rules.",
-             "groups": ["pam", "syslog"]},
-    "5501": {"level": 3, "description": "PAM: Login session opened.",
-             "groups": ["pam", "syslog", "authentication_success"],
-             "pci_dss": ["10.2.5"], "gpg13": ["7.8", "7.9"], "gdpr": ["IV_32.2"],
-             "hipaa": ["164.312.b"], "nist_800_53": ["AU.14", "AC.7"],
-             "tsc": ["CC6.8", "CC7.2", "CC7.3"]},
-    "5502": {"level": 3, "description": "PAM: Login session closed.",
-             "groups": ["pam", "syslog"],
-             "pci_dss": ["10.2.5"], "gpg13": ["7.8", "7.9"], "gdpr": ["IV_32.2"],
-             "hipaa": ["164.312.b"], "nist_800_53": ["AU.14", "AC.7"],
-             "tsc": ["CC6.8", "CC7.2", "CC7.3"]},
-    "9300": {"level": 0, "description": "Grouping for the Horde imp rules.",
-             "groups": ["syslog", "hordeimp"]},
-    "9303": {"level": 5, "description": "Horde IMP error message.",
-             "groups": ["syslog", "hordeimp"], "gdpr": ["IV_35.7.d"]},
-    "9305": {"level": 3, "description": "Horde IMP successful login.",
-             "groups": ["syslog", "hordeimp", "authentication_success"],
-             "pci_dss": ["10.2.5"], "gpg13": ["7.1", "7.2"], "gdpr": ["IV_32.2"],
-             "hipaa": ["164.312.b"], "nist_800_53": ["AU.14", "AC.7"],
-             "tsc": ["CC6.8", "CC7.2", "CC7.3"]},
-    "9306": {"level": 5, "description": "Horde IMP Failed login.",
-             "groups": ["syslog", "hordeimp", "authentication_failed"],
-             "pci_dss": ["10.2.4", "10.2.5"], "gpg13": ["7.1"],
-             "gdpr": ["IV_35.7.d", "IV_32.2"], "hipaa": ["164.312.b"],
-             "nist_800_53": ["AU.14", "AC.7"], "tsc": ["CC6.1", "CC6.8", "CC7.2", "CC7.3"]},
-    "9700": {"level": 0, "description": "Dovecot Messages Grouped.", "groups": ["dovecot"]},
-    "9701": {"level": 3, "description": "Dovecot Authentication Success.",
-             "groups": ["dovecot", "authentication_success"],
-             "pci_dss": ["10.2.5"], "gpg13": ["7.1", "7.2"], "gdpr": ["IV_32.2"],
-             "hipaa": ["164.312.b"], "nist_800_53": ["AU.14", "AC.7"],
-             "tsc": ["CC6.8", "CC7.2", "CC7.3"]},
+    "1": {
+        "level": 0,
+        "description": "Generic template for all syslog rules.",
+        "groups": ["syslog"],
+    },
+    "1002": {
+        "level": 2,
+        "description": "Unknown problem somewhere in the system.",
+        "groups": ["syslog", "errors"],
+        "gpg13": ["4.3"],
+    },
+    "5100": {
+        "level": 0,
+        "description": "Pre-match rule for kernel messages.",
+        "groups": ["syslog"],
+    },
+    "5500": {
+        "level": 0,
+        "description": "Grouping of the pam_unix rules.",
+        "groups": ["pam", "syslog"],
+    },
+    "5501": {
+        "level": 3,
+        "description": "PAM: Login session opened.",
+        "groups": ["pam", "syslog", "authentication_success"],
+        "pci_dss": ["10.2.5"],
+        "gpg13": ["7.8", "7.9"],
+        "gdpr": ["IV_32.2"],
+        "hipaa": ["164.312.b"],
+        "nist_800_53": ["AU.14", "AC.7"],
+        "tsc": ["CC6.8", "CC7.2", "CC7.3"],
+    },
+    "5502": {
+        "level": 3,
+        "description": "PAM: Login session closed.",
+        "groups": ["pam", "syslog"],
+        "pci_dss": ["10.2.5"],
+        "gpg13": ["7.8", "7.9"],
+        "gdpr": ["IV_32.2"],
+        "hipaa": ["164.312.b"],
+        "nist_800_53": ["AU.14", "AC.7"],
+        "tsc": ["CC6.8", "CC7.2", "CC7.3"],
+    },
+    "9300": {
+        "level": 0,
+        "description": "Grouping for the Horde imp rules.",
+        "groups": ["syslog", "hordeimp"],
+    },
+    "9303": {
+        "level": 5,
+        "description": "Horde IMP error message.",
+        "groups": ["syslog", "hordeimp"],
+        "gdpr": ["IV_35.7.d"],
+    },
+    "9305": {
+        "level": 3,
+        "description": "Horde IMP successful login.",
+        "groups": ["syslog", "hordeimp", "authentication_success"],
+        "pci_dss": ["10.2.5"],
+        "gpg13": ["7.1", "7.2"],
+        "gdpr": ["IV_32.2"],
+        "hipaa": ["164.312.b"],
+        "nist_800_53": ["AU.14", "AC.7"],
+        "tsc": ["CC6.8", "CC7.2", "CC7.3"],
+    },
+    "9306": {
+        "level": 5,
+        "description": "Horde IMP Failed login.",
+        "groups": ["syslog", "hordeimp", "authentication_failed"],
+        "pci_dss": ["10.2.4", "10.2.5"],
+        "gpg13": ["7.1"],
+        "gdpr": ["IV_35.7.d", "IV_32.2"],
+        "hipaa": ["164.312.b"],
+        "nist_800_53": ["AU.14", "AC.7"],
+        "tsc": ["CC6.1", "CC6.8", "CC7.2", "CC7.3"],
+    },
+    "9700": {
+        "level": 0,
+        "description": "Dovecot Messages Grouped.",
+        "groups": ["dovecot"],
+    },
+    "9701": {
+        "level": 3,
+        "description": "Dovecot Authentication Success.",
+        "groups": ["dovecot", "authentication_success"],
+        "pci_dss": ["10.2.5"],
+        "gpg13": ["7.1", "7.2"],
+        "gdpr": ["IV_32.2"],
+        "hipaa": ["164.312.b"],
+        "nist_800_53": ["AU.14", "AC.7"],
+        "tsc": ["CC6.8", "CC7.2", "CC7.3"],
+    },
     "20101": {"level": 6, "description": "IDS event.", "groups": ["ids"]},
-    "31100": {"level": 0, "description": "Access log messages grouped.",
-              "groups": ["web", "accesslog"]},
-    "31101": {"level": 5, "description": "Web server 400 error code.",
-              "groups": ["web", "accesslog", "attack"],
-              "pci_dss": ["6.5", "11.4"], "gdpr": ["IV_35.7.d"],
-              "nist_800_53": ["SA.11", "SI.4"],
-              "tsc": ["CC6.6", "CC7.1", "CC8.1", "CC6.1", "CC6.8", "CC7.2", "CC7.3"]},
-    "31102": {"level": 0, "description": "Ignored extensions on 400 error codes.",
-              "groups": ["web", "accesslog"]},
-    "31108": {"level": 0, "description": "Ignored URLs (simple queries).",
-              "groups": ["web", "accesslog"]},
-    "31120": {"level": 5, "description": "Web server 500 error code (server error).",
-              "groups": ["web", "accesslog"]},
-    "31121": {"level": 4, "description": "Web server 501 error code (Not Implemented).",
-              "groups": ["web", "accesslog"]},
-    "31122": {"level": 5, "description": "Web server 500 error code (Internal Error).",
-              "groups": ["web", "accesslog", "system_error"]},
-    "31123": {"level": 4, "description": "Web server 503 error code (Service unavailable).",
-              "groups": ["web", "accesslog"]},
-    "30100": {"level": 0, "description": "Apache messages grouped.", "groups": ["apache"]},
-    "30301": {"level": 0, "description": "Apache error messages grouped.", "groups": ["apache"]},
-    "30302": {"level": 0, "description": "Apache warn messages grouped.", "groups": ["apache"]},
-    "30305": {"level": 5, "description": "Apache: Attempt to access forbidden file or directory.",
-              "groups": ["apache", "access_denied"],
-              "pci_dss": ["6.5.8", "10.2.4"], "gdpr": ["IV_35.7.d"], "hipaa": ["164.312.b"],
-              "nist_800_53": ["SA.11", "AU.14", "AC.7"],
-              "tsc": ["CC6.6", "CC7.1", "CC6.1", "CC6.8", "CC7.2", "CC7.3"]},
-    "30306": {"level": 5, "description": "Apache: Attempt to access forbidden directory index.",
-              "groups": ["apache", "access_denied"],
-              "pci_dss": ["6.5.8", "10.2.4"], "gdpr": ["IV_35.7.d"], "hipaa": ["164.312.b"],
-              "nist_800_53": ["SA.11", "AU.14", "AC.7"],
-              "tsc": ["CC6.6", "CC7.1", "CC6.1", "CC6.8", "CC7.2", "CC7.3"]},
-    "30318": {"level": 5, "description": "Apache: PHP Notice in Apache log", "groups": ["apache"]},
-    "52501": {"level": 0, "description": "ClamAV: database update",
-              "groups": ["clamd", "freshclam", "virus"]},
-    "52507": {"level": 3, "description": "ClamAV database update",
-              "groups": ["clamd", "freshclam", "virus"],
-              "pci_dss": ["5.2"], "tsc": ["A1.2"], "nist_800_53": ["SI.3"],
-              "gpg13": ["4.4"], "gdpr": ["IV_35.7.d"]},
-    "52508": {"level": 3, "description": "ClamAV database updated",
-              "groups": ["clamd", "freshclam", "virus"],
-              "pci_dss": ["5.2"], "tsc": ["A1.2"], "nist_800_53": ["SI.3"],
-              "gpg13": ["4.4"], "gdpr": ["IV_35.7.d"]},
-    "80700": {"level": 0, "description": "Audit: messages grouped.", "groups": ["audit"]},
-    "81800": {"level": 0, "description": "OpenVPN messages grouped.", "groups": ["openvpn"]},
-    "81801": {"level": 3, "description": "OpenVPN: User logged in",
-              "groups": ["openvpn", "authentication_success"],
-              "pci_dss": ["10.2.5"], "gpg13": ["7.1", "7.2"], "gdpr": ["IV_32.2"],
-              "hipaa": ["164.312.b"], "nist_800_53": ["AU.14", "AC.7"],
-              "tsc": ["CC6.8", "CC7.2", "CC7.3"]},
-    "81803": {"level": 4, "description": "OpenVPN: Connection Certificate Failed",
-              "groups": ["openvpn", "openvpn-error"], "gdpr": ["IV_35.7.d"]},
+    "31100": {
+        "level": 0,
+        "description": "Access log messages grouped.",
+        "groups": ["web", "accesslog"],
+    },
+    "31101": {
+        "level": 5,
+        "description": "Web server 400 error code.",
+        "groups": ["web", "accesslog", "attack"],
+        "pci_dss": ["6.5", "11.4"],
+        "gdpr": ["IV_35.7.d"],
+        "nist_800_53": ["SA.11", "SI.4"],
+        "tsc": ["CC6.6", "CC7.1", "CC8.1", "CC6.1", "CC6.8", "CC7.2", "CC7.3"],
+    },
+    "31102": {
+        "level": 0,
+        "description": "Ignored extensions on 400 error codes.",
+        "groups": ["web", "accesslog"],
+    },
+    "31108": {
+        "level": 0,
+        "description": "Ignored URLs (simple queries).",
+        "groups": ["web", "accesslog"],
+    },
+    "31120": {
+        "level": 5,
+        "description": "Web server 500 error code (server error).",
+        "groups": ["web", "accesslog"],
+    },
+    "31121": {
+        "level": 4,
+        "description": "Web server 501 error code (Not Implemented).",
+        "groups": ["web", "accesslog"],
+    },
+    "31122": {
+        "level": 5,
+        "description": "Web server 500 error code (Internal Error).",
+        "groups": ["web", "accesslog", "system_error"],
+    },
+    "31123": {
+        "level": 4,
+        "description": "Web server 503 error code (Service unavailable).",
+        "groups": ["web", "accesslog"],
+    },
+    "30100": {
+        "level": 0,
+        "description": "Apache messages grouped.",
+        "groups": ["apache"],
+    },
+    "30301": {
+        "level": 0,
+        "description": "Apache error messages grouped.",
+        "groups": ["apache"],
+    },
+    "30302": {
+        "level": 0,
+        "description": "Apache warn messages grouped.",
+        "groups": ["apache"],
+    },
+    "30305": {
+        "level": 5,
+        "description": "Apache: Attempt to access forbidden file or directory.",
+        "groups": ["apache", "access_denied"],
+        "pci_dss": ["6.5.8", "10.2.4"],
+        "gdpr": ["IV_35.7.d"],
+        "hipaa": ["164.312.b"],
+        "nist_800_53": ["SA.11", "AU.14", "AC.7"],
+        "tsc": ["CC6.6", "CC7.1", "CC6.1", "CC6.8", "CC7.2", "CC7.3"],
+    },
+    "30306": {
+        "level": 5,
+        "description": "Apache: Attempt to access forbidden directory index.",
+        "groups": ["apache", "access_denied"],
+        "pci_dss": ["6.5.8", "10.2.4"],
+        "gdpr": ["IV_35.7.d"],
+        "hipaa": ["164.312.b"],
+        "nist_800_53": ["SA.11", "AU.14", "AC.7"],
+        "tsc": ["CC6.6", "CC7.1", "CC6.1", "CC6.8", "CC7.2", "CC7.3"],
+    },
+    "30318": {
+        "level": 5,
+        "description": "Apache: PHP Notice in Apache log",
+        "groups": ["apache"],
+    },
+    "52501": {
+        "level": 0,
+        "description": "ClamAV: database update",
+        "groups": ["clamd", "freshclam", "virus"],
+    },
+    "52507": {
+        "level": 3,
+        "description": "ClamAV database update",
+        "groups": ["clamd", "freshclam", "virus"],
+        "pci_dss": ["5.2"],
+        "tsc": ["A1.2"],
+        "nist_800_53": ["SI.3"],
+        "gpg13": ["4.4"],
+        "gdpr": ["IV_35.7.d"],
+    },
+    "52508": {
+        "level": 3,
+        "description": "ClamAV database updated",
+        "groups": ["clamd", "freshclam", "virus"],
+        "pci_dss": ["5.2"],
+        "tsc": ["A1.2"],
+        "nist_800_53": ["SI.3"],
+        "gpg13": ["4.4"],
+        "gdpr": ["IV_35.7.d"],
+    },
+    "80700": {
+        "level": 0,
+        "description": "Audit: messages grouped.",
+        "groups": ["audit"],
+    },
+    "81800": {
+        "level": 0,
+        "description": "OpenVPN messages grouped.",
+        "groups": ["openvpn"],
+    },
+    "81801": {
+        "level": 3,
+        "description": "OpenVPN: User logged in",
+        "groups": ["openvpn", "authentication_success"],
+        "pci_dss": ["10.2.5"],
+        "gpg13": ["7.1", "7.2"],
+        "gdpr": ["IV_32.2"],
+        "hipaa": ["164.312.b"],
+        "nist_800_53": ["AU.14", "AC.7"],
+        "tsc": ["CC6.8", "CC7.2", "CC7.3"],
+    },
+    "81803": {
+        "level": 4,
+        "description": "OpenVPN: Connection Certificate Failed",
+        "groups": ["openvpn", "openvpn-error"],
+        "gdpr": ["IV_35.7.d"],
+    },
 }
 
 _COMPLIANCE_KEYS = ("pci_dss", "gpg13", "gdpr", "hipaa", "nist_800_53", "tsc")
@@ -240,64 +384,144 @@ class AgentResolver:
 # --------------------------------------------------------------------------- #
 # Event-time parsing (take the time from the raw log, as Wazuh does).         #
 # --------------------------------------------------------------------------- #
-MONTHS = {m: i for i, m in enumerate(
-    ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], start=1)}
+MONTHS = {
+    m: i
+    for i, m in enumerate(
+        [
+            "Jan",
+            "Feb",
+            "Mar",
+            "Apr",
+            "May",
+            "Jun",
+            "Jul",
+            "Aug",
+            "Sep",
+            "Oct",
+            "Nov",
+            "Dec",
+        ],
+        start=1,
+    )
+}
 
 RE_SYSLOG = re.compile(r"^([A-Z][a-z]{2})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})\s")
-RE_APACHE_ACCESS = re.compile(r"\[(\d{2})/([A-Z][a-z]{2})/(\d{4}):(\d{2}):(\d{2}):(\d{2})\s")
+RE_APACHE_ACCESS = re.compile(
+    r"\[(\d{2})/([A-Z][a-z]{2})/(\d{4}):(\d{2}):(\d{2}):(\d{2})\s"
+)
 RE_APACHE_ERROR = re.compile(
-    r"^\[[A-Z][a-z]{2}\s+([A-Z][a-z]{2})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})\.(\d+)\s+(\d{4})\]")
+    r"^\[[A-Z][a-z]{2}\s+([A-Z][a-z]{2})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})\.(\d+)\s+(\d{4})\]"
+)
 RE_SURICATA = re.compile(r"^(\d{2})/(\d{2})/(\d{4})-(\d{2}):(\d{2}):(\d{2})\.(\d+)")
 RE_ISO_SPACE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})\s(\d{2}):(\d{2}):(\d{2})")
 
 
 def _utc(dt: datetime) -> datetime:
-    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
+    return (
+        dt.replace(tzinfo=timezone.utc)
+        if dt.tzinfo is None
+        else dt.astimezone(timezone.utc)
+    )
 
 
 def parse_event_time(raw: str, location: str, fallback_epoch: float):
     """Return (datetime_utc, predecoder_timestamp | None)."""
-    fb_year = datetime.fromtimestamp(fallback_epoch, tz=timezone.utc).year if fallback_epoch else 2022
+    fb_year = (
+        datetime.fromtimestamp(fallback_epoch, tz=timezone.utc).year
+        if fallback_epoch
+        else 2022
+    )
 
     if raw.startswith("{"):
         try:
             ts = json.loads(raw).get("@timestamp")
             if ts:
-                return _utc(datetime.strptime(ts.replace("Z", "+0000"),
-                                              "%Y-%m-%dT%H:%M:%S.%f%z")), None
+                return (
+                    _utc(
+                        datetime.strptime(
+                            ts.replace("Z", "+0000"), "%Y-%m-%dT%H:%M:%S.%f%z"
+                        )
+                    ),
+                    None,
+                )
         except (json.JSONDecodeError, ValueError):
             pass
 
     m = RE_SURICATA.match(raw)
     if m:
         mo, d, y, hh, mm, ss, frac = m.groups()
-        return datetime(int(y), int(mo), int(d), int(hh), int(mm), int(ss),
-                        int((frac + "000000")[:6]), tzinfo=timezone.utc), raw[:m.end()]
+        return (
+            datetime(
+                int(y),
+                int(mo),
+                int(d),
+                int(hh),
+                int(mm),
+                int(ss),
+                int((frac + "000000")[:6]),
+                tzinfo=timezone.utc,
+            ),
+            raw[: m.end()],
+        )
 
     m = RE_APACHE_ERROR.match(raw)
     if m:
         mon, d, hh, mm, ss, frac, y = m.groups()
-        return datetime(int(y), MONTHS[mon], int(d), int(hh), int(mm), int(ss),
-                        int((frac + "000000")[:6]), tzinfo=timezone.utc), None
+        return (
+            datetime(
+                int(y),
+                MONTHS[mon],
+                int(d),
+                int(hh),
+                int(mm),
+                int(ss),
+                int((frac + "000000")[:6]),
+                tzinfo=timezone.utc,
+            ),
+            None,
+        )
 
     m = RE_APACHE_ACCESS.search(raw)
     if m:
         d, mon, y, hh, mm, ss = m.groups()
-        return datetime(int(y), MONTHS[mon], int(d), int(hh), int(mm), int(ss),
-                        tzinfo=timezone.utc), None
+        return (
+            datetime(
+                int(y),
+                MONTHS[mon],
+                int(d),
+                int(hh),
+                int(mm),
+                int(ss),
+                tzinfo=timezone.utc,
+            ),
+            None,
+        )
 
     m = RE_ISO_SPACE.match(raw)
     if m:
         y, mo, d, hh, mm, ss = m.groups()
-        return datetime(int(y), int(mo), int(d), int(hh), int(mm), int(ss),
-                        tzinfo=timezone.utc), None
+        return (
+            datetime(
+                int(y), int(mo), int(d), int(hh), int(mm), int(ss), tzinfo=timezone.utc
+            ),
+            None,
+        )
 
     m = RE_SYSLOG.match(raw)
     if m:
         mon, d, hh, mm, ss = m.groups()
-        return datetime(fb_year, MONTHS[mon], int(d), int(hh), int(mm), int(ss),
-                        tzinfo=timezone.utc), raw[:m.end() - 1]
+        return (
+            datetime(
+                fb_year,
+                MONTHS[mon],
+                int(d),
+                int(hh),
+                int(mm),
+                int(ss),
+                tzinfo=timezone.utc,
+            ),
+            raw[: m.end() - 1],
+        )
 
     return datetime.fromtimestamp(fallback_epoch, tz=timezone.utc), None
 
@@ -309,7 +533,9 @@ def iso_z(dt: datetime) -> str:
 # --------------------------------------------------------------------------- #
 # Syslog header parsing.                                                      #
 # --------------------------------------------------------------------------- #
-RE_SYSLOG_HDR = re.compile(r"^[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+(?P<rest>.*)$")
+RE_SYSLOG_HDR = re.compile(
+    r"^[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+(?P<rest>.*)$"
+)
 RE_PROG = re.compile(r"^(?P<prog>[\w./\-]+)(?:\[\d+\])?:\s")
 
 
@@ -336,11 +562,13 @@ def parse_syslog_header(raw: str):
 # --------------------------------------------------------------------------- #
 RE_WEB = re.compile(
     r'^(?P<ip>\S+)\s+\S+\s+\S+\s+\[[^\]]+\]\s+"(?P<req>[^"]*)"\s+'
-    r'(?P<status>\d{3}|-)\s+\S+\s+"[^"]*"\s+"[^"]*"')
+    r'(?P<status>\d{3}|-)\s+\S+\s+"[^"]*"\s+"[^"]*"'
+)
 STATIC_EXT = (".jpg", ".jpeg", ".gif", ".png", ".css", ".js")
 RE_SNORT = re.compile(
     r"\[\*\*\]\s+\[(?P<sid>\d+:\d+:\d+)\].*?\{\w+\}\s+"
-    r"(?P<src>\d+\.\d+\.\d+\.\d+):\d+\s+->\s+(?P<dst>\d+\.\d+\.\d+\.\d+:\d+)")
+    r"(?P<src>\d+\.\d+\.\d+\.\d+):\d+\s+->\s+(?P<dst>\d+\.\d+\.\d+\.\d+:\d+)"
+)
 RE_AUDIT_TYPE = re.compile(r"^type=(\S+)\s")
 RE_AUDIT_ID = re.compile(r"msg=audit\([0-9.]+:(\d+)\)")
 
@@ -348,7 +576,11 @@ RE_AUDIT_ID = re.compile(r"msg=audit\([0-9.]+:(\d+)\)")
 def web_rule_id(status: int, url: str) -> str:
     if 400 <= status <= 499:
         u = url.lower().split("?", 1)[0]
-        if u.endswith(STATIC_EXT) or u.endswith("favicon.ico") or u.endswith("robots.txt"):
+        if (
+            u.endswith(STATIC_EXT)
+            or u.endswith("favicon.ico")
+            or u.endswith("robots.txt")
+        ):
             return "31102"
         return "31101"
     if status == 501:
@@ -417,8 +649,11 @@ def build_audit(raw: str):
 
 def build_suricata_fast(raw: str):
     m = RE_SNORT.search(raw)
-    data = ({"srcip": m.group("src"), "dstip": m.group("dst"), "id": m.group("sid")}
-            if m else None)
+    data = (
+        {"srcip": m.group("src"), "dstip": m.group("dst"), "id": m.group("sid")}
+        if m
+        else None
+    )
     return {"parent": "snort", "name": "snort"}, "20101", data
 
 
@@ -575,7 +810,8 @@ def iter_aminer_docs(aminer_path: str, resolver: AgentResolver, labels_fh, stats
             source["id"] = f"{ALERT_ID_EPOCH}.{ALERT_ID_SEQ_START + i}"
 
             label = {
-                "id": source["id"], "anomalous": True,
+                "id": source["id"],
+                "anomalous": True,
                 "detector_type": ac.get("AnalysisComponentType"),
                 "detector_id": ac.get("AnalysisComponentIdentifier"),
                 "detector_name": ac.get("AnalysisComponentName"),
@@ -628,16 +864,20 @@ def main() -> None:
         return
 
     for wazuh_path in wazuh_files:
-        prefix = os.path.basename(wazuh_path)[:-len("_wazuh.json")]
+        prefix = os.path.basename(wazuh_path)[: -len("_wazuh.json")]
         aminer_path = os.path.join(INPUT_DIR, f"{prefix}_aminer.json")
         if not os.path.exists(aminer_path):
             aminer_path = None
-        print(f"Processing {prefix}: {wazuh_path}"
-              + (f" + {aminer_path}" if aminer_path else " (no aminer sibling)"))
+        print(
+            f"Processing {prefix}: {wazuh_path}"
+            + (f" + {aminer_path}" if aminer_path else " (no aminer sibling)")
+        )
         s = process_prefix(prefix, wazuh_path, aminer_path)
         total = s["wazuh"] + s["aminer"]
-        print(f"  wrote {total} alerts ({s['wazuh']} wazuh + {s['aminer']} aminer) "
-              f"-> {s['out_path']}")
+        print(
+            f"  wrote {total} alerts ({s['wazuh']} wazuh + {s['aminer']} aminer) "
+            f"-> {s['out_path']}"
+        )
         if s["labels_path"]:
             print(f"  labels -> {s['labels_path']}")
 

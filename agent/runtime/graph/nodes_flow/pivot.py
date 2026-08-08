@@ -1,13 +1,31 @@
 """The `pivot` node: push confirmed findings to the board and queue validated follow-up leads."""
+
 from __future__ import annotations
 
 from ...infra.logbus import emit, src_label
 from ..board import _record_board_entry, _record_hypotheses_text
 from ..findings_model import FindingsVerification
 from ..lead_model import validate_leads_model
-from ..parsing import _EVENT_ID_DUMP_RE, _FACT_BULLET_RE, _FINDINGS_RE, _HYPOTHESES_RE, _NEW_LEADS_HEADER_RE, _extract_source_refs, _is_none_bullet, _normalize_fact_key, _section_body, _strip_markers
+from ..parsing import (
+    _EVENT_ID_DUMP_RE,
+    _FACT_BULLET_RE,
+    _FINDINGS_RE,
+    _HYPOTHESES_RE,
+    _NEW_LEADS_HEADER_RE,
+    _extract_source_refs,
+    _is_none_bullet,
+    _normalize_fact_key,
+    _section_body,
+    _strip_markers,
+)
 from ..state import AgentState
-from ..toolio import _SEED_TASK_TITLE, _call, _emit_node_entry, _is_error_tool_result, _tmap
+from ..toolio import (
+    _SEED_TASK_TITLE,
+    _call,
+    _emit_node_entry,
+    _is_error_tool_result,
+    _tmap,
+)
 from ..validation import _board_compromise_facts, _collect_escalation_facts
 import json
 
@@ -61,15 +79,28 @@ async def pivot(state: AgentState, config) -> dict:
                         f"**Confirmed indicators (raw-evidence backed):**\n{fact_lines}\n\n"
                         "Immediate analyst review required. Full investigation report to follow."
                     )
-                    result = await _call(comment_fn, {
-                        "case_id": state["case_id"],
-                        "message": message,
-                    }, _dbg=src)
+                    result = await _call(
+                        comment_fn,
+                        {
+                            "case_id": state["case_id"],
+                            "message": message,
+                        },
+                        _dbg=src,
+                    )
                     if not _is_error_tool_result(result):
-                        emit(src, "note", "auto-escalation: active compromise alert posted to case")
+                        emit(
+                            src,
+                            "note",
+                            "auto-escalation: active compromise alert posted to case",
+                        )
                         escalation_posted = True
                     else:
-                        emit(src, "warning", "auto-escalation: post_case_comment failed", detail=result)
+                        emit(
+                            src,
+                            "warning",
+                            "auto-escalation: post_case_comment failed",
+                            detail=result,
+                        )
 
     # Push confirmed facts from the "## Findings" section to the board. Findings is
     # now the per-task system of record for grounded evidence; each bullet (with its
@@ -82,12 +113,20 @@ async def pivot(state: AgentState, config) -> dict:
     # board facts; restated/speculative/ungrounded bullets are dropped with a logged
     # reason. When verification is absent (fail-open path / non-SIEM task), fall back to
     # today's behavior — record every real (non-None) bullet.
-    _verification = FindingsVerification.from_state(state.get("last_findings_verification"))
+    _verification = FindingsVerification.from_state(
+        state.get("last_findings_verification")
+    )
     _confirmed_keys: set[str] | None = None
     if _verification is not None:
-        _confirmed_keys = {_normalize_fact_key(v.text) for v in _verification.verified if v.text}
+        _confirmed_keys = {
+            _normalize_fact_key(v.text) for v in _verification.verified if v.text
+        }
         for v in _verification.rejected:
-            emit(src, "note", f"findings board: dropped {v.status or 'unverified'} bullet")
+            emit(
+                src,
+                "note",
+                f"findings board: dropped {v.status or 'unverified'} bullet",
+            )
     preserved_keys: set[str] = set()
     for finding in _coerce_preserved_findings(state.get("last_confirmed_findings")):
         content = _finding_bullet(finding)[2:].strip()
@@ -119,7 +158,10 @@ async def pivot(state: AgentState, config) -> dict:
             if _normalize_fact_key(content) in preserved_keys:
                 continue
             # Gate to verifier-confirmed bullets when verification is available.
-            if _confirmed_keys is not None and _normalize_fact_key(content) not in _confirmed_keys:
+            if (
+                _confirmed_keys is not None
+                and _normalize_fact_key(content) not in _confirmed_keys
+            ):
                 continue
             _record_board_entry(
                 state,
@@ -162,11 +204,14 @@ async def pivot(state: AgentState, config) -> dict:
 
     tasks: list[dict] = []
     if list_fn:
-        raw = await _call(list_fn, {
-            "case_id": state["case_id"],
-            "run_id": state["run_id"],
-            "agent_name": state["agent_name"],
-        })
+        raw = await _call(
+            list_fn,
+            {
+                "case_id": state["case_id"],
+                "run_id": state["run_id"],
+                "agent_name": state["agent_name"],
+            },
+        )
         try:
             data = json.loads(raw) if isinstance(raw, str) else raw
             tasks = data if isinstance(data, list) else data.get("tasks", [])
@@ -180,15 +225,19 @@ async def pivot(state: AgentState, config) -> dict:
     # Convergence cap: stop creating tasks once the limit is reached so the
     # queue drains to empty and the investigation finishes cleanly.
     if already_created >= _MAX_PIVOT_TASKS:
-        emit(src, "note",
-             f"pivot: convergence cap reached ({already_created}/{_MAX_PIVOT_TASKS}) "
-             f"— no further tasks created; queue will drain to finish")
+        emit(
+            src,
+            "note",
+            f"pivot: convergence cap reached ({already_created}/{_MAX_PIVOT_TASKS}) "
+            f"— no further tasks created; queue will drain to finish",
+        )
         return {"escalation_posted": escalation_posted}
 
     completed_task = state.get("last_completed_task") or state.get("current_task")
     completed_task_id = (completed_task or {}).get("id")
     dedup_tasks = [
-        t for t in tasks
+        t
+        for t in tasks
         if t.get("id") != completed_task_id
         and _SEED_TASK_TITLE not in (t.get("title") or "").lower()
     ]
@@ -196,16 +245,18 @@ async def pivot(state: AgentState, config) -> dict:
     # removes them on completion).  Passed as synthetic "completed" entries so
     # the lead validator's _task_blocks_duplicate logic applies correctly —
     # conclusive outcomes suppress re-investigation; inconclusive ones allow it.
-    for ct in (state.get("completed_task_titles") or []):
+    for ct in state.get("completed_task_titles") or []:
         title = ct.get("title", "")
         if title and not any(t.get("title") == title for t in dedup_tasks):
-            dedup_tasks.append({
-                "title": title,
-                "description": "",
-                "summary": ct.get("summary", ""),
-                "priority": ct.get("priority", "?"),
-                "status": "completed",
-            })
+            dedup_tasks.append(
+                {
+                    "title": title,
+                    "description": "",
+                    "summary": ct.get("summary", ""),
+                    "priority": ct.get("priority", "?"),
+                    "status": "completed",
+                }
+            )
     # Model-based extraction + validation: the model reassembles inconsistently
     # formatted leads into whole candidates (avoiding the regex fragmentation that
     # split one lead into several invalid ones) and judges relevance/duplication;
@@ -237,23 +288,36 @@ async def pivot(state: AgentState, config) -> dict:
     created = 0
     for decision in validation.approved:
         candidate = decision.candidate
-        result = await _call(create_fn, {
-            "case_id": state["case_id"],
-            "run_id": state["run_id"],
-            "agent_name": state["agent_name"],
-            "title": candidate.title,
-            "description": (
-                f"Pivots: {candidate.pivots}\n"
-                f"Evidence: {candidate.evidence}\n"
-                f"Validator: {decision.reason}; signature={decision.signature}"
-            ),
-            "priority": candidate.priority,
-        }, _dbg=src)
+        result = await _call(
+            create_fn,
+            {
+                "case_id": state["case_id"],
+                "run_id": state["run_id"],
+                "agent_name": state["agent_name"],
+                "title": candidate.title,
+                "description": (
+                    f"Pivots: {candidate.pivots}\n"
+                    f"Evidence: {candidate.evidence}\n"
+                    f"Validator: {decision.reason}; signature={decision.signature}"
+                ),
+                "priority": candidate.priority,
+            },
+            _dbg=src,
+        )
         if not _is_error_tool_result(result):
             created += 1
-            emit(src, "note", f"pivot: created '{candidate.title}' (P{candidate.priority})")
+            emit(
+                src,
+                "note",
+                f"pivot: created '{candidate.title}' (P{candidate.priority})",
+            )
         else:
-            emit(src, "error", f"pivot: create_task failed for '{candidate.title}'", detail=result)
+            emit(
+                src,
+                "error",
+                f"pivot: create_task failed for '{candidate.title}'",
+                detail=result,
+            )
 
     if created:
         emit(src, "note", f"pivot: {created} follow-up task(s) queued")

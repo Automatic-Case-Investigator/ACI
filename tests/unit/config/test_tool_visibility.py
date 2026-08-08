@@ -5,18 +5,22 @@ Offline test: graph-managed tools never leak into the model's tool list.
 If the model can call them it corrupts the queue (premature claim/complete). Run:
     python .claude/skills/run-aci-backend/tests/test_tool_visibility.py -v
 """
+
 from __future__ import annotations
 
 import os
 import sys
 import unittest
 
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, project_root)
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
 os.environ.setdefault("SECRET_KEY", "test")
 
 import django
+
 django.setup()
 
 from agent.runtime.graph import _format_queue_context, _model_tools_for_agent
@@ -27,10 +31,20 @@ class _Tool:
         self.name = name
 
 
-ALL_TOOLS = [_Tool(n) for n in (
-    "create_task", "list_tasks", "claim_next", "complete_task",
-    "search", "get_board", "add_fact", "write", "get_case",
-)]
+ALL_TOOLS = [
+    _Tool(n)
+    for n in (
+        "create_task",
+        "list_tasks",
+        "claim_next",
+        "complete_task",
+        "search",
+        "get_board",
+        "add_fact",
+        "write",
+        "get_case",
+    )
+]
 
 HIDDEN = {"claim_next", "complete_task"}
 
@@ -68,14 +82,16 @@ class TestToolVisibility(unittest.TestCase):
         self.assertNotIn("create_task", names)
 
     def test_queue_context_formats_current_tasks(self):
-        context = _format_queue_context([
-            {
-                "status": "pending",
-                "priority": 85,
-                "title": "Review cron FIM diff",
-                "description": "Pivots: path=/var/spool/cron/crontabs/user",
-            }
-        ])
+        context = _format_queue_context(
+            [
+                {
+                    "status": "pending",
+                    "priority": 85,
+                    "title": "Review cron FIM diff",
+                    "description": "Pivots: path=/var/spool/cron/crontabs/user",
+                }
+            ]
+        )
         self.assertIn("Current Task Queue", context)
         self.assertIn("[pending P85] Review cron FIM diff", context)
         self.assertIn("Only propose New Leads", context)

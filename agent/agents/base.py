@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 @dataclass
 class Budget:
     """Execution limits enforced by the runtime graph for one agent run."""
+
     max_steps: int = 20
     max_tool_calls: int = 60
 
@@ -15,6 +16,7 @@ class Budget:
 @dataclass
 class AgentDefinition:
     """Static configuration for an agent exposed through the registry."""
+
     name: str
     description: str
     prompt_layers: list[str]
@@ -43,13 +45,16 @@ class Handoff:
     question text, so the receiving agent's `seed` step can build its task queue from
     explicit fields instead of string-matching.
     """
+
     analyst_request: str = ""
     triage_report: str = ""
     source_run_id: str = ""
     source_entity_id: str = ""
     source_entity_type: str = ""
     artifacts: dict = field(default_factory=dict)
-    prior_investigation_report: str = ""  # set for resume runs; used instead of triage_report
+    prior_investigation_report: str = (
+        ""  # set for resume runs; used instead of triage_report
+    )
 
     def to_dict(self) -> dict:
         """Serialize the handoff into AgentRun metadata."""
@@ -99,7 +104,9 @@ class Handoff:
             "— do NOT re-investigate questions that were already conclusively answered."
         )
         parts.append("")
-        parts.append("### Step 1 — populate your task queue (do this before any investigation)")
+        parts.append(
+            "### Step 1 — populate your task queue (do this before any investigation)"
+        )
         parts.append("")
         parts.append(
             "Read the prior investigation report below carefully. Then:\n"

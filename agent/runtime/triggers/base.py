@@ -6,6 +6,7 @@ pollers) land next sprint; today a binding is invoked manually (management comma
 to prove the path that ingestion will reuse — every binding ultimately calls
 `runtime.dispatch.dispatch_run`, the same headless entry used elsewhere.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -19,6 +20,7 @@ EVENT_NEW_ALERT = "new_alert"
 @dataclass(frozen=True)
 class Trigger:
     """A single occurrence the platform reacts to."""
+
     event_type: str
     case_id: str
     payload: dict
@@ -55,7 +57,9 @@ async def dispatch_trigger(
     # Apply analyst-editable workflow overrides (enabled / dedupe window).
     from ..config.overrides import resolve_workflow
 
-    enabled, dedupe_window = await sync_to_async(resolve_workflow, thread_sensitive=True)(
+    enabled, dedupe_window = await sync_to_async(
+        resolve_workflow, thread_sensitive=True
+    )(
         trigger.event_type,
         default_enabled=binding.enabled,
         default_window=binding.dedupe_window,
@@ -66,8 +70,11 @@ async def dispatch_trigger(
         dedupe_window = max(0, int(dedupe_window_override))
 
     if emit_triggered:
-        emit("workflow", "triggered",
-             f"{trigger.event_type} → {binding.agent_name} (case {trigger.case_id})")
+        emit(
+            "workflow",
+            "triggered",
+            f"{trigger.event_type} → {binding.agent_name} (case {trigger.case_id})",
+        )
 
     return await dispatch_run(
         binding.agent_name,
@@ -79,7 +86,9 @@ async def dispatch_trigger(
             "trigger_event": trigger.event_type,
             "trigger_payload": trigger.payload,
             "source_entity_id": trigger.case_id,
-            "source_entity_type": "alert" if trigger.event_type == EVENT_NEW_ALERT else "case",
+            "source_entity_type": (
+                "alert" if trigger.event_type == EVENT_NEW_ALERT else "case"
+            ),
             **(metadata_extra or {}),
         },
     )
@@ -93,6 +102,7 @@ class WorkflowBinding:
     event. `agent_name` must name a registered agent. `dedupe_window` (seconds)
     suppresses duplicate runs for the same case+agent within the window; 0 disables.
     """
+
     event_type: str
     agent_name: str
     build_question: Callable[[Trigger], str]

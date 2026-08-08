@@ -3,6 +3,7 @@
 One binding today — "new TheHive case → triage" — to demonstrate the seam. Add more
 here as event sources come online; the dispatch path stays identical.
 """
+
 from __future__ import annotations
 
 from .base import EVENT_NEW_ALERT, EVENT_NEW_CASE, Trigger, WorkflowBinding
@@ -23,15 +24,19 @@ def _alert_triage_question(trigger: Trigger) -> str:
     )
 
 
-register(WorkflowBinding(
-    event_type=EVENT_NEW_CASE,
-    agent_name="triage",
-    build_question=_triage_question,
-))
+register(
+    WorkflowBinding(
+        event_type=EVENT_NEW_CASE,
+        agent_name="triage",
+        build_question=_triage_question,
+    )
+)
 
 
-register(WorkflowBinding(
-    event_type=EVENT_NEW_ALERT,
-    agent_name="triage",
-    build_question=_alert_triage_question,
-))
+register(
+    WorkflowBinding(
+        event_type=EVENT_NEW_ALERT,
+        agent_name="triage",
+        build_question=_alert_triage_question,
+    )
+)

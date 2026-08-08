@@ -7,7 +7,9 @@ from benchmark.pipeline import load_wazuh
 
 
 class _Response:
-    def __init__(self, status_code: int, payload: dict | None = None, headers: dict | None = None):
+    def __init__(
+        self, status_code: int, payload: dict | None = None, headers: dict | None = None
+    ):
         self.status_code = status_code
         self._payload = payload or {}
         self.headers = headers or {}
@@ -19,19 +21,27 @@ class _Response:
 
 class WazuhTeardownTest(unittest.TestCase):
     def test_elasticdump_command_wraps_windows_cmd_file(self):
-        with patch.object(load_wazuh.shutil, "which", side_effect=[
-            r"C:\Users\acezxn\AppData\Roaming\npm\elasticdump.cmd",
-            None,
-            None,
-        ]), patch.object(load_wazuh.os, "name", "nt"), \
-                patch.dict(load_wazuh.os.environ, {"COMSPEC": r"C:\Windows\System32\cmd.exe"}):
+        with patch.object(
+            load_wazuh.shutil,
+            "which",
+            side_effect=[
+                r"C:\Users\acezxn\AppData\Roaming\npm\elasticdump.cmd",
+                None,
+                None,
+            ],
+        ), patch.object(load_wazuh.os, "name", "nt"), patch.dict(
+            load_wazuh.os.environ, {"COMSPEC": r"C:\Windows\System32\cmd.exe"}
+        ):
             cmd = load_wazuh._elasticdump_command(["--type=data"])
 
-        self.assertEqual(cmd[:3], [
-            r"C:\Windows\System32\cmd.exe",
-            "/c",
-            r"C:\Users\acezxn\AppData\Roaming\npm\elasticdump.cmd",
-        ])
+        self.assertEqual(
+            cmd[:3],
+            [
+                r"C:\Windows\System32\cmd.exe",
+                "/c",
+                r"C:\Users\acezxn\AppData\Roaming\npm\elasticdump.cmd",
+            ],
+        )
         self.assertEqual(cmd[3:], ["--type=data"])
 
     def test_teardown_retries_429_delete_by_query(self):
@@ -40,15 +50,21 @@ class WazuhTeardownTest(unittest.TestCase):
             _Response(200, {"task": "node:123"}),
         ]
         get_responses = [
-            _Response(200, {
-                "completed": False,
-                "task": {"status": {"total": 123, "deleted": 50, "batches": 1}},
-            }),
-            _Response(200, {
-                "completed": True,
-                "task": {"status": {"total": 123, "deleted": 123, "batches": 2}},
-                "response": {"deleted": 123, "failures": []},
-            }),
+            _Response(
+                200,
+                {
+                    "completed": False,
+                    "task": {"status": {"total": 123, "deleted": 50, "batches": 1}},
+                },
+            ),
+            _Response(
+                200,
+                {
+                    "completed": True,
+                    "task": {"status": {"total": 123, "deleted": 123, "batches": 2}},
+                    "response": {"deleted": 123, "failures": []},
+                },
+            ),
         ]
         calls = []
 
@@ -59,9 +75,9 @@ class WazuhTeardownTest(unittest.TestCase):
         def fake_get(_url, **_kwargs):
             return get_responses.pop(0)
 
-        with patch("httpx.post", side_effect=fake_post), \
-                patch("httpx.get", side_effect=fake_get), \
-                patch.object(load_wazuh.time, "sleep"):
+        with patch("httpx.post", side_effect=fake_post), patch(
+            "httpx.get", side_effect=fake_get
+        ), patch.object(load_wazuh.time, "sleep"):
             result = load_wazuh.teardown(
                 "https://admin:secret@localhost:9201",
                 "fox",
@@ -83,7 +99,9 @@ class WazuhTeardownTest(unittest.TestCase):
         def fake_post(_url, **_kwargs):
             return _Response(429, headers={"retry-after": "0"})
 
-        with patch("httpx.post", side_effect=fake_post), patch.object(load_wazuh.time, "sleep"):
+        with patch("httpx.post", side_effect=fake_post), patch.object(
+            load_wazuh.time, "sleep"
+        ):
             result = load_wazuh.teardown(
                 "https://admin:secret@localhost:9201",
                 "fox",

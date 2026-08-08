@@ -6,6 +6,7 @@ settings come from `runtime/config.py` (DB overrides over env defaults). A disab
 provider (per its ProviderConfig row) is dropped from the run. Adding a platform
 means registering a provider — not editing this module.
 """
+
 from __future__ import annotations
 
 import logging
@@ -65,7 +66,9 @@ def _configured_mcp_server(key: str, run_ctx: dict | None = None) -> dict | None
         return None
 
     raw_env = row.env or {}
-    env = {str(k): str(v) for k, v in raw_env.items() if not isinstance(v, (dict, list))}
+    env = {
+        str(k): str(v) for k, v in raw_env.items() if not isinstance(v, (dict, list))
+    }
     if run_ctx:
         if run_ctx.get("case_id"):
             env.setdefault("ACI_CASE_ID", str(run_ctx["case_id"]))
@@ -85,7 +88,9 @@ def _configured_mcp_server(key: str, run_ctx: dict | None = None) -> dict | None
             "env": env,
         }
     if row.transport == MCPServerConfig.TRANSPORT_HTTP:
-        headers = raw_env.get("headers") if isinstance(raw_env.get("headers"), dict) else {}
+        headers = (
+            raw_env.get("headers") if isinstance(raw_env.get("headers"), dict) else {}
+        )
         return {
             "transport": "streamable_http",
             "url": row.command_or_url,
@@ -108,7 +113,9 @@ async def build_mcp_client(
     # _server_configs uses Django ORM (ProviderConfig / MCPServerConfig lookups).
     # Calling it directly from async code triggers SynchronousOnlyOperation.
     # sync_to_async runs it in the main Django sync thread where ORM is allowed.
-    configs = await sync_to_async(_server_configs, thread_sensitive=True)(tool_policy, run_ctx)
+    configs = await sync_to_async(_server_configs, thread_sensitive=True)(
+        tool_policy, run_ctx
+    )
     configs = await _prune_unreachable_optional_servers(configs)
     return MultiServerMCPClient(configs)
 
@@ -131,7 +138,10 @@ async def _prune_unreachable_optional_servers(configs: dict) -> dict:
             continue
         if not await _streamable_http_reachable(config):
             pruned.pop(server_name, None)
-            log.warning("optional MCP server %s is unreachable; skipping it for this run", server_name)
+            log.warning(
+                "optional MCP server %s is unreachable; skipping it for this run",
+                server_name,
+            )
     return pruned
 
 
@@ -167,13 +177,17 @@ async def load_mcp_prompt_guidance(
     sections: list[str] = []
     missing: list[str] = []
     for server_name in client.connections:
-        server_required = instructions_required_for_server(server_name, default=required)
+        server_required = instructions_required_for_server(
+            server_name, default=required
+        )
         try:
             server_sections: list[str] = []
             async with client.session(server_name, auto_initialize=False) as session:
                 init = await session.initialize()
                 if init.instructions:
-                    server_sections.append(f"### {server_name}: Server Instructions\n\n{init.instructions.strip()}")
+                    server_sections.append(
+                        f"### {server_name}: Server Instructions\n\n{init.instructions.strip()}"
+                    )
 
                 if init.capabilities.prompts:
                     listed = await session.list_prompts()
@@ -186,7 +200,9 @@ async def load_mcp_prompt_guidance(
                         text = _prompt_result_to_text(result)
                         if text:
                             title = prompt.description or prompt.name
-                            server_sections.append(f"### {server_name}: {title}\n\n{text}")
+                            server_sections.append(
+                                f"### {server_name}: {title}\n\n{text}"
+                            )
 
             if server_sections:
                 sections.extend(server_sections)
@@ -195,7 +211,9 @@ async def load_mcp_prompt_guidance(
         except Exception as exc:
             if server_required:
                 missing.append(server_name)
-                raise RuntimeError(f"Failed to load MCP instructions for {server_name}: {exc}") from exc
+                raise RuntimeError(
+                    f"Failed to load MCP instructions for {server_name}: {exc}"
+                ) from exc
     if missing:
         names = ", ".join(missing)
         raise RuntimeError(

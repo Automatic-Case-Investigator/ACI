@@ -1,8 +1,17 @@
 """Cross-cutting helpers shared by the assess/pivot/completion nodes (preserved-findings, section extractors, run checkpoint)."""
+
 from __future__ import annotations
 
 from ....models import AgentRun
-from ..parsing import _FACT_BULLET_RE, _FINDINGS_RE, _NEW_LEADS_HEADER_RE, _NEXT_HEADER_RE, _is_none_bullet, _normalize_fact_key, _strip_markers
+from ..parsing import (
+    _FACT_BULLET_RE,
+    _FINDINGS_RE,
+    _NEW_LEADS_HEADER_RE,
+    _NEXT_HEADER_RE,
+    _is_none_bullet,
+    _normalize_fact_key,
+    _strip_markers,
+)
 from ..publication import extract_section as _extract_publication_section
 from ..coverage import _count_evidence_queries  # re-exported for nodes_flow users
 from ..state import AgentState
@@ -44,6 +53,8 @@ async def _checkpoint_run(
         await sync_to_async(_write, thread_sensitive=True)()
     except Exception:
         pass
+
+
 def _findings_section_text(text: str) -> str:
     """Return the body of the ## Findings section, bounded by `_NEXT_HEADER_RE`.
 
@@ -55,9 +66,11 @@ def _findings_section_text(text: str) -> str:
     match = _FINDINGS_RE.search(text)
     if not match:
         return ""
-    rest = text[match.end():]
+    rest = text[match.end() :]
     next_header = _NEXT_HEADER_RE.search(rest)
-    return (rest[:next_header.start()] if next_header else rest).strip()
+    return (rest[: next_header.start()] if next_header else rest).strip()
+
+
 def _new_leads_section_text(text: str) -> str:
     """Return the body of the ## New Leads section, bounded by `_NEXT_HEADER_RE`.
 
@@ -68,9 +81,11 @@ def _new_leads_section_text(text: str) -> str:
     match = _NEW_LEADS_HEADER_RE.search(text)
     if not match:
         return ""
-    rest = text[match.end():]
+    rest = text[match.end() :]
     next_header = _NEXT_HEADER_RE.search(rest)
-    return (rest[:next_header.start()] if next_header else rest).strip()
+    return (rest[: next_header.start()] if next_header else rest).strip()
+
+
 def _has_real_findings(text: str) -> bool:
     """True when the report's ## Findings section has at least one non-'None.' bullet.
 
@@ -81,6 +96,8 @@ def _has_real_findings(text: str) -> bool:
         if content and not _is_none_bullet(content):
             return True
     return False
+
+
 def _coerce_preserved_findings(value) -> list[dict]:
     if not isinstance(value, list):
         return []
@@ -96,22 +113,30 @@ def _coerce_preserved_findings(value) -> list[dict]:
             for event_id in (item.get("event_ids") or [])
             if str(event_id).strip()
         ][:8]
-        out.append({
-            "summary": summary[:900],
-            "event_ids": event_ids,
-            "source": ", ".join(event_ids),
-        })
+        out.append(
+            {
+                "summary": summary[:900],
+                "event_ids": event_ids,
+                "source": ", ".join(event_ids),
+            }
+        )
     return out[:12]
+
+
 def _preserved_findings_from_state(state: AgentState) -> list[dict]:
     ledger = state.get("task_ledger") or {}
     return _coerce_preserved_findings(
         ledger.get("confirmed_findings") or state.get("last_confirmed_findings")
     )
+
+
 def _finding_bullet(finding: dict) -> str:
     summary = str(finding.get("summary") or "").strip()
     event_ids = finding.get("event_ids") or []
     source = f" Event refs: {', '.join(event_ids[:6])}." if event_ids else ""
     return f"- {summary}{source}"
+
+
 def _merge_preserved_findings(final_answer: str, findings: list[dict]) -> str:
     findings = _coerce_preserved_findings(findings)
     if not findings:
@@ -124,8 +149,10 @@ def _merge_preserved_findings(final_answer: str, findings: list[dict]) -> str:
         for match in _FACT_BULLET_RE.finditer(existing)
     }
     missing = [
-        bullet for bullet in bullets
-        if _normalize_fact_key(_strip_markers(bullet[2:].strip())[0]) not in existing_keys
+        bullet
+        for bullet in bullets
+        if _normalize_fact_key(_strip_markers(bullet[2:].strip())[0])
+        not in existing_keys
     ]
     if not missing:
         return text
@@ -135,17 +162,21 @@ def _merge_preserved_findings(final_answer: str, findings: list[dict]) -> str:
 
     match = _FINDINGS_RE.search(text)
     assert match is not None
-    rest = text[match.end():]
+    rest = text[match.end() :]
     next_header = _NEXT_HEADER_RE.search(rest)
     body_end = match.end() + (next_header.start() if next_header else len(rest))
-    current_body = text[match.end():body_end].strip()
+    current_body = text[match.end() : body_end].strip()
     existing_real = [
         _strip_markers(item.group(1).strip())[0]
         for item in _FACT_BULLET_RE.finditer(current_body)
     ]
-    existing_real = [item for item in existing_real if item and not _is_none_bullet(item)]
+    existing_real = [
+        item for item in existing_real if item and not _is_none_bullet(item)
+    ]
     body_lines = [f"- {item}" for item in existing_real] + missing
     new_body = "\n" + "\n".join(body_lines) + "\n\n"
-    return text[:match.end()] + new_body + text[body_end:].lstrip()
+    return text[: match.end()] + new_body + text[body_end:].lstrip()
+
+
 def _extract_section(text: str, header: str) -> str:
     return _extract_publication_section(text, header)

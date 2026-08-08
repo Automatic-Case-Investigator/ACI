@@ -9,13 +9,27 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from ..infra.logbus import emit, src_label, summarize_result
 
 from .board import _entry_line
-from .parsing import _FINDINGS_RE, _HYPOTHESES_RE, _fact_dedup_key, _is_none_bullet, _is_provenance_only, _looks_like_lead, _normalize_fact_key, _section_body, _strip_markers
+from .parsing import (
+    _FINDINGS_RE,
+    _HYPOTHESES_RE,
+    _fact_dedup_key,
+    _is_none_bullet,
+    _is_provenance_only,
+    _looks_like_lead,
+    _normalize_fact_key,
+    _section_body,
+    _strip_markers,
+)
 from .sanitize import _normalize, _sanitize_message
 from .state import AgentState
-from .toolio import _MAX_SYNTHESIS_FINDINGS_CHARS, _SEED_TASK_TITLE, _call, _is_error_tool_result
+from .toolio import (
+    _MAX_SYNTHESIS_FINDINGS_CHARS,
+    _SEED_TASK_TITLE,
+    _call,
+    _is_error_tool_result,
+)
 from .validation import _derive_report_guardrails
 from ..analysis.kill_chain import KILL_CHAIN_ORDER, _CORE_PHASES
-
 
 
 def _execution_record(messages: list) -> str:
@@ -31,8 +45,9 @@ def _execution_record(messages: list) -> str:
     if entries:
         return (
             "The task reached completion without a final narrative from the agent.\n\n"
-            "**Recorded tool activity:**\n" + "\n".join(entries) +
-            "\n\nNo additional conclusion was supplied. Review the recorded tool "
+            "**Recorded tool activity:**\n"
+            + "\n".join(entries)
+            + "\n\nNo additional conclusion was supplied. Review the recorded tool "
             "results and linked artifacts before treating the task as a substantive finding."
         )
     return (
@@ -41,7 +56,9 @@ def _execution_record(messages: list) -> str:
     )
 
 
-async def _build_investigation_summary(state: AgentState, tmap: dict, model=None) -> str:
+async def _build_investigation_summary(
+    state: AgentState, tmap: dict, model=None
+) -> str:
     """Read the task queue and board, then compile the final investigation report.
 
     Produces a synthesized SOC analyst report (verdict, executive summary, timeline,
@@ -54,11 +71,14 @@ async def _build_investigation_summary(state: AgentState, tmap: dict, model=None
     list_fn = tmap.get("list_tasks")
     tasks: list[dict] = []
     if list_fn:
-        raw = await _call(list_fn, {
-            "case_id": state["case_id"],
-            "run_id": state["run_id"],
-            "agent_name": state["agent_name"],
-        })
+        raw = await _call(
+            list_fn,
+            {
+                "case_id": state["case_id"],
+                "run_id": state["run_id"],
+                "agent_name": state["agent_name"],
+            },
+        )
         if not _is_error_tool_result(raw):
             try:
                 data = json.loads(raw)
@@ -66,10 +86,18 @@ async def _build_investigation_summary(state: AgentState, tmap: dict, model=None
             except Exception:
                 pass
 
-    completed = [t for t in tasks if t.get("status") == "completed"
-                 and _SEED_TASK_TITLE not in (t.get("title") or "").lower()]
-    incomplete = [t for t in tasks if t.get("status") not in ("completed", "dismissed")
-                  and _SEED_TASK_TITLE not in (t.get("title") or "").lower()]
+    completed = [
+        t
+        for t in tasks
+        if t.get("status") == "completed"
+        and _SEED_TASK_TITLE not in (t.get("title") or "").lower()
+    ]
+    incomplete = [
+        t
+        for t in tasks
+        if t.get("status") not in ("completed", "dismissed")
+        and _SEED_TASK_TITLE not in (t.get("title") or "").lower()
+    ]
 
     # --- board ---
     get_board_fn = tmap.get("get_board")
@@ -88,7 +116,9 @@ async def _build_investigation_summary(state: AgentState, tmap: dict, model=None
                 facts = [e for e in entries if e.get("kind") == "fact"]
                 hypotheses = [e for e in entries if e.get("kind") == "hypothesis"]
                 ti_enrichments = [e for e in entries if e.get("kind") == "ti_result"]
-                kill_chain_entries = [e for e in entries if e.get("kind") == "kill_chain"]
+                kill_chain_entries = [
+                    e for e in entries if e.get("kind") == "kill_chain"
+                ]
             except Exception:
                 pass
 
@@ -141,7 +171,9 @@ async def _build_investigation_summary(state: AgentState, tmap: dict, model=None
     if key_findings:
         lines.extend(key_findings)
     else:
-        lines.append("- No confirmed findings; see Hypotheses and Completed Tasks below.")
+        lines.append(
+            "- No confirmed findings; see Hypotheses and Completed Tasks below."
+        )
     lines.append("")
 
     if artifacts:
@@ -185,7 +217,9 @@ async def _build_investigation_summary(state: AgentState, tmap: dict, model=None
         status = embedded_status or hyp.get("status", "open")
         key = _normalize_fact_key(content) or content.lower()
         prev = hyp_by_key.get(key)
-        if prev is None or _STATUS_RANK.get(status, 0) > _STATUS_RANK.get(prev["status"], 0):
+        if prev is None or _STATUS_RANK.get(status, 0) > _STATUS_RANK.get(
+            prev["status"], 0
+        ):
             hyp_by_key[key] = {
                 "content": content,
                 "status": status,
@@ -220,7 +254,13 @@ async def _build_investigation_summary(state: AgentState, tmap: dict, model=None
             lines.append(f"- [{status}] {t.get('title', '(untitled)')}")
         lines.append("")
 
-    if not completed and not artifacts and not facts and not hypotheses and not ti_enrichments:
+    if (
+        not completed
+        and not artifacts
+        and not facts
+        and not hypotheses
+        and not ti_enrichments
+    ):
         lines.append("No tasks completed and no Findings Board entries were recorded.")
 
     structured = "\n".join(lines)
@@ -228,9 +268,17 @@ async def _build_investigation_summary(state: AgentState, tmap: dict, model=None
     # Synthesize a SOC analyst report on top of the grounded data. The model sees
     # the COMPLETE board + task summaries (never truncated); the structured findings
     # are kept as an appendix so nothing is lost if the synthesis is terse.
-    kill_chain_content = kill_chain_entries[-1].get("content") if kill_chain_entries else ""
+    kill_chain_content = (
+        kill_chain_entries[-1].get("content") if kill_chain_entries else ""
+    )
     narrative = await _synthesize_analyst_report(
-        model, state, key_findings, facts, hypotheses, completed, report_guardrails,
+        model,
+        state,
+        key_findings,
+        facts,
+        hypotheses,
+        completed,
+        report_guardrails,
         phase_scaffold=_phase_scaffold(kill_chain_content),
     )
     if narrative:
@@ -291,15 +339,23 @@ def _phase_scaffold(kill_chain_content: str) -> str:
     lines: list[str] = []
     for phase in KILL_CHAIN_ORDER:
         if phase in content:
-            lines.append(f"- {phase}: EVIDENCE PRESENT (kill-chain correlation tagged this tactic)")
+            lines.append(
+                f"- {phase}: EVIDENCE PRESENT (kill-chain correlation tagged this tactic)"
+            )
         elif phase in _CORE_PHASES:
-            lines.append(f"- {phase}: no MITRE-tagged evidence (core phase — confirm from the facts or mark a gap)")
+            lines.append(
+                f"- {phase}: no MITRE-tagged evidence (core phase — confirm from the facts or mark a gap)"
+            )
     return "\n".join(lines)
 
 
 async def _synthesize_analyst_report(
-    model, state: AgentState, key_findings: list[str],
-    facts: list[dict], hypotheses: list[dict], completed: list[dict],
+    model,
+    state: AgentState,
+    key_findings: list[str],
+    facts: list[dict],
+    hypotheses: list[dict],
+    completed: list[dict],
     report_guardrails: str = "",
     phase_scaffold: str = "",
 ) -> str:
@@ -309,13 +365,21 @@ async def _synthesize_analyst_report(
     # Cap lists so the synthesis prompt stays within small-model context limits.
     facts_txt = "\n".join(_entry_line(f) for f in facts[:60]) or "- (none)"
     hyps_txt = "\n".join(_entry_line(h) for h in hypotheses[:30]) or "- (none)"
-    tasks_txt = "\n\n".join(
-        f"### {t.get('title', '(untitled)')}\n{_task_summary_for_synthesis(t.get('summary') or '')}"
-        for t in completed
-    ) or "- (none)"
+    tasks_txt = (
+        "\n\n".join(
+            f"### {t.get('title', '(untitled)')}\n{_task_summary_for_synthesis(t.get('summary') or '')}"
+            for t in completed
+        )
+        or "- (none)"
+    )
     findings_txt = "\n".join(key_findings) or "- (none)"
-    guardrails_txt = report_guardrails or "- No deterministic severity/correlation guardrails derived."
-    scaffold_txt = phase_scaffold or "(derive the phase coverage from the confirmed facts below)"
+    guardrails_txt = (
+        report_guardrails
+        or "- No deterministic severity/correlation guardrails derived."
+    )
+    scaffold_txt = (
+        phase_scaffold or "(derive the phase coverage from the confirmed facts below)"
+    )
     prompt = (
         f"Case: {state['case_id']}\nAnalyst question: {state['question']}\n\n"
         f"## Key findings already derived\n{findings_txt}\n\n"
@@ -376,20 +440,28 @@ async def _synthesize_analyst_report(
     _SYNTHESIS_TIMEOUT_SECS = 180
     try:
         resp = await asyncio.wait_for(
-            model.ainvoke([
-                SystemMessage(content=_ANALYST_REPORT_SYSTEM),
-                HumanMessage(content=prompt),
-            ]),
+            model.ainvoke(
+                [
+                    SystemMessage(content=_ANALYST_REPORT_SYSTEM),
+                    HumanMessage(content=prompt),
+                ]
+            ),
             timeout=_SYNTHESIS_TIMEOUT_SECS,
         )
         _sanitize_message(resp)
         return (getattr(resp, "content", "") or "").strip()
     except asyncio.TimeoutError:
-        emit(src_label(state["agent_name"]), "warning",
-             f"final report synthesis timed out ({_SYNTHESIS_TIMEOUT_SECS}s); using structured findings only")
+        emit(
+            src_label(state["agent_name"]),
+            "warning",
+            f"final report synthesis timed out ({_SYNTHESIS_TIMEOUT_SECS}s); using structured findings only",
+        )
         return ""
     except Exception as exc:
-        emit(src_label(state["agent_name"]), "warning",
-             "final report synthesis failed; using structured findings only",
-             detail=str(exc))
+        emit(
+            src_label(state["agent_name"]),
+            "warning",
+            "final report synthesis failed; using structured findings only",
+            detail=str(exc),
+        )
         return ""

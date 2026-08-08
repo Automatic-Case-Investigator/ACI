@@ -7,7 +7,9 @@ import unittest
 
 from langchain_core.messages import ToolMessage
 
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 sys.path.insert(0, project_root)
 sys.path.insert(0, os.path.join(project_root, "aci-mcp-servers", "aci-thehive"))
 
@@ -17,11 +19,13 @@ from agent.runtime.graph.nodes_loop import _time_window_guard
 
 class TheHiveCaseDateTest(unittest.TestCase):
     def test_case_date_becomes_incident_time_not_created_at(self):
-        case = _normalize_case_timestamps({
-            "date": 1642508350000,
-            "createdAt": 1782713471057,
-            "_createdAt": 1782713471057,
-        })
+        case = _normalize_case_timestamps(
+            {
+                "date": 1642508350000,
+                "createdAt": 1782713471057,
+                "_createdAt": 1782713471057,
+            }
+        )
 
         self.assertEqual(case["incident_time_source"], "case.date")
         self.assertTrue(case["incident_time_iso"].startswith("2022-01-18T12:19:10"))
@@ -63,14 +67,19 @@ class SiemTimeGuardTest(unittest.TestCase):
             ToolMessage(
                 name="get_case",
                 tool_call_id="case-1",
-                content=json.dumps({
-                    "incident_time_iso": "2022-01-18T12:19:10+00:00",
-                    "incident_time_source": "case.date",
-                    "createdAt_iso": "2026-06-29T01:11:11+00:00",
-                }),
+                content=json.dumps(
+                    {
+                        "incident_time_iso": "2022-01-18T12:19:10+00:00",
+                        "incident_time_source": "case.date",
+                        "createdAt_iso": "2026-06-29T01:11:11+00:00",
+                    }
+                ),
             )
         ]
-        state = {"current_task": {"description": "Investigate case"}, "default_vicinity_window_hours": 24}
+        state = {
+            "current_task": {"description": "Investigate case"},
+            "default_vicinity_window_hours": 24,
+        }
 
         err = _time_window_guard(
             "get_event_volume",

@@ -57,15 +57,18 @@ def _build_prompt(
     # Include status so the model can distinguish pending from completed work.
     # If a completed task did not reach a solid conclusion, it should not
     # automatically block a follow-up investigation.
-    existing = "\n".join(
-        f"- [{t.get('status', '?')} P{t.get('priority', '?')}] {t.get('title', '')}"
-        + (
-            f" | Outcome: {t.get('summary') or t.get('conclusion')}"
-            if (t.get("summary") or t.get("conclusion"))
-            else ""
+    existing = (
+        "\n".join(
+            f"- [{t.get('status', '?')} P{t.get('priority', '?')}] {t.get('title', '')}"
+            + (
+                f" | Outcome: {t.get('summary') or t.get('conclusion')}"
+                if (t.get("summary") or t.get("conclusion"))
+                else ""
+            )
+            for t in (existing_tasks or [])
         )
-        for t in (existing_tasks or [])
-    ) or "- (none)"
+        or "- (none)"
+    )
 
     task_line = ""
     if current_task:
@@ -173,7 +176,9 @@ def _to_decision(item: dict, index: int, existing_refs: list[dict]) -> LeadDecis
     signature = lead_signature(candidate)
     category = str(item.get("category") or "").strip().lower()
     approved = bool(item.get("approved")) and category in {"approved", ""}
-    reason = str(item.get("reason") or "").strip() or ("approved" if approved else "rejected by reviewer")
+    reason = str(item.get("reason") or "").strip() or (
+        "approved" if approved else "rejected by reviewer"
+    )
     if not candidate.title:
         approved, category, reason = False, "invalid", "empty lead title"
     elif category not in _VALID_CATEGORIES:
@@ -185,7 +190,9 @@ def _to_decision(item: dict, index: int, existing_refs: list[dict]) -> LeadDecis
         if dup:
             approved, category, reason = False, "duplicate", dup
     score = candidate.priority + (10 if approved else 0)
-    return LeadDecision(candidate, approved, reason, category or "approved", score, signature)
+    return LeadDecision(
+        candidate, approved, reason, category or "approved", score, signature
+    )
 
 
 async def validate_leads_model(
@@ -204,7 +211,11 @@ async def validate_leads_model(
     src = src_label(agent_name)
     empty = LeadValidationResult(approved=[], rejected=[], deferred=[])
     if model is None:
-        emit(src, "warning", "lead validator: no model available — skipping lead creation this turn")
+        emit(
+            src,
+            "warning",
+            "lead validator: no model available — skipping lead creation this turn",
+        )
         return empty
     if not (leads_section or "").strip():
         return empty
@@ -214,19 +225,30 @@ async def validate_leads_model(
 
     try:
         resp = await asyncio.wait_for(
-            model.ainvoke([
-                SystemMessage(content=_LEAD_SYSTEM),
-                HumanMessage(content=prompt),
-            ]),
+            model.ainvoke(
+                [
+                    SystemMessage(content=_LEAD_SYSTEM),
+                    HumanMessage(content=prompt),
+                ]
+            ),
             timeout=_LEAD_MODEL_TIMEOUT_SECS,
         )
         _sanitize_message(resp)
         items = _parse_model_leads(getattr(resp, "content", "") or "")
     except asyncio.TimeoutError:
-        emit(src, "warning", f"lead validator: model timed out ({_LEAD_MODEL_TIMEOUT_SECS}s) — no leads created")
+        emit(
+            src,
+            "warning",
+            f"lead validator: model timed out ({_LEAD_MODEL_TIMEOUT_SECS}s) — no leads created",
+        )
         return empty
     except Exception as exc:
-        emit(src, "warning", "lead validator: model call failed — no leads created", detail=str(exc))
+        emit(
+            src,
+            "warning",
+            "lead validator: model call failed — no leads created",
+            detail=str(exc),
+        )
         return empty
 
     if not items:
@@ -239,15 +261,23 @@ async def validate_leads_model(
         decision = _to_decision(item, index, existing_refs)
         if decision.approved:
             if decision.signature in seen_signatures:
-                rejected.append(LeadDecision(
-                    decision.candidate, False, "duplicate of another proposed lead",
-                    "duplicate", decision.score, decision.signature,
-                ))
+                rejected.append(
+                    LeadDecision(
+                        decision.candidate,
+                        False,
+                        "duplicate of another proposed lead",
+                        "duplicate",
+                        decision.score,
+                        decision.signature,
+                    )
+                )
                 continue
             seen_signatures.add(decision.signature)
             approved_pool.append(decision)
         else:
             rejected.append(decision)
 
-    approved, deferred = apply_lead_budget(approved_pool, remaining_run_budget=remaining_run_budget)
+    approved, deferred = apply_lead_budget(
+        approved_pool, remaining_run_budget=remaining_run_budget
+    )
     return LeadValidationResult(approved=approved, rejected=rejected, deferred=deferred)

@@ -7,6 +7,7 @@ the metric stays a pure measurement. Aggregates to mean tokens/calls per run ove
 which lets you correlate cost against quality (phase_recall / verdict_correctness) in the
 same result table.
 """
+
 from __future__ import annotations
 
 from ..base import Metric, MetricResult
@@ -29,5 +30,8 @@ class CostToVerdict(Metric):
                 "output_tokens": int(tokens.get("output") or 0),
                 "model_calls": int(tokens.get("model_calls") or 0),
             },
-            detail={"status": ctx.meta.get("status", ""), "entry_point": ctx.entry_point},
+            detail={
+                "status": ctx.meta.get("status", ""),
+                "entry_point": ctx.entry_point,
+            },
         )

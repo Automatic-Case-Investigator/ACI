@@ -2,6 +2,7 @@
 specialist runs (and events) with it, on ANY delete path — because the child→session
 link is a soft `metadata["session_id"]` reference, not a DB foreign key.
 """
+
 from django.test import TestCase
 
 from agent.models import AgentEvent, AgentRun
@@ -9,15 +10,25 @@ from agent.models import AgentEvent, AgentRun
 
 class SessionCascadeDeleteTests(TestCase):
     def _session_with_children(self):
-        orch = AgentRun.objects.create(agent_name="orchestrator", case_id="~1", question="q")
+        orch = AgentRun.objects.create(
+            agent_name="orchestrator", case_id="~1", question="q"
+        )
         sid = str(orch.id)
         triage = AgentRun.objects.create(
-            agent_name="triage", case_id="~1", question="q", metadata={"session_id": sid},
+            agent_name="triage",
+            case_id="~1",
+            question="q",
+            metadata={"session_id": sid},
         )
         inv = AgentRun.objects.create(
-            agent_name="investigation", case_id="~1", question="q", metadata={"session_id": sid},
+            agent_name="investigation",
+            case_id="~1",
+            question="q",
+            metadata={"session_id": sid},
         )
-        AgentEvent.objects.create(session_id=sid, source="orch", kind="note", summary="hi")
+        AgentEvent.objects.create(
+            session_id=sid, source="orch", kind="note", summary="hi"
+        )
         return orch, triage, inv, sid
 
     def test_deleting_session_via_instance_delete_cascades_children(self):

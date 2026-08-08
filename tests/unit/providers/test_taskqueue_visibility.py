@@ -5,7 +5,9 @@ import sys
 import tempfile
 import unittest
 
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 sys.path.insert(0, project_root)
 sys.path.insert(0, os.path.join(project_root, "aci-mcp-servers", "aci-taskqueue"))
 
@@ -23,7 +25,9 @@ class TaskqueueVisibilityTest(unittest.TestCase):
 
     def test_agent_payload_omits_queue_lifecycle_timestamps(self):
         stored = store.create_task(
-            "~case", "run-1", "triage",
+            "~case",
+            "run-1",
+            "triage",
             title="Triage case ~case",
             description="Use case date as incident time.",
             priority=100,
@@ -41,7 +45,9 @@ class TaskqueueVisibilityTest(unittest.TestCase):
         self.assertNotIn("updated_at", claimed)
         self.assertNotIn("claimed_at", claimed)
 
-        listed = store.agent_visible_tasks(store.list_tasks("~case", "run-1", "triage"))[0]
+        listed = store.agent_visible_tasks(
+            store.list_tasks("~case", "run-1", "triage")
+        )[0]
         self.assertEqual(listed["id"], created["id"])
         self.assertNotIn("created_at", listed)
         self.assertNotIn("updated_at", listed)

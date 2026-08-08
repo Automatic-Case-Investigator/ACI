@@ -27,13 +27,17 @@ def build_session_note(state: dict, verdict: dict | None, final_answer: str) -> 
     if v:
         verdict_label = str(v.get("verdict", "?")).upper()
         triage = str(v.get("triage_verdict", "") or "").upper()
-        triage_suffix = f" (triage was {triage})" if triage and triage != verdict_label else ""
+        triage_suffix = (
+            f" (triage was {triage})" if triage and triage != verdict_label else ""
+        )
         lines.append(
             f"- Verdict: **{verdict_label}** ({v.get('confidence', '?')}); "
             f"impact={v.get('impact_state', '?')}, scope={v.get('scope_state', '?')}{triage_suffix}"
         )
 
-    summary = extract_section(final_answer, "Executive Summary") or extract_section(final_answer, "Verdict")
+    summary = extract_section(final_answer, "Executive Summary") or extract_section(
+        final_answer, "Verdict"
+    )
     if summary:
         lines += ["", "## What this run concluded", summary[:1200]]
 

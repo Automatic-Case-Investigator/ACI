@@ -4,7 +4,6 @@ import posixpath
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-
 MEMORY_FILE = "memory.md"
 
 
@@ -79,12 +78,14 @@ def render_memory(
             lines.append(_row(entry))
     else:
         lines.append("| _none_ |  |  |  |  |")
-    lines.extend([
-        "",
-        "## Child Directories",
-        "| Path | Type | Summary | Created By | Updated |",
-        "|---|---|---|---|---|",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Child Directories",
+            "| Path | Type | Summary | Created By | Updated |",
+            "|---|---|---|---|---|",
+        ]
+    )
     if child_directories:
         for entry in sorted(child_directories, key=lambda e: e.path):
             lines.append(_row(entry))
@@ -129,7 +130,12 @@ def upsert_memory_content(
     target[direct_name] = MemoryEntry(
         path=direct_name,
         kind="Directory" if is_child_dir else file_kind(direct_name),
-        summary=summary or ("Contains workspace artifacts." if is_child_dir else path_summary(changed_path)),
+        summary=summary
+        or (
+            "Contains workspace artifacts."
+            if is_child_dir
+            else path_summary(changed_path)
+        ),
         created_by=created_by,
         updated=updated,
     )
@@ -156,7 +162,13 @@ def parent_index_dirs(path: str, *, stop_at: str) -> list[str]:
 
 
 def _row(entry: MemoryEntry) -> str:
-    vals = [_escape(entry.path), _escape(entry.kind), _escape(entry.summary), _escape(entry.created_by), _escape(entry.updated)]
+    vals = [
+        _escape(entry.path),
+        _escape(entry.kind),
+        _escape(entry.summary),
+        _escape(entry.created_by),
+        _escape(entry.updated),
+    ]
     return "| " + " | ".join(vals) + " |"
 
 
@@ -170,7 +182,7 @@ def _direct_child(directory: str, path: str) -> str:
     prefix = directory + "/"
     if not path.startswith(prefix):
         return ""
-    return path[len(prefix):]
+    return path[len(prefix) :]
 
 
 def _purpose_for(directory: str) -> str:
@@ -189,7 +201,9 @@ def _purpose_for(directory: str) -> str:
     return "Directory index for agent workspace files."
 
 
-def _parse_tables(content: str) -> tuple[dict[str, MemoryEntry], dict[str, MemoryEntry]]:
+def _parse_tables(
+    content: str,
+) -> tuple[dict[str, MemoryEntry], dict[str, MemoryEntry]]:
     files: dict[str, MemoryEntry] = {}
     dirs: dict[str, MemoryEntry] = {}
     section = ""
@@ -197,7 +211,11 @@ def _parse_tables(content: str) -> tuple[dict[str, MemoryEntry], dict[str, Memor
         if line.startswith("## "):
             section = line[3:].strip()
             continue
-        if not line.startswith("| ") or line.startswith("| Path ") or line.startswith("|---"):
+        if (
+            not line.startswith("| ")
+            or line.startswith("| Path ")
+            or line.startswith("|---")
+        ):
             continue
         cols = [c.strip().replace("\\|", "|") for c in line.strip("|").split("|")]
         if len(cols) < 5 or cols[0] == "_none_":

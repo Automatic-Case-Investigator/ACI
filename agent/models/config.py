@@ -2,7 +2,6 @@ import uuid
 from django.db import models
 
 
-
 class ProviderConfig(models.Model):
     """DB-backed connection settings for one MCP provider (SOAR / SIEM / utility).
 
@@ -101,7 +100,9 @@ class MCPServerConfig(models.Model):
     command_or_url = models.TextField()
     env = models.JSONField(default=dict, blank=True)
     enabled = models.BooleanField(default=True)
-    health_status = models.CharField(max_length=16, choices=HEALTH_CHOICES, default=HEALTH_UNKNOWN)
+    health_status = models.CharField(
+        max_length=16, choices=HEALTH_CHOICES, default=HEALTH_UNKNOWN
+    )
     allowed_agents = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -129,7 +130,9 @@ class ModelProviderConfig(models.Model):
     base_url = models.URLField()
     api_key = models.CharField(max_length=512, blank=True)
     model = models.CharField(max_length=256)
-    tool_calling_mode = models.CharField(max_length=16, choices=TOOL_CALLING_CHOICES, default=TOOL_CALLING_AUTO)
+    tool_calling_mode = models.CharField(
+        max_length=16, choices=TOOL_CALLING_CHOICES, default=TOOL_CALLING_AUTO
+    )
     timeout = models.PositiveIntegerField(null=True, blank=True, default=None)
     # Model context window in tokens; drives compaction thresholds. Null → fall
     # back to the built-in default in agent/runtime/model_client.py.
@@ -161,7 +164,9 @@ class AgentConfig(models.Model):
     # Override the agent's MCP tool policy (list of provider keys). Null = default.
     tool_policy = models.JSONField(null=True, blank=True, default=None)
     stream_intent = models.BooleanField(null=True, blank=True, default=None)
-    vicinity_window_hours = models.PositiveIntegerField(null=True, blank=True, default=None)
+    vicinity_window_hours = models.PositiveIntegerField(
+        null=True, blank=True, default=None
+    )
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -246,8 +251,12 @@ class ResponsePolicy(models.Model):
     ]
 
     verdict = models.CharField(max_length=32)
-    subject = models.CharField(max_length=16, choices=SUBJECT_CHOICES, default=SUBJECT_CASE)
-    action = models.CharField(max_length=16, choices=ACTION_CHOICES, default=ACTION_NONE)
+    subject = models.CharField(
+        max_length=16, choices=SUBJECT_CHOICES, default=SUBJECT_CASE
+    )
+    action = models.CharField(
+        max_length=16, choices=ACTION_CHOICES, default=ACTION_NONE
+    )
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -268,17 +277,23 @@ class RuntimeConfig(models.Model):
 
     SINGLETON_ID = 1
 
-    id = models.PositiveSmallIntegerField(primary_key=True, default=SINGLETON_ID, editable=False)
+    id = models.PositiveSmallIntegerField(
+        primary_key=True, default=SINGLETON_ID, editable=False
+    )
     # None → use settings.WORKFLOWS_ENABLED; True/False → explicit override.
     workflows_enabled = models.BooleanField(null=True, blank=True, default=None)
     # "" → use settings.BASELINE_SIEM_ADAPTER.
     baseline_siem_adapter = models.CharField(max_length=64, blank=True, default="")
     # None → use settings.BASELINE_COMPUTE_INTERVAL_HOURS (applies on next restart).
-    baseline_interval_hours = models.PositiveIntegerField(null=True, blank=True, default=None)
+    baseline_interval_hours = models.PositiveIntegerField(
+        null=True, blank=True, default=None
+    )
     # None/False → off; True → surface all internal tool calls and node transitions.
     debug_mode = models.BooleanField(null=True, blank=True, default=None)
     # None → use settings.TI_CACHE_TTL_HOURS; the shared TI cache entry lifetime.
-    ti_cache_ttl_hours = models.PositiveIntegerField(null=True, blank=True, default=None)
+    ti_cache_ttl_hours = models.PositiveIntegerField(
+        null=True, blank=True, default=None
+    )
     updated_at = models.DateTimeField(auto_now=True)
 
     def save(self, *args, **kwargs):
@@ -287,4 +302,3 @@ class RuntimeConfig(models.Model):
 
     def __str__(self):
         return "runtime config"
-

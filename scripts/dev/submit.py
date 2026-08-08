@@ -10,6 +10,7 @@ Examples
     # Follow-up on an existing session, then poll for the answer
     python scripts/dev/submit.py --session <id> --question "investigate this case" --poll
 """
+
 from __future__ import annotations
 
 import argparse
@@ -25,7 +26,9 @@ from agent.models import AgentEvent  # noqa: E402
 
 
 def _poll(session_id: str, base: str, max_wait: int, pre_seen: set[int]) -> None:
-    print(f"Polling up to {max_wait}s (skipping {len(pre_seen)} pre-existing events)...")
+    print(
+        f"Polling up to {max_wait}s (skipping {len(pre_seen)} pre-existing events)..."
+    )
     seen = set(pre_seen)
     start = time.time()
     while time.time() - start < max_wait:
@@ -45,12 +48,20 @@ def _poll(session_id: str, base: str, max_wait: int, pre_seen: set[int]) -> None
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     p.add_argument("--question", required=True, help="analyst question to submit")
-    p.add_argument("--session", help="existing session id (omit to start a new session)")
+    p.add_argument(
+        "--session", help="existing session id (omit to start a new session)"
+    )
     p.add_argument("--base", default="http://localhost:8000", help="server base URL")
-    p.add_argument("--poll", action="store_true", help="poll for the answer after submitting")
-    p.add_argument("--max-wait", type=int, default=420, help="poll timeout seconds (default 420)")
+    p.add_argument(
+        "--poll", action="store_true", help="poll for the answer after submitting"
+    )
+    p.add_argument(
+        "--max-wait", type=int, default=420, help="poll timeout seconds (default 420)"
+    )
     args = p.parse_args()
 
     if args.session:

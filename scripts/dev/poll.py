@@ -7,6 +7,7 @@ Examples
     python scripts/dev/poll.py --run <run_id> --max-wait 600
     python scripts/dev/poll.py --session <session_id>
 """
+
 from __future__ import annotations
 
 import argparse
@@ -30,12 +31,18 @@ def _events(args: argparse.Namespace):
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     scope = p.add_mutually_exclusive_group(required=True)
     scope.add_argument("--run", help="run id to poll")
     scope.add_argument("--session", help="session id to poll")
-    p.add_argument("--max-wait", type=int, default=600, help="seconds to wait (default 600)")
-    p.add_argument("--poll", type=int, default=10, help="poll interval seconds (default 10)")
+    p.add_argument(
+        "--max-wait", type=int, default=600, help="seconds to wait (default 600)"
+    )
+    p.add_argument(
+        "--poll", type=int, default=10, help="poll interval seconds (default 10)"
+    )
     args = p.parse_args()
 
     label = f"run {args.run}" if args.run else f"session {args.session}"

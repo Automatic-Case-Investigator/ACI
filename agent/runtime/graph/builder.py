@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from langgraph.graph import END, StateGraph
 
-from .nodes_flow import assess, finish, pivot, publish_finish, reassess_verdict, verdict_contract
+from .nodes_flow import (
+    assess,
+    finish,
+    pivot,
+    publish_finish,
+    reassess_verdict,
+    verdict_contract,
+)
 from .coverage import _count_evidence_queries
 from .interpretation import interpret
 from .nodes_loop import _MAX_TASK_TOOL_CALLS, claim, seed, think, use_tools
@@ -37,7 +44,10 @@ def _route_triage_think(state: AgentState) -> str:
     """Act on tool calls, or finish once the flat loop produced a report."""
     if state.get("status") == "cancelled":
         return "finish"
-    if state["steps"] >= state["max_steps"] or state["tool_calls_made"] >= state["max_tool_calls"]:
+    if (
+        state["steps"] >= state["max_steps"]
+        or state["tool_calls_made"] >= state["max_tool_calls"]
+    ):
         return "finish"
     last = state["messages"][-1] if state["messages"] else None
     return "use_tools" if (last and getattr(last, "tool_calls", None)) else "finish"
@@ -74,7 +84,10 @@ def _route_interpret(state: AgentState) -> str:
 def _route_think(state: AgentState) -> str:
     """Choose between more tool use, assessment, or shutdown based on the latest model reply."""
     last = state["messages"][-1] if state["messages"] else None
-    if state["steps"] >= state["max_steps"] or state["tool_calls_made"] >= state["max_tool_calls"]:
+    if (
+        state["steps"] >= state["max_steps"]
+        or state["tool_calls_made"] >= state["max_tool_calls"]
+    ):
         return "finish"
     # Per-task call cap: a capped investigation task must close (→ assess), never loop
     # back into use_tools — `think` already stripped its tools, but this also blocks a
@@ -82,10 +95,7 @@ def _route_think(state: AgentState) -> str:
     # Keyed on the deterministic per-task counter, never on ToolMessage presence: the
     # counter measures this task alone and cannot be fooled by how history is assembled.
     task_calls = state["tool_calls_made"] - state.get("task_call_floor", 0)
-    if (
-        state["agent_name"] == "investigation"
-        and task_calls >= _MAX_TASK_TOOL_CALLS
-    ):
+    if state["agent_name"] == "investigation" and task_calls >= _MAX_TASK_TOOL_CALLS:
         return "assess"
     return "use_tools" if (last and getattr(last, "tool_calls", None)) else "assess"
 
@@ -121,9 +131,13 @@ def build_graph():
 
     g.set_entry_point("seed")
     g.add_conditional_edges(
-        "seed", _route_seed, {"claim": "claim", "triage_think": "triage_think"},
+        "seed",
+        _route_seed,
+        {"claim": "claim", "triage_think": "triage_think"},
     )
-    g.add_conditional_edges("claim", _route_claim, {"think": "think", "finish": "finish"})
+    g.add_conditional_edges(
+        "claim", _route_claim, {"think": "think", "finish": "finish"}
+    )
     g.add_conditional_edges(
         "use_tools",
         _route_use_tools,
@@ -145,7 +159,9 @@ def build_graph():
         {"use_tools": "use_tools", "assess": "assess", "finish": "finish"},
     )
     g.add_conditional_edges(
-        "assess", _route_assess, {"pivot": "pivot", "finish": "finish"},
+        "assess",
+        _route_assess,
+        {"pivot": "pivot", "finish": "finish"},
     )
     g.add_edge("pivot", "claim")
     g.add_edge("finish", "verdict_contract")

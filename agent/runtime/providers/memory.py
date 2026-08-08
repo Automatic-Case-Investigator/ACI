@@ -4,6 +4,7 @@ Read-only access to curated patterns, baselines, and analyst feedback. The sourc
 of truth is the Django `agent` app tables, so this provider points the server at
 Django's default SQLite database; the server opens it read-only.
 """
+
 from __future__ import annotations
 
 import sys
@@ -40,12 +41,19 @@ def _build(resolved: dict, run_ctx: dict | None = None) -> dict:
     }
 
 
-register(MCPProvider(
-    key="aci-memory",
-    kind=KIND_UTILITY,
-    setting_defaults=_defaults,
-    build_config=_build,
-    capabilities={
-        "memory_lookup": ("search_feedback", "search_patterns", "list_baseline_entities", "get_baselines"),
-    },
-))
+register(
+    MCPProvider(
+        key="aci-memory",
+        kind=KIND_UTILITY,
+        setting_defaults=_defaults,
+        build_config=_build,
+        capabilities={
+            "memory_lookup": (
+                "search_feedback",
+                "search_patterns",
+                "list_baseline_entities",
+                "get_baselines",
+            ),
+        },
+    )
+)

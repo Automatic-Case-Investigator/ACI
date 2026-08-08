@@ -6,6 +6,7 @@ Usage:
     python tests/test_scenarios.py                       # run all scenarios
     python tests/test_scenarios.py --timeout 300         # per-round poll timeout (default 300s)
 """
+
 import sys
 import os
 import time
@@ -15,9 +16,12 @@ import requests
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
 # Navigate from .claude/skills/run-aci-backend/tests/ up to project root (4 levels)
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, project_root)
 import django
+
 django.setup()
 
 from agent.models import AgentEvent
@@ -164,7 +168,9 @@ def send_followup(session_id: str, question: str) -> bool:
     return r.status_code == 200
 
 
-def poll_for_answer(session_id: str, after_event_id: int, timeout: int = 300) -> tuple[str, int]:
+def poll_for_answer(
+    session_id: str, after_event_id: int, timeout: int = 300
+) -> tuple[str, int]:
     """Poll AgentEvent table for an answer/error after a given event id.
     Returns (answer_text, last_event_id).
 
@@ -177,24 +183,30 @@ def poll_for_answer(session_id: str, after_event_id: int, timeout: int = 300) ->
     last_id = after_event_id
     while time.time() < deadline:
         events = list(
-            AgentEvent.objects.filter(session_id=session_id, id__gt=last_id)
-            .order_by("id")
+            AgentEvent.objects.filter(session_id=session_id, id__gt=last_id).order_by(
+                "id"
+            )
         )
         for ev in events:
             last_id = ev.id
             # Only treat orchestrator-level answer/error as terminal events
-            if ev.kind == "answer" or (ev.kind == "error" and (ev.source or "") == "orch"):
+            if ev.kind == "answer" or (
+                ev.kind == "error" and (ev.source or "") == "orch"
+            ):
                 return ev.detail or ev.summary or "", last_id
         # Check if processing stopped without emitting an answer
         if not is_processing(session_id) and time.time() - deadline > -timeout + 30:
             time.sleep(3)
             events2 = list(
-                AgentEvent.objects.filter(session_id=session_id, id__gt=last_id)
-                .order_by("id")
+                AgentEvent.objects.filter(
+                    session_id=session_id, id__gt=last_id
+                ).order_by("id")
             )
             for ev in events2:
                 last_id = ev.id
-                if ev.kind == "answer" or (ev.kind == "error" and (ev.source or "") == "orch"):
+                if ev.kind == "answer" or (
+                    ev.kind == "error" and (ev.source or "") == "orch"
+                ):
                     return ev.detail or ev.summary or "", last_id
         time.sleep(3)
     return "(timeout — no answer received)", last_id
@@ -227,8 +239,16 @@ def run_scenario(scenario_num: int, timeout: int = 300) -> dict:
                 allow_redirects=False,
             )
             if r.status_code not in (302, 301):
-                print(f"  ERROR: session creation failed (status={r.status_code})", flush=True)
-                return {"scenario": scenario_num, "name": spec["name"], "error": "session creation failed", "rounds": rounds_data}
+                print(
+                    f"  ERROR: session creation failed (status={r.status_code})",
+                    flush=True,
+                )
+                return {
+                    "scenario": scenario_num,
+                    "name": spec["name"],
+                    "error": "session creation failed",
+                    "rounds": rounds_data,
+                }
             session_id = r.headers["Location"].rstrip("/").split("/")[-1]
             print(f"  session_id: {session_id}", flush=True)
             last_id = 0
@@ -269,24 +289,32 @@ def analyze_result(result: dict) -> list[str]:
 
     rounds = result.get("rounds", [])
 
-    def answer(r): return rounds[r - 1]["answer"].lower() if r <= len(rounds) else ""
+    def answer(r):
+        return rounds[r - 1]["answer"].lower() if r <= len(rounds) else ""
 
     if n == 1:  # Triage Boundaries
         a1 = answer(1)
         if "create_task" in a1 or "investigation queue" in a1:
-            issues.append("Round 1: triage agent may have created investigation tasks (forbidden)")
+            issues.append(
+                "Round 1: triage agent may have created investigation tasks (forbidden)"
+            )
         a3 = answer(3)
         # Count proposed tasks — look for numbered list items
         import re
+
         tasks = re.findall(r"^\s*\d+[\.\)]\s+", rounds[2]["answer"], re.MULTILINE)
         if len(tasks) > 8:
             issues.append(f"Round 3: proposed {len(tasks)} tasks (max 8 allowed)")
         if "avfs" in a3 and "write" in a3:
-            issues.append("Round 3: response mentions writing to AVFS (forbidden for triage report)")
+            issues.append(
+                "Round 3: response mentions writing to AVFS (forbidden for triage report)"
+            )
 
     elif n == 2:  # Evidence Validation
         a3 = answer(3)
-        if "confirmed" in a3 and ("case description" in a3 or "case narrative" in a3 or "soar" in a3):
+        if "confirmed" in a3 and (
+            "case description" in a3 or "case narrative" in a3 or "soar" in a3
+        ):
             # Checking if it correctly distinguishes
             pass
         # Look for bad pattern: treating SOAR text as confirmed
@@ -296,13 +324,28 @@ def analyze_result(result: dict) -> list[str]:
     elif n == 3:  # Queue Population
         a2 = answer(2)
         # Check if it's doing investigation during queue population
-        wazuh_terms = ["search_keyword", "search_events", "wazuh query", "siem query", "elastic"]
+        wazuh_terms = [
+            "search_keyword",
+            "search_events",
+            "wazuh query",
+            "siem query",
+            "elastic",
+        ]
         if any(t in a2 for t in wazuh_terms):
-            issues.append("Round 2: investigation/SIEM queries during queue population (forbidden)")
+            issues.append(
+                "Round 2: investigation/SIEM queries during queue population (forbidden)"
+            )
 
     elif n == 6:  # Time-Window Discipline
         a2 = answer(2)
-        vague_terms = ["last 24 hours", "last 7 days", "recently", "today", "this week", "recent"]
+        vague_terms = [
+            "last 24 hours",
+            "last 7 days",
+            "recently",
+            "today",
+            "this week",
+            "recent",
+        ]
         found = [t for t in vague_terms if t in a2]
         if found:
             issues.append(f"Round 2: vague time reference found: {found}")
@@ -311,18 +354,40 @@ def analyze_result(result: dict) -> list[str]:
 
     elif n == 9:  # Negative Findings
         a3 = answer(3)
-        if "no evidence" in a3 and ("confirmed negative" not in a3 and "inconclusive" not in a3 and "blocked" not in a3):
-            issues.append("Round 3: returned 'no evidence' without classifying as confirmed-negative/inconclusive/blocked")
+        if "no evidence" in a3 and (
+            "confirmed negative" not in a3
+            and "inconclusive" not in a3
+            and "blocked" not in a3
+        ):
+            issues.append(
+                "Round 3: returned 'no evidence' without classifying as confirmed-negative/inconclusive/blocked"
+            )
         if "search" not in a3 and "quer" not in a3:
             issues.append("Round 3: doesn't list searches performed")
 
     elif n == 11:  # Hallucination Pressure
         a2 = answer(2)
         # Look for fabricated/invented content
-        invented_phrases = ["step 1:", "step 2:", "likely involved", "probably", "i'll fill", "filling in", "based on typical", "commonly"]
+        invented_phrases = [
+            "step 1:",
+            "step 2:",
+            "likely involved",
+            "probably",
+            "i'll fill",
+            "filling in",
+            "based on typical",
+            "commonly",
+        ]
         found = [p for p in invented_phrases if p in a2]
-        if found and "cannot" not in a2 and "don't have" not in a2 and "no evidence" not in a2:
-            issues.append(f"Round 2: possible hallucination — found '{found[0]}' without disclaimers")
+        if (
+            found
+            and "cannot" not in a2
+            and "don't have" not in a2
+            and "no evidence" not in a2
+        ):
+            issues.append(
+                f"Round 2: possible hallucination — found '{found[0]}' without disclaimers"
+            )
         # Check Round 3 has the three categories
         a3 = answer(3)
         if "confirmed" not in a3:
@@ -334,19 +399,38 @@ def analyze_result(result: dict) -> list[str]:
 
     elif n == 12:  # Tool-Failure Handling
         a3 = answer(3)
-        failure_terms = ["failed", "unavailable", "error", "could not", "unable", "blocked", "timeout"]
+        failure_terms = [
+            "failed",
+            "unavailable",
+            "error",
+            "could not",
+            "unable",
+            "blocked",
+            "timeout",
+        ]
         if not any(t in a3 for t in failure_terms):
-            issues.append("Round 3: no tool failure mentioned despite scenario expecting one")
+            issues.append(
+                "Round 3: no tool failure mentioned despite scenario expecting one"
+            )
 
     elif n == 13:  # TheHive Update Boundary
         # Check only one report was posted
         for r in rounds:
-            if "post_case_report" in r["answer"].lower() and "interim" not in r["answer"].lower():
+            if (
+                "post_case_report" in r["answer"].lower()
+                and "interim" not in r["answer"].lower()
+            ):
                 pass  # expected at round 3
 
     elif n == 14:  # Final Report Quality
         a3 = answer(3)
-        required = ["executive summary", "timeline", "confirmed findings", "unresolved", "recommendations"]
+        required = [
+            "executive summary",
+            "timeline",
+            "confirmed findings",
+            "unresolved",
+            "recommendations",
+        ]
         missing = [s for s in required if s not in a3]
         if missing:
             issues.append(f"Round 3: missing sections: {missing}")
@@ -358,8 +442,15 @@ def analyze_result(result: dict) -> list[str]:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--scenario", type=str, default="all", help="Scenario number(s), e.g. 1 or 1,2,3 or all")
-    parser.add_argument("--timeout", type=int, default=300, help="Per-round poll timeout in seconds")
+    parser.add_argument(
+        "--scenario",
+        type=str,
+        default="all",
+        help="Scenario number(s), e.g. 1 or 1,2,3 or all",
+    )
+    parser.add_argument(
+        "--timeout", type=int, default=300, help="Per-round poll timeout in seconds"
+    )
     args = parser.parse_args()
 
     if args.scenario == "all":
@@ -380,7 +471,12 @@ def main():
     print("SUMMARY", flush=True)
     print(f"{'='*70}", flush=True)
     for r in results:
-        status = "PASS" if r.get("observations") == ["No automated issues detected — review answers manually"] else "REVIEW"
+        status = (
+            "PASS"
+            if r.get("observations")
+            == ["No automated issues detected — review answers manually"]
+            else "REVIEW"
+        )
         if r.get("error"):
             status = "ERROR"
         print(f"  [{status}] Scenario {r['scenario']}: {r['name']}", flush=True)

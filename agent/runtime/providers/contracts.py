@@ -1,4 +1,5 @@
 """Standardized provider capability contracts and rendering helpers."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -19,12 +20,15 @@ def provider_contract_snapshot(provider: MCPProvider) -> dict[str, Any]:
     capability_ids = _capability_ids_for(provider)
     standardized = []
     for cap_id in capability_ids:
-        standardized.append({
-            "id": cap_id,
-            "required": cap_id in REQUIRED_CAPABILITIES_BY_KIND.get(provider.kind, ()),
-            "tools": list(provider.capabilities.get(cap_id, ())),
-            "doc": CAPABILITY_DOCS.get(cap_id, {}),
-        })
+        standardized.append(
+            {
+                "id": cap_id,
+                "required": cap_id
+                in REQUIRED_CAPABILITIES_BY_KIND.get(provider.kind, ()),
+                "tools": list(provider.capabilities.get(cap_id, ())),
+                "doc": CAPABILITY_DOCS.get(cap_id, {}),
+            }
+        )
     return {
         "provider_key": provider.key,
         "provider_kind": provider.kind,
@@ -106,4 +110,6 @@ def _capability_ids_for(provider: MCPProvider) -> tuple[str, ...]:
     declared = tuple(provider.capabilities.keys())
     if declared:
         return declared
-    return REQUIRED_CAPABILITIES_BY_KIND.get(provider.kind, ()) + OPTIONAL_CAPABILITIES_BY_KIND.get(provider.kind, ())
+    return REQUIRED_CAPABILITIES_BY_KIND.get(
+        provider.kind, ()
+    ) + OPTIONAL_CAPABILITIES_BY_KIND.get(provider.kind, ())

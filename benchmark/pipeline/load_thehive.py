@@ -12,6 +12,7 @@ Correlation rules are collapsed as before. Every alert is tagged for tag-based t
 Connection resolves from the dashboard `ProviderConfig` (aci-thehive) if not passed,
 falling back to THEHIVE_URL / THEHIVE_API_KEY env vars.
 """
+
 from __future__ import annotations
 
 import datetime as _dt
@@ -64,7 +65,9 @@ def run(
     dump = preprocessed_dir / f"{scenario}_wazuh.json"
     labels = _th.load_labels(str(preprocessed_dir / f"{scenario}_aminer.labels.json"))
 
-    run_id = tag or (_dt.datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6])
+    run_id = tag or (
+        _dt.datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6]
+    )
     run_tag = _th.RUN_TAG_PREFIX + run_id
 
     rows = _th.selected_alerts(str(dump), labels, min_level, True, 0, include_anomalies)
@@ -82,7 +85,9 @@ def run(
         if alerts:
             max_workers = max(1, min(workers, len(alerts)))
             with ThreadPoolExecutor(max_workers=max_workers) as pool:
-                futures = {pool.submit(hive.create_alert, alert): alert for alert in alerts}
+                futures = {
+                    pool.submit(hive.create_alert, alert): alert for alert in alerts
+                }
                 for fut in as_completed(futures):
                     alert = futures[fut]
                     status, info = fut.result()
@@ -91,43 +96,76 @@ def run(
                         existed += status == "exists"
                         if info:
                             ids.append(info)
-                            records.append({
-                                "id": info,
-                                "sourceRef": alert.get("sourceRef", ""),
-                                "date": alert.get("date"),
-                                "title": alert.get("title", ""),
-                                "tags": alert.get("tags") or [],
-                            })
+                            records.append(
+                                {
+                                    "id": info,
+                                    "sourceRef": alert.get("sourceRef", ""),
+                                    "date": alert.get("date"),
+                                    "title": alert.get("title", ""),
+                                    "tags": alert.get("tags") or [],
+                                }
+                            )
                     else:
                         errors += 1
-                    bar.advance(extra=f"created={created} exists={existed} errors={errors}")
+                    bar.advance(
+                        extra=f"created={created} exists={existed} errors={errors}"
+                    )
     finally:
         bar.close(extra=f"created={created} exists={existed} errors={errors}")
 
-    manifest_dir = Path(manifest_dir) if manifest_dir else preprocessed_dir.parent / "manifests"
+    manifest_dir = (
+        Path(manifest_dir) if manifest_dir else preprocessed_dir.parent / "manifests"
+    )
     manifest_dir.mkdir(parents=True, exist_ok=True)
     manifest = manifest_dir / f"thehive_manifest.{run_id}.json"
-    manifest.write_text(json.dumps({
-        "run_id": run_id, "tag": run_tag, "scenario": scenario,
-        "created": created, "existed": existed, "errors": errors,
-        "alert_ids": ids, "alerts": records,
-    }, indent=2), encoding="utf-8")
-    return {"run_id": run_id, "tag": run_tag, "selected": len(alerts),
-            "created": created, "existed": existed, "errors": errors, "manifest": str(manifest)}
+    manifest.write_text(
+        json.dumps(
+            {
+                "run_id": run_id,
+                "tag": run_tag,
+                "scenario": scenario,
+                "created": created,
+                "existed": existed,
+                "errors": errors,
+                "alert_ids": ids,
+                "alerts": records,
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    return {
+        "run_id": run_id,
+        "tag": run_tag,
+        "selected": len(alerts),
+        "created": created,
+        "existed": existed,
+        "errors": errors,
+        "manifest": str(manifest),
+    }
 
 
 def _ids_by_tag_with_progress(hive, tag: str, progress: Progress) -> list[str]:
     ids: list[str] = []
     page = 0
     while True:
-        progress.update(len(ids), extra=f"querying tag page={page} found={len(ids)}", force=True)
+        progress.update(
+            len(ids), extra=f"querying tag page={page} found={len(ids)}", force=True
+        )
         with Spinner(progress, f"querying tag page={page} found={len(ids)}"):
             if hasattr(hive, "_query"):
-                res = hive._query([
-                    {"_name": "listAlert"},
-                    {"_name": "filter", "_field": "tags", "_value": tag},
-                    {"_name": "page", "from": page, "to": page + 500, "extraData": []},
-                ])
+                res = hive._query(
+                    [
+                        {"_name": "listAlert"},
+                        {"_name": "filter", "_field": "tags", "_value": tag},
+                        {
+                            "_name": "page",
+                            "from": page,
+                            "to": page + 500,
+                            "extraData": [],
+                        },
+                    ]
+                )
             else:
                 res = [{"_id": i} for i in hive.ids_by_tag(tag)]
         if not res:
@@ -141,9 +179,16 @@ def _ids_by_tag_with_progress(hive, tag: str, progress: Progress) -> list[str]:
     return ids
 
 
-def teardown(tag: str, *, url: str | None = None, api_key: str | None = None,
-             verify_tls: bool = True, progress: bool | None = None,
-             manifest_path: str | Path | None = None, workers: int = 32) -> int:
+def teardown(
+    tag: str,
+    *,
+    url: str | None = None,
+    api_key: str | None = None,
+    verify_tls: bool = True,
+    progress: bool | None = None,
+    manifest_path: str | Path | None = None,
+    workers: int = 32,
+) -> int:
     if not (url and api_key):
         url, api_key, verify_tls = _resolve_connection()
     hive = _th.TheHive(url, api_key, verify=verify_tls)

@@ -3,6 +3,7 @@
 Groups scorecards by (scenario, entry_point), rolls each metric up across trials via
 `scoring.aggregate`, and writes data/results/<scenario>.{json,md,csv}.
 """
+
 from __future__ import annotations
 
 import csv
@@ -45,7 +46,11 @@ def aggregate_cards(cards: list[dict]) -> dict:
     # Entry points with ONLY invalid trials still surface (0 valid) for visibility.
     for (scenario, entry_point), n in excluded.items():
         if entry_point not in out.get(scenario, {}):
-            out[scenario][entry_point] = {"trials": 0, "excluded_trials": n, "metrics": {}}
+            out[scenario][entry_point] = {
+                "trials": 0,
+                "excluded_trials": n,
+                "metrics": {},
+            }
     return dict(out)
 
 
@@ -73,7 +78,16 @@ def _rows_from_cards(cards: list[dict], scenario: str) -> list[dict]:
 def _write_csv(path: Path, rows: list[dict]) -> None:
     fieldnames = sorted({k for row in rows for k in row})
     if not fieldnames:
-        fieldnames = ["scenario", "entry_point", "trial", "status", "metric", "kind", "key", "value"]
+        fieldnames = [
+            "scenario",
+            "entry_point",
+            "trial",
+            "status",
+            "metric",
+            "kind",
+            "key",
+            "value",
+        ]
     with path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()

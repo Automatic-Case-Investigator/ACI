@@ -1,4 +1,5 @@
 """Wazuh OpenSearch REST API client."""
+
 from __future__ import annotations
 
 import json
@@ -58,8 +59,8 @@ class WazuhClient:
     _SELECTIVITY_FIELDS = (
         "rule.id",
         "rule.level",
-        "data.id",          # HTTP status code on web accesslog rules (200 vs 404)
-        "data.protocol",    # HTTP method / protocol on many web rules (GET vs POST)
+        "data.id",  # HTTP status code on web accesslog rules (200 vs 404)
+        "data.protocol",  # HTTP method / protocol on many web rules (GET vs POST)
         "data.srcip",
         "data.dstip",
         "data.dstuser",
@@ -127,12 +128,19 @@ class WazuhClient:
         guidance for malformed structured queries (e.g. a bad `bool`/`should` clause).
         """
         low = str(err).lower()
-        if any(k in low for k in ("parsing_exception", "query malformed",
-                                  "x_content_parse_exception", "parse_exception")):
+        if any(
+            k in low
+            for k in (
+                "parsing_exception",
+                "query malformed",
+                "x_content_parse_exception",
+                "parse_exception",
+            )
+        ):
             return (
                 "Your structured query is malformed and was not run. Every `bool` clause "
                 "(`must`/`should`/`filter`) must be a LIST of clause objects, each a single "
-                "query type such as {\"term\": {\"field\": \"value\"}}; do not nest `should` "
+                'query type such as {"term": {"field": "value"}}; do not nest `should` '
                 "directly inside `should`. Rebuild it, or use `search_keyword` / `profile_field`."
             )
         return None
@@ -180,7 +188,9 @@ class WazuhClient:
                 except Exception:
                     body = resp.text[:1000]
                 raise RuntimeError(f"OpenSearch error {resp.status_code}: {body}")
-            return [row["index"] for row in resp.json() if not row["index"].startswith(".")]
+            return [
+                row["index"] for row in resp.json() if not row["index"].startswith(".")
+            ]
 
     def get_index_schema(self, index_pattern: str) -> dict[str, Any]:
         with self._client() as c:
@@ -208,8 +218,18 @@ class WazuhClient:
     # Leaf clause operators whose body is `{field: value}` — the places a query names a
     # field. Used to detect when a zero-hit result was caused by a wrong field NAME (which
     # returns 0 exactly like a genuine absence) rather than a true negative.
-    _LEAF_FIELD_OPS = ("term", "terms", "match", "match_phrase", "match_phrase_prefix",
-                       "wildcard", "prefix", "regexp", "fuzzy", "range")
+    _LEAF_FIELD_OPS = (
+        "term",
+        "terms",
+        "match",
+        "match_phrase",
+        "match_phrase_prefix",
+        "wildcard",
+        "prefix",
+        "regexp",
+        "fuzzy",
+        "range",
+    )
 
     @classmethod
     def _query_leaf_fields(cls, dsl: Any) -> set[str]:
@@ -248,7 +268,11 @@ class WazuhClient:
             return cache[index]
         try:
             schema = self.get_index_schema(index)
-            fields = set((schema.get("fields") or {}).keys()) if isinstance(schema, dict) else set()
+            fields = (
+                set((schema.get("fields") or {}).keys())
+                if isinstance(schema, dict)
+                else set()
+            )
         except Exception:
             fields = set()
         cache[index] = fields
@@ -260,12 +284,15 @@ class WazuhClient:
         segment (e.g. `url` → `data.url`), ranked shortest-first."""
         seg = str(queried).split(".")[-1].lower()
         cands = [
-            k for k in known
+            k
+            for k in known
             if k.lower() != str(queried).lower() and k.split(".")[-1].lower() == seg
         ]
         return sorted(cands, key=len)[:5]
 
-    def _absent_field_warnings(self, index: str, queried_fields: set[str]) -> list[dict]:
+    def _absent_field_warnings(
+        self, index: str, queried_fields: set[str]
+    ) -> list[dict]:
         """For each queried field not present in the index mapping, a warning with
         candidate real field names. Empty if the mapping is unavailable (fail-open)."""
         known = self._known_fields(index)
@@ -275,11 +302,13 @@ class WazuhClient:
         for field_name in sorted(queried_fields):
             if field_name in known:
                 continue
-            out.append({
-                "queried": field_name,
-                "present": False,
-                "candidates": self._field_candidates(field_name, known),
-            })
+            out.append(
+                {
+                    "queried": field_name,
+                    "present": False,
+                    "candidates": self._field_candidates(field_name, known),
+                }
+            )
         return out
 
     @staticmethod
@@ -287,7 +316,9 @@ class WazuhClient:
         parts = []
         for w in warnings:
             cands = ", ".join(w.get("candidates") or [])
-            parts.append(f"`{w['queried']}`" + (f" (did you mean {cands}?)" if cands else ""))
+            parts.append(
+                f"`{w['queried']}`" + (f" (did you mean {cands}?)" if cands else "")
+            )
         return (
             "0 hits — but the query references field name(s) not in the index mapping: "
             + "; ".join(parts)
@@ -328,11 +359,21 @@ class WazuhClient:
     # Keys that are part of a *search request* but are NOT valid anywhere inside an
     # OpenSearch query DSL clause. Models frequently leak these into the `query`
     # argument (sometimes nested deep inside a `bool`); strip them everywhere.
-    _NON_CLAUSE_KEYS = frozenset({
-        "time_range", "max_results", "size", "index_pattern",
-        "from", "to", "sort", "aggs", "aggregations", "_source",
-        "source_fields",  # model-friendly alias sometimes nested inside the query dict
-    })
+    _NON_CLAUSE_KEYS = frozenset(
+        {
+            "time_range",
+            "max_results",
+            "size",
+            "index_pattern",
+            "from",
+            "to",
+            "sort",
+            "aggs",
+            "aggregations",
+            "_source",
+            "source_fields",  # model-friendly alias sometimes nested inside the query dict
+        }
+    )
     # Subset that is NEVER valid at any nesting level in a DSL object; strip recursively.
     _ALWAYS_INVALID = frozenset({"time_range", "max_results", "index_pattern"})
 
@@ -383,7 +424,11 @@ class WazuhClient:
         if isinstance(dsl, dict):
             for key in list(dsl):
                 if key in cls._NON_CLAUSE_KEYS:
-                    if key == "time_range" and time_range is None and isinstance(dsl[key], dict):
+                    if (
+                        key == "time_range"
+                        and time_range is None
+                        and isinstance(dsl[key], dict)
+                    ):
                         time_range = dsl[key]
                     dsl.pop(key, None)
 
@@ -427,17 +472,29 @@ class WazuhClient:
     def _extract_bool_clauses(cls, dsl: Any) -> tuple[list, list]:
         """Return (must_clauses, should_clauses) from a DSL, dropping the @timestamp
         range (that is the window baseline, not a discriminator)."""
+
         def _not_ts(c: Any) -> bool:
-            return not (isinstance(c, dict) and isinstance(c.get("range"), dict)
-                        and "@timestamp" in c["range"])
+            return not (
+                isinstance(c, dict)
+                and isinstance(c.get("range"), dict)
+                and "@timestamp" in c["range"]
+            )
+
         b = dsl.get("bool") if isinstance(dsl, dict) else None
         if not isinstance(b, dict):
             # A bare leaf query (e.g. a lone term) counts as a single must clause.
-            if isinstance(dsl, dict) and dsl and "match_all" not in dsl and _not_ts(dsl):
+            if (
+                isinstance(dsl, dict)
+                and dsl
+                and "match_all" not in dsl
+                and _not_ts(dsl)
+            ):
                 return [dsl], []
             return [], []
+
         def _norm(v: Any) -> list:
             return v if isinstance(v, list) else ([] if v is None else [v])
+
         musts = [c for c in _norm(b.get("must")) if _not_ts(c)]
         shoulds = [c for c in _norm(b.get("should")) if _not_ts(c)]
         return musts, shoulds
@@ -484,7 +541,11 @@ class WazuhClient:
         window = data.get("hits", {}).get("total", {})
         window_docs = window.get("value", 0) if isinstance(window, dict) else window
         clauses = [
-            {"clause": label, "type": kind, "matches": buckets.get(key, {}).get("doc_count", 0)}
+            {
+                "clause": label,
+                "type": kind,
+                "matches": buckets.get(key, {}).get("doc_count", 0),
+            }
             for key, kind, label in labels
         ]
         return {"window_docs": window_docs, "clauses": clauses}
@@ -515,7 +576,9 @@ class WazuhClient:
             # on a TRUNCATED result `total` is the capped lower bound (10000) while the
             # aggregation counts every matching doc, so `doc_count / total` can exceed 100%.
             # Sum this field's buckets + the docs beyond the top-N (`sum_other_doc_count`).
-            denom = sum(b["doc_count"] for b in buckets) + agg.get("sum_other_doc_count", 0)
+            denom = sum(b["doc_count"] for b in buckets) + agg.get(
+                "sum_other_doc_count", 0
+            )
             if not denom:
                 continue
             top = buckets[0]
@@ -529,20 +592,28 @@ class WazuhClient:
                 role = "flood_signature"
             else:
                 role = "high_cardinality"
-            entries.append({
-                "field": field,
-                "dominant": top["key"],
-                "dominant_share": round(dominant_share, 3),
-                "minorities": minorities[:5],
-                "role": role,
-            })
+            entries.append(
+                {
+                    "field": field,
+                    "dominant": top["key"],
+                    "dominant_share": round(dominant_share, 3),
+                    "minorities": minorities[:5],
+                    "role": role,
+                }
+            )
         rank = {"discriminator": 0, "flood_signature": 1, "high_cardinality": 2}
         entries.sort(key=lambda e: (rank[e["role"]], -e["dominant_share"]))
         return entries
 
     def _residue_sample(
-        self, client, index: str, dsl: dict, field: str, dominant_value,
-        per_value: int = 2, cap: int = 10,
+        self,
+        client,
+        index: str,
+        dsl: dict,
+        field: str,
+        dominant_value,
+        per_value: int = 2,
+        cap: int = 10,
     ) -> list[dict]:
         """Sample the residue after removing the flood's DOMINANT value — a couple of
         events per distinct minority value, ordered RAREST-first. The order is a useful
@@ -553,16 +624,32 @@ class WazuhClient:
         try:
             body = {
                 "size": 0,
-                "query": {"bool": {"must": [dsl], "must_not": [{"term": {field: dominant_value}}]}},
-                "aggs": {"by_value": {
-                    "terms": {"field": field, "size": 12, "order": {"_count": "asc"}},
-                    "aggs": {"ex": {"top_hits": {"size": per_value}}},
-                }},
+                "query": {
+                    "bool": {
+                        "must": [dsl],
+                        "must_not": [{"term": {field: dominant_value}}],
+                    }
+                },
+                "aggs": {
+                    "by_value": {
+                        "terms": {
+                            "field": field,
+                            "size": 12,
+                            "order": {"_count": "asc"},
+                        },
+                        "aggs": {"ex": {"top_hits": {"size": per_value}}},
+                    }
+                },
             }
             resp = client.post(f"/{index}/_search", json=body)
             if resp.is_error:
                 return []
-            buckets = resp.json().get("aggregations", {}).get("by_value", {}).get("buckets", [])
+            buckets = (
+                resp.json()
+                .get("aggregations", {})
+                .get("by_value", {})
+                .get("buckets", [])
+            )
             out: list[dict] = []
             for b in buckets:
                 for h in b.get("ex", {}).get("hits", {}).get("hits", []):
@@ -583,7 +670,9 @@ class WazuhClient:
     ) -> dict[str, Any]:
         index = index_pattern or self._default_index
         dsl = self._as_dsl(query)
-        dsl, time_range, max_results = self._unwrap_request(dsl, time_range, max_results)
+        dsl, time_range, max_results = self._unwrap_request(
+            dsl, time_range, max_results
+        )
         noop_should = self._has_noop_should(dsl)
         # Capture the caller's clauses BEFORE the outer time-range wrap below rewrites dsl.
         diag_musts, diag_shoulds = self._extract_bool_clauses(dsl)
@@ -645,7 +734,7 @@ class WazuhClient:
                 "`should` SCORING-ONLY, not a filter: the result above is NOT narrowed "
                 "by those terms, only by whatever `must`/`filter` you also supplied "
                 "(often just the time range). Either move the discriminator into "
-                "`must` (a hard AND), or add `\"minimum_should_match\": 1` to require "
+                '`must` (a hard AND), or add `"minimum_should_match": 1` to require '
                 "at least one `should` clause to match."
             )
         # Per-clause selectivity: how many docs in the window each must/should clause
@@ -659,7 +748,9 @@ class WazuhClient:
         # the caller to scope by class. An entity-only query (host/IP with no rule.groups)
         # returns the union of all the entity's classes, so the loudest (usually IDS/network
         # noise against a scanned host) buries the quiet class holding the evidence.
-        rg_buckets = data.get("aggregations", {}).get("rule_groups", {}).get("buckets", [])
+        rg_buckets = (
+            data.get("aggregations", {}).get("rule_groups", {}).get("buckets", [])
+        )
         rule_groups = [{"group": b["key"], "count": b["doc_count"]} for b in rg_buckets]
         flooded = out["truncated"] or total_value >= self._BROAD_RESULT_THRESHOLD
         if flooded and rule_groups:
@@ -686,7 +777,9 @@ class WazuhClient:
                     f"`rule_groups_breakdown`, and the dominant class (`{top}`) is burying the "
                     "rest. Scope to the class your objective needs, or `must_not` the dominant one."
                 )
-            out["note"] = (out["note"] + " " + flood_note) if out.get("note") else flood_note
+            out["note"] = (
+                (out["note"] + " " + flood_note) if out.get("note") else flood_note
+            )
 
         # Selectivity map + minority sample: even a class-scoped query can stay flooded by
         # the scan's own events (rule.groups:web + /wp-content/* is still thousands of
@@ -698,7 +791,9 @@ class WazuhClient:
             sel_map = self._selectivity_map(data.get("aggregations", {}))
             if sel_map:
                 out["selectivity_map"] = sel_map
-                discriminator = next((e for e in sel_map if e["role"] == "discriminator"), None)
+                discriminator = next(
+                    (e for e in sel_map if e["role"] == "discriminator"), None
+                )
                 if discriminator and discriminator["minorities"]:
                     field = discriminator["field"]
                     dominant = discriminator["dominant"]
@@ -720,14 +815,19 @@ class WazuhClient:
                         f"or `must_not {field}={dominant}` only if the sample is insufficient or you "
                         f"need to enumerate scope."
                     )
-                    out["note"] = (out["note"] + " " + sel_note) if out.get("note") else sel_note
+                    out["note"] = (
+                        (out["note"] + " " + sel_note) if out.get("note") else sel_note
+                    )
 
         # Zero-hit result: a wrong field NAME returns 0 exactly like a genuine absence.
         # Flag any queried field that is not in the index mapping so the caller corrects
         # the name instead of recording a false negative. Only on a true zero result.
         if total_value == 0:
             warnings = self._absent_field_warnings(
-                index, self._query_leaf_fields({"bool": {"must": diag_musts, "should": diag_shoulds}})
+                index,
+                self._query_leaf_fields(
+                    {"bool": {"must": diag_musts, "should": diag_shoulds}}
+                ),
             )
             if warnings:
                 out["field_warnings"] = warnings
@@ -738,10 +838,14 @@ class WazuhClient:
     def _range_filter(self, time_range: dict | None) -> dict | None:
         if not time_range:
             return None
-        return {"range": {"@timestamp": {
-            "gte": time_range.get("from", "now-24h"),
-            "lte": time_range.get("to", "now"),
-        }}}
+        return {
+            "range": {
+                "@timestamp": {
+                    "gte": time_range.get("from", "now-24h"),
+                    "lte": time_range.get("to", "now"),
+                }
+            }
+        }
 
     # rare_terms upper bound on "how many docs a term may appear in" to still count as
     # rare. OpenSearch defaults to 1 (true singletons); meaningful SOC deviations often
@@ -787,12 +891,20 @@ class WazuhClient:
 
         # max_doc_count is clamped to OpenSearch's supported rare_terms range [1, 100];
         # an unset (None) value uses the default, an out-of-range value is clamped.
-        raw_cap = self._RARE_MAX_DOC_COUNT_DEFAULT if max_doc_count is None else int(max_doc_count)
+        raw_cap = (
+            self._RARE_MAX_DOC_COUNT_DEFAULT
+            if max_doc_count is None
+            else int(max_doc_count)
+        )
         rare_cap = max(1, min(raw_cap, 100))
 
         def _run(agg_field: str) -> dict:
             if rare:
-                aggs = {"rare": {"rare_terms": {"field": agg_field, "max_doc_count": rare_cap}}}
+                aggs = {
+                    "rare": {
+                        "rare_terms": {"field": agg_field, "max_doc_count": rare_cap}
+                    }
+                }
             else:
                 aggs = {"top": {"terms": {"field": agg_field, "size": min(top_n, 100)}}}
             body: dict = {
@@ -854,7 +966,8 @@ class WazuhClient:
                 "field": used_field,
                 "matched_docs": matched,
                 "top_values": [
-                    {"value": b["key"], "count": b["doc_count"]} for b in agg_out.get("buckets", [])
+                    {"value": b["key"], "count": b["doc_count"]}
+                    for b in agg_out.get("buckets", [])
                 ],
                 "other_count": agg_out.get("sum_other_doc_count", 0),
             }
@@ -1120,7 +1233,12 @@ class WazuhClient:
             m_q, m_a = sum(quiet) / len(quiet), sum(active) / len(active)
             variance = w_q * w_a * (m_a - m_q) ** 2
             if variance > best_variance:
-                best_variance, best_cut, best_mean_quiet, best_mean_active = variance, t, m_q, m_a
+                best_variance, best_cut, best_mean_quiet, best_mean_active = (
+                    variance,
+                    t,
+                    m_q,
+                    m_a,
+                )
         if best_cut is None:
             return None
         # Unimodal guard: require a clean two-cluster separation...
@@ -1141,7 +1259,9 @@ class WazuhClient:
     _BURST_MAX_GAP_BINS = 1
 
     @classmethod
-    def _detect_bursts(cls, bins_out: list[dict], threshold: float | None) -> list[dict]:
+    def _detect_bursts(
+        cls, bins_out: list[dict], threshold: float | None
+    ) -> list[dict]:
         """Segment the histogram into distinct activity bursts.
 
         Groups contiguous runs of bins at/above the active `threshold`, tolerating gaps
@@ -1207,11 +1327,15 @@ class WazuhClient:
                 clause, time_range, _ = self._unwrap_request(query, time_range, 0)
                 must.append(clause)
             else:
-                must.append({"simple_query_string": {
-                    "query": query,
-                    "fields": self._SEARCH_KEYWORD_FIELDS,
-                    "lenient": True,
-                }})
+                must.append(
+                    {
+                        "simple_query_string": {
+                            "query": query,
+                            "fields": self._SEARCH_KEYWORD_FIELDS,
+                            "lenient": True,
+                        }
+                    }
+                )
         rng = self._range_filter(time_range)
         if rng:
             must.append(rng)
@@ -1266,10 +1390,18 @@ class WazuhClient:
         # is then: the onset window (initial access), the active windows, and the
         # cessation edge (where follow-on / "did it actually stop" hides) — not the
         # densest bucket of a known scan.
-        peak_idx = max(range(len(bins_out)), key=lambda i: bins_out[i]["count"]) if bins_out else -1
+        peak_idx = (
+            max(range(len(bins_out)), key=lambda i: bins_out[i]["count"])
+            if bins_out
+            else -1
+        )
         peak_bucket = bins_out[peak_idx] if peak_idx >= 0 else None
         threshold = self._otsu_active_threshold(counts)
-        active = [b for b in bins_out if b["count"] >= threshold] if threshold is not None else []
+        active = (
+            [b for b in bins_out if b["count"] >= threshold]
+            if threshold is not None
+            else []
+        )
         onset = active[0] if active else None
         cessation = active[-1] if active else None
         # The above-baseline windows flanking the densest bin, split for downstream
@@ -1280,7 +1412,9 @@ class WazuhClient:
         # hides once the burst quiets; the pre side is the lead-in toward the peak.
         if threshold is not None and peak_idx >= 0:
             pre_spike = [b for b in bins_out[:peak_idx] if b["count"] >= threshold]
-            post_spike = [b for b in bins_out[peak_idx + 1:] if b["count"] >= threshold]
+            post_spike = [
+                b for b in bins_out[peak_idx + 1 :] if b["count"] >= threshold
+            ]
         else:
             pre_spike, post_spike = [], []
         # Saturation: the active region spans most of the window, so the profile did
@@ -1292,7 +1426,9 @@ class WazuhClient:
         saturated = False
         span_hours = 0.0
         if onset is not None and cessation is not None:
-            o_ts, c_ts = self._parse_ts(onset["time"]), self._parse_ts(cessation["time"])
+            o_ts, c_ts = self._parse_ts(onset["time"]), self._parse_ts(
+                cessation["time"]
+            )
             if o_ts and c_ts:
                 span_hours = (c_ts - o_ts).total_seconds() / 3600
                 saturated = span_hours > self._VOLUME_SATURATION_HOURS
@@ -1438,10 +1574,12 @@ class WazuhClient:
         if len(pin_fields) == 1:
             pin: dict = {"term": {pin_fields[0]: value}}
         else:
-            pin = {"bool": {
-                "should": [{"term": {f: value}} for f in pin_fields],
-                "minimum_should_match": 1,
-            }}
+            pin = {
+                "bool": {
+                    "should": [{"term": {f: value}} for f in pin_fields],
+                    "minimum_should_match": 1,
+                }
+            }
         must: list[dict] = [pin]
         rng = self._range_filter(time_range)
         if rng:
@@ -1501,13 +1639,15 @@ class WazuhClient:
                     h["_id"]
                     for h in b.get("samples", {}).get("hits", {}).get("hits", [])
                 ]
-                entries.append({
-                    "value": b["key"],
-                    "count": b["doc_count"],
-                    "first": b.get("first", {}).get("value_as_string"),
-                    "last": b.get("last", {}).get("value_as_string"),
-                    "event_ids": ids,
-                })
+                entries.append(
+                    {
+                        "value": b["key"],
+                        "count": b["doc_count"],
+                        "first": b.get("first", {}).get("value_as_string"),
+                        "last": b.get("last", {}).get("value_as_string"),
+                        "event_ids": ids,
+                    }
+                )
             if entries:
                 neighbors[nf] = entries
 
@@ -1543,15 +1683,20 @@ class WazuhClient:
         """
         index = index_pattern or self._default_index
         time_range = (
-            {"from": start_time, "to": end_time}
-            if (start_time or end_time)
-            else None
+            {"from": start_time, "to": end_time} if (start_time or end_time) else None
         )
         fields = link_fields or self._CORRELATE_DEFAULT_FIELDS
         samples = 3
 
         primary = self._correlate_one(
-            field, value, time_range, fields, top_n, samples, index, min_cooccurrence,
+            field,
+            value,
+            time_range,
+            fields,
+            top_n,
+            samples,
+            index,
+            min_cooccurrence,
             match_fields=match_fields,
         )
         if "error" in primary:
@@ -1576,7 +1721,14 @@ class WazuhClient:
         opposite = None if match_fields else self._IP_ROLE_OPPOSITE.get(field)
         if opposite:
             cr = self._correlate_one(
-                opposite, value, time_range, fields, top_n, samples, index, min_cooccurrence
+                opposite,
+                value,
+                time_range,
+                fields,
+                top_n,
+                samples,
+                index,
+                min_cooccurrence,
             )
             if "error" not in cr:
                 result["cross_role"] = {"field": opposite, **cr}
@@ -1610,9 +1762,15 @@ class WazuhClient:
                 clause, time_range, _ = self._unwrap_request(query, time_range, 0)
                 must.append(clause)
             else:
-                must.append({"simple_query_string": {
-                    "query": query, "fields": self._SEARCH_KEYWORD_FIELDS, "lenient": True,
-                }})
+                must.append(
+                    {
+                        "simple_query_string": {
+                            "query": query,
+                            "fields": self._SEARCH_KEYWORD_FIELDS,
+                            "lenient": True,
+                        }
+                    }
+                )
         rng = self._range_filter(time_range)
         if rng:
             must.append(rng)
@@ -1627,13 +1785,18 @@ class WazuhClient:
                 "by_technique": {
                     "terms": {"field": "rule.mitre.id", "size": min(top_n, 100)},
                     "aggs": {
-                        "technique": {"terms": {"field": "rule.mitre.technique", "size": 1}},
+                        "technique": {
+                            "terms": {"field": "rule.mitre.technique", "size": 1}
+                        },
                         "tactic": {"terms": {"field": "rule.mitre.tactic", "size": 3}},
                         "first": {"min": {"field": "@timestamp"}},
-                        "samples": {"top_hits": {
-                            "size": 2, "_source": False,
-                            "sort": [{"@timestamp": {"order": "asc"}}],
-                        }},
+                        "samples": {
+                            "top_hits": {
+                                "size": 2,
+                                "_source": False,
+                                "sort": [{"@timestamp": {"order": "asc"}}],
+                            }
+                        },
                     },
                 },
                 "by_tactic": {"terms": {"field": "rule.mitre.tactic", "size": 20}},
@@ -1656,15 +1819,19 @@ class WazuhClient:
         for b in aggs.get("by_technique", {}).get("buckets", []):
             tech = [x["key"] for x in b.get("technique", {}).get("buckets", [])]
             tacs = [x["key"] for x in b.get("tactic", {}).get("buckets", [])]
-            ids = [h["_id"] for h in b.get("samples", {}).get("hits", {}).get("hits", [])]
-            techniques.append({
-                "id": b["key"],
-                "technique": tech[0] if tech else None,
-                "tactics": tacs,
-                "count": b["doc_count"],
-                "first": b.get("first", {}).get("value_as_string"),
-                "event_ids": ids,
-            })
+            ids = [
+                h["_id"] for h in b.get("samples", {}).get("hits", {}).get("hits", [])
+            ]
+            techniques.append(
+                {
+                    "id": b["key"],
+                    "technique": tech[0] if tech else None,
+                    "tactics": tacs,
+                    "count": b["doc_count"],
+                    "first": b.get("first", {}).get("value_as_string"),
+                    "event_ids": ids,
+                }
+            )
         tactics = [
             {"tactic": b["key"], "count": b["doc_count"]}
             for b in aggs.get("by_tactic", {}).get("buckets", [])
@@ -1676,7 +1843,9 @@ class WazuhClient:
             "tactics": tactics,
         }
 
-    def get_event(self, event_id: str, index_pattern: str | None = None) -> dict[str, Any]:
+    def get_event(
+        self, event_id: str, index_pattern: str | None = None
+    ) -> dict[str, Any]:
         # NB: a plain `GET /<index>/_doc/<id>` does NOT work against a wildcard index
         # pattern (e.g. 'wazuh-alerts-4.x-*'), which is the normal case here. Use an
         # ids search so the document is found regardless of which concrete index holds it.
@@ -1692,6 +1861,8 @@ class WazuhClient:
             data = resp.json()
         hits = data.get("hits", {}).get("hits", [])
         if not hits:
-            return {"error": f"No event found with _id '{event_id}' in index '{index}'."}
+            return {
+                "error": f"No event found with _id '{event_id}' in index '{index}'."
+            }
         h = hits[0]
         return {"_id": h["_id"], "_index": h["_index"], **h.get("_source", {})}

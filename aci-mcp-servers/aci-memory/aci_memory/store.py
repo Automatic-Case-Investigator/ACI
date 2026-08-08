@@ -9,6 +9,7 @@ Coupling note: the table/column names below mirror Django's auto-generated schem
 for the `agent` app (`agent_<modelname>`). Writes (create/approve/expire) happen
 exclusively through Django; this module only SELECTs.
 """
+
 from __future__ import annotations
 
 import json
@@ -138,7 +139,9 @@ def list_baseline_entities(subject_type: str | None = None) -> list[dict[str, An
         return []
     finally:
         conn.close()
-    return [{"subject_type": r["subject_type"], "subject_id": r["subject_id"]} for r in rows]
+    return [
+        {"subject_type": r["subject_type"], "subject_id": r["subject_id"]} for r in rows
+    ]
 
 
 def get_baselines(subject_type: str, subject_id: str) -> list[dict[str, Any]]:
@@ -224,15 +227,17 @@ def search_feedback(
             entry_rules = {str(x).strip() for x in ctx.get("rule_ids", [])}
             if not (entry_rules & wanted_rules):
                 continue
-        out.append({
-            "case_id": r["case_id"],
-            "run_id": r["run_id"],
-            "agent_name": r["agent_name"],
-            "original_verdict": _loads(r["original_verdict"], None),
-            "analyst_verdict": _loads(r["analyst_verdict"], None),
-            "context": ctx,
-            "note": r["note"],
-            "created_by": r["created_by"],
-            "updated_at": r["updated_at"],
-        })
+        out.append(
+            {
+                "case_id": r["case_id"],
+                "run_id": r["run_id"],
+                "agent_name": r["agent_name"],
+                "original_verdict": _loads(r["original_verdict"], None),
+                "analyst_verdict": _loads(r["analyst_verdict"], None),
+                "context": ctx,
+                "note": r["note"],
+                "created_by": r["created_by"],
+                "updated_at": r["updated_at"],
+            }
+        )
     return out

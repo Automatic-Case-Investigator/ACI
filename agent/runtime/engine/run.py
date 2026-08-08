@@ -10,12 +10,25 @@ from django.conf import settings
 from ...agents.registry import get_agent
 from ...models import AgentRun
 from ..infra.avfs import bind_agent_id as bind_avfs_agent_id
-from ..infra.avfs import case_dir, home_dir, memory_dir, reset_agent_id as reset_avfs_agent_id
+from ..infra.avfs import (
+    case_dir,
+    home_dir,
+    memory_dir,
+    reset_agent_id as reset_avfs_agent_id,
+)
 from ..graph import GRAPH, AgentState
 from ..providers.base import format_provider_capability_contracts
 from ..infra.logbus import (
-    bind_debug_mode, bind_run, bind_session, clear_run_issues, current_session,
-    emit, reset_debug_mode, reset_run, reset_session, src_label,
+    bind_debug_mode,
+    bind_run,
+    bind_session,
+    clear_run_issues,
+    current_session,
+    emit,
+    reset_debug_mode,
+    reset_run,
+    reset_session,
+    src_label,
 )
 from .mcp_client import build_mcp_client, load_mcp_prompt_guidance
 from .model_client import build_model
@@ -43,6 +56,7 @@ async def run_agent(
     session_token = bind_session(run_id) if current_session() is None else None
     run_token = bind_run(run_id)
     from ..config.runtime_config import debug_mode as _debug_mode
+
     debug_token = bind_debug_mode(_debug_mode())
     try:
         await _run_agent_bound(run_id, agent_name, case_id, question)
@@ -67,7 +81,10 @@ async def _run_agent_bound(
     from asgiref.sync import sync_to_async
     from ..config.overrides import resolve_agent_definition
     from ..providers.avfs import resolved_agent_id
-    agent_def = await sync_to_async(resolve_agent_definition, thread_sensitive=True)(agent_def)
+
+    agent_def = await sync_to_async(resolve_agent_definition, thread_sensitive=True)(
+        agent_def
+    )
     avfs_agent_id = await sync_to_async(resolved_agent_id, thread_sensitive=True)()
     avfs_token = bind_avfs_agent_id(avfs_agent_id)
     run = None
@@ -112,7 +129,9 @@ async def _run_agent_bound(
                 "avfs_memory_dir": memory_dir(),
                 "avfs_case_dir": case_dir(case_id),
                 "available_tools": _prompt_tool_names(agent_name, tools),
-                "provider_capability_contracts": format_provider_capability_contracts(agent_def.tool_policy),
+                "provider_capability_contracts": format_provider_capability_contracts(
+                    agent_def.tool_policy
+                ),
                 "mcp_prompt_guidance": mcp_prompt_guidance,
                 "orchestrator_conversation": orchestrator_conversation,
                 "restart_context": restart_context,
@@ -170,7 +189,9 @@ async def _run_agent_bound(
 
     except Exception as exc:
         log.exception("Agent run %s failed", run_id)
-        emit(src_label(agent_name), "error", f"agent run failed: {exc}", detail=str(exc))
+        emit(
+            src_label(agent_name), "error", f"agent run failed: {exc}", detail=str(exc)
+        )
         try:
             if run is not None:
                 run.status = AgentRun.STATUS_FAILED

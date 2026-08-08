@@ -5,6 +5,7 @@ genuine absence. The client compares queried leaf-fields against the cached inde
 and, only on a zero/empty result, attaches `field_warnings` + a corrective note pointing
 at the real field name (e.g. `url` → `data.url`). See project_siem_analyst_loop memory.
 """
+
 from __future__ import annotations
 
 import os
@@ -13,17 +14,32 @@ import unittest
 
 import httpx
 
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 sys.path.insert(0, project_root)
 
 from aci_wazuh.client import WazuhClient as W
 
 # Mapping the fake index exposes: data.url/data.srcip, agent.name, rule.id/rule.groups.
-_MAPPING = {"wazuh-alerts-*": {"mappings": {"properties": {
-    "data": {"properties": {"url": {"type": "keyword"}, "srcip": {"type": "ip"}}},
-    "agent": {"properties": {"name": {"type": "keyword"}}},
-    "rule": {"properties": {"id": {"type": "keyword"}, "groups": {"type": "keyword"}}},
-}}}}
+_MAPPING = {
+    "wazuh-alerts-*": {
+        "mappings": {
+            "properties": {
+                "data": {
+                    "properties": {"url": {"type": "keyword"}, "srcip": {"type": "ip"}}
+                },
+                "agent": {"properties": {"name": {"type": "keyword"}}},
+                "rule": {
+                    "properties": {
+                        "id": {"type": "keyword"},
+                        "groups": {"type": "keyword"},
+                    }
+                },
+            }
+        }
+    }
+}
 
 
 class _Fake:
@@ -47,20 +63,33 @@ class _Fake:
         req = httpx.Request("POST", f"https://wazuh.local{path}")
         aggs = json.get("aggs") or {}
         if "clauses" in aggs:  # clause_diagnostics side-request
-            return httpx.Response(200, json={
-                "hits": {"total": {"value": 0}}, "aggregations": {"clauses": {"buckets": {}}}},
-                request=req)
+            return httpx.Response(
+                200,
+                json={
+                    "hits": {"total": {"value": 0}},
+                    "aggregations": {"clauses": {"buckets": {}}},
+                },
+                request=req,
+            )
         if "top" in aggs or "rare" in aggs:  # profile_field
             key = "top" if "top" in aggs else "rare"
-            return httpx.Response(200, json={
-                "hits": {"total": {"value": self._total}},
-                "aggregations": {key: {"buckets": self._profile_buckets}}},
-                request=req)
+            return httpx.Response(
+                200,
+                json={
+                    "hits": {"total": {"value": self._total}},
+                    "aggregations": {key: {"buckets": self._profile_buckets}},
+                },
+                request=req,
+            )
         # main search
-        return httpx.Response(200, json={
-            "hits": {"total": {"value": self._total, "relation": "eq"}, "hits": []},
-            "aggregations": {"rule_groups": {"buckets": []}},
-        }, request=req)
+        return httpx.Response(
+            200,
+            json={
+                "hits": {"total": {"value": self._total, "relation": "eq"}, "hits": []},
+                "aggregations": {"rule_groups": {"buckets": []}},
+            },
+            request=req,
+        )
 
 
 def _client(fake) -> W:
@@ -107,8 +136,9 @@ class ProfileFieldWarningTest(unittest.TestCase):
         self.assertIn("data.url", w["candidates"])
 
     def test_present_field_with_matches_no_warning(self):
-        result = _client(_Fake(50, profile_buckets=[{"key": "web", "doc_count": 50}])).profile_field(
-            field="rule.groups", time_range=_TR)
+        result = _client(
+            _Fake(50, profile_buckets=[{"key": "web", "doc_count": 50}])
+        ).profile_field(field="rule.groups", time_range=_TR)
         self.assertEqual(result["matched_docs"], 50)
         self.assertNotIn("field_warnings", result)
 

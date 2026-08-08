@@ -1,20 +1,32 @@
 """Deterministic normalization of tool-result batches into observation state."""
+
 from __future__ import annotations
 
 import json
 import re
 
-from ..analysis.query_memo import BROAD_HIT_THRESHOLD, extract_hit_count, normalize_query_shape
+from ..analysis.query_memo import (
+    BROAD_HIT_THRESHOLD,
+    extract_hit_count,
+    normalize_query_shape,
+)
 from .parsing import _PIVOT_CONF_SCORE, _PIVOT_ROLE_SCORE, _PIVOT_SOURCE_SCORE
 from .timeutil import _find_timestamp_range, _format_dt, _parse_dt, _pivot_key
 
 _SEARCH_TOOLS = frozenset({"search", "search_keyword"})
 _EVENT_SNAPSHOT_TOOLS = frozenset({"search", "search_keyword", "get_event"})
 _PROFILE_TOOLS = frozenset({"get_event_volume", "profile_field"})
-_EVIDENCE_TOOLS = frozenset({
-    "search", "search_keyword", "profile_field", "get_event_volume",
-    "correlate_entity", "correlate_techniques", "get_event",
-})
+_EVIDENCE_TOOLS = frozenset(
+    {
+        "search",
+        "search_keyword",
+        "profile_field",
+        "get_event_volume",
+        "correlate_entity",
+        "correlate_techniques",
+        "get_event",
+    }
+)
 _STRONG_SIGNALS = frozenset({"TRUNCATED", "SATURATED", "FLOODED", "ORIENTATION_ONLY"})
 _CASE_URL_EXEMPLAR_RULE_IDS = frozenset({"31151"})
 _INVALID_TIME_RE = re.compile(
@@ -25,12 +37,25 @@ _TASK_WINDOW_RE = re.compile(
     r"The claimed task specifies\s*([0-9T:.\-+Z]+)\s+to\s+([0-9T:.\-+Z]+)\.",
     re.IGNORECASE,
 )
-_TIME_WINDOW_TOOLS = frozenset({
-    "search", "search_keyword", "profile_field", "get_event_volume",
-    "correlate_entity", "correlate_techniques",
-})
+_TIME_WINDOW_TOOLS = frozenset(
+    {
+        "search",
+        "search_keyword",
+        "profile_field",
+        "get_event_volume",
+        "correlate_entity",
+        "correlate_techniques",
+    }
+)
 _QUERY_FOCUS_TOOLS = frozenset({"search", "search_keyword", "profile_field"})
-_EVENT_CONTAINER_KEYS = ("events", "hits", "results", "documents", "alerts", "minority_sample")
+_EVENT_CONTAINER_KEYS = (
+    "events",
+    "hits",
+    "results",
+    "documents",
+    "alerts",
+    "minority_sample",
+)
 _EVENT_ID_KEYS = ("_id", "event.id", "event_id")
 
 
@@ -75,7 +100,9 @@ def _tool_query_focus(tool_name: str, args: dict) -> dict | None:
     return {"tool": tool_name, "focus": shape[:500]}
 
 
-def _trial_outcome(tool_signals: list[str], hits, *, is_error: bool, has_events: bool) -> str:
+def _trial_outcome(
+    tool_signals: list[str], hits, *, is_error: bool, has_events: bool
+) -> str:
     """One-word outcome class for a query trial, from the signals already derived.
     Ordered so the most decisive class wins (a flood is a flood even if truncated)."""
     if is_error:
@@ -93,7 +120,10 @@ def _trial_outcome(tool_signals: list[str], hits, *, is_error: bool, has_events:
 
 
 def _trial_record(
-    focus: dict | None, window: dict | None, outcome: str, hits,
+    focus: dict | None,
+    window: dict | None,
+    outcome: str,
+    hits,
     evidence: list[str] | None = None,
 ) -> dict | None:
     """A single (discriminator, window, outcome) trial the agent can reason over across
@@ -248,23 +278,43 @@ def _evidence_snapshots(tool_name: str, obj) -> list[dict]:
         fields = _event_fields(event)
         snapshot = {
             "event_id": _source_id(event),
-            "timestamp": _first_present(fields, ("timestamp", "@timestamp", "data.timestamp")),
+            "timestamp": _first_present(
+                fields, ("timestamp", "@timestamp", "data.timestamp")
+            ),
             "agent": _first_present(fields, ("agent.name", "agent", "host.name")),
             "rule_id": _first_present(fields, ("rule.id", "rule_id")),
-            "rule_description": _first_present(fields, ("rule.description", "rule_desc", "description")),
+            "rule_description": _first_present(
+                fields, ("rule.description", "rule_desc", "description")
+            ),
             "rule_groups": _first_present(fields, ("rule.groups",)),
             "rule_level": _first_present(fields, ("rule.level",)),
-            "src_ip": _first_present(fields, ("data.srcip", "src_ip", "source.ip", "srcip")),
-            "dst_ip": _first_present(fields, ("data.dstip", "dst_ip", "destination.ip", "dstip")),
+            "src_ip": _first_present(
+                fields, ("data.srcip", "src_ip", "source.ip", "srcip")
+            ),
+            "dst_ip": _first_present(
+                fields, ("data.dstip", "dst_ip", "destination.ip", "dstip")
+            ),
             "status": _first_present(fields, ("data.id", "http.response.status_code")),
             "url": _first_present(fields, ("data.url", "url", "http.url", "request")),
-            "user_agent": _first_present(fields, ("data.user_agent", "http.user_agent", "user_agent")),
-            "user": _first_present(fields, ("data.srcuser", "data.dstuser", "user.name", "user")),
-            "command": _first_present(fields, (
-                "data.command", "data.audit.command", "process.command_line",
-                "data.audit.exe", "process.executable",
-            )),
-            "full_log": _clip(_first_present(fields, ("full_log", "message", "log", "raw")), 420),
+            "user_agent": _first_present(
+                fields, ("data.user_agent", "http.user_agent", "user_agent")
+            ),
+            "user": _first_present(
+                fields, ("data.srcuser", "data.dstuser", "user.name", "user")
+            ),
+            "command": _first_present(
+                fields,
+                (
+                    "data.command",
+                    "data.audit.command",
+                    "process.command_line",
+                    "data.audit.exe",
+                    "process.executable",
+                ),
+            ),
+            "full_log": _clip(
+                _first_present(fields, ("full_log", "message", "log", "raw")), 420
+            ),
         }
         compact = {key: value for key, value in snapshot.items() if value}
         if compact:
@@ -280,10 +330,14 @@ def _digest_line(snapshot: dict) -> str:
     line stays dense. This is pure formatting of the already-extracted snapshot; it
     carries no judgement about maliciousness."""
     parts: list[str] = []
-    rule = " ".join(p for p in (
-        snapshot.get("rule_id") and f"rule {snapshot['rule_id']}",
-        snapshot.get("rule_description"),
-    ) if p)
+    rule = " ".join(
+        p
+        for p in (
+            snapshot.get("rule_id") and f"rule {snapshot['rule_id']}",
+            snapshot.get("rule_description"),
+        )
+        if p
+    )
     if rule:
         parts.append(rule)
     if snapshot.get("rule_groups"):
@@ -298,9 +352,15 @@ def _digest_line(snapshot: dict) -> str:
     if snapshot.get("user"):
         parts.append(f"user={snapshot['user']}")
     if snapshot.get("src_ip") or snapshot.get("dst_ip"):
-        flow = "→".join(p for p in (snapshot.get("src_ip"), snapshot.get("dst_ip")) if p)
+        flow = "→".join(
+            p for p in (snapshot.get("src_ip"), snapshot.get("dst_ip")) if p
+        )
         parts.append(flow)
-    if snapshot.get("full_log") and not snapshot.get("command") and not snapshot.get("url"):
+    if (
+        snapshot.get("full_log")
+        and not snapshot.get("command")
+        and not snapshot.get("url")
+    ):
         parts.append(_clip(snapshot["full_log"], 160))
     return " | ".join(parts)
 
@@ -353,7 +413,9 @@ def _orientation_facts(tool_name: str, obj) -> list[dict]:
             "src_ip": _extract_markdown_value(description, "data.srcip"),
             "url": _extract_markdown_value(description, "data.url"),
             "rule_id": _extract_markdown_value(description, "rule.id"),
-            "rule_description": _extract_markdown_value(description, "rule.description"),
+            "rule_description": _extract_markdown_value(
+                description, "rule.description"
+            ),
         }
         compact = {key: value for key, value in fact.items() if value}
         return [compact] if compact else []
@@ -491,14 +553,20 @@ def _pivot_candidates_from_orientation(fact: dict) -> list[dict]:
             out.append(candidate)
     url_value = str(fact.get("url") or "").strip()
     if url_value:
-        role = "exemplar" if source_level == "case" or rule_id in _CASE_URL_EXEMPLAR_RULE_IDS else "hypothesis"
-        out.append(_pivot_candidate(
-            field="url",
-            value=url_value,
-            source_level=source_level,
-            role=role,
-            confidence="low" if role == "exemplar" else "medium",
-        ))
+        role = (
+            "exemplar"
+            if source_level == "case" or rule_id in _CASE_URL_EXEMPLAR_RULE_IDS
+            else "hypothesis"
+        )
+        out.append(
+            _pivot_candidate(
+                field="url",
+                value=url_value,
+                source_level=source_level,
+                role=role,
+                confidence="low" if role == "exemplar" else "medium",
+            )
+        )
     return [candidate for candidate in out if isinstance(candidate, dict)]
 
 
@@ -587,10 +655,16 @@ def _error_recovery(tool_name: str, raw) -> dict | None:
     invalid = _INVALID_TIME_RE.search(text)
     if invalid:
         recovery["signal"] = "INVALID_TIME_WINDOW"
-        recovery["requested_window"] = {"from": invalid.group(1), "to": invalid.group(2)}
+        recovery["requested_window"] = {
+            "from": invalid.group(1),
+            "to": invalid.group(2),
+        }
     task_window = _TASK_WINDOW_RE.search(text)
     if task_window:
-        recovery["required_window"] = {"from": task_window.group(1), "to": task_window.group(2)}
+        recovery["required_window"] = {
+            "from": task_window.group(1),
+            "to": task_window.group(2),
+        }
     return recovery
 
 
@@ -610,7 +684,9 @@ def _recommended_moves(signals: list[str]) -> list[str]:
     return [mapping[s] for s in signals if s in mapping]
 
 
-def _signals_for_result(tool_name: str, raw, obj, *, evidence_tools_used: set[str]) -> list[str]:
+def _signals_for_result(
+    tool_name: str, raw, obj, *, evidence_tools_used: set[str]
+) -> list[str]:
     signals: list[str] = []
     if tool_name in _SEARCH_TOOLS and isinstance(obj, dict):
         hits = extract_hit_count(raw)
@@ -654,7 +730,11 @@ def _discriminator_from_result(obj) -> dict | None:
         return None
     minorities = disc.get("minorities") or []
     rarest = minorities[-1].get("value") if minorities else None
-    minority_values = [item.get("value") for item in minorities if isinstance(item, dict) and item.get("value") is not None]
+    minority_values = [
+        item.get("value")
+        for item in minorities
+        if isinstance(item, dict) and item.get("value") is not None
+    ]
     sample = obj.get("minority_sample") or []
     sample_ids = [h.get("_id") for h in sample if isinstance(h, dict) and h.get("_id")]
     return {
@@ -675,8 +755,10 @@ def build_observation(
     """Summarize one tool batch into a normalized observation contract."""
     tools = [str(run.get("name") or "") for run in tool_runs]
     evidence_tools_used = {
-        name for name in tools
-        if name in _EVIDENCE_TOOLS and not run_is_error(next(r for r in tool_runs if r.get("name") == name))
+        name
+        for name in tools
+        if name in _EVIDENCE_TOOLS
+        and not run_is_error(next(r for r in tool_runs if r.get("name") == name))
     }
     signals: list[str] = []
     event_ids: list[str] = []
@@ -723,9 +805,11 @@ def build_observation(
         # events leave the current observation window.
         snapshots = _evidence_snapshots(tool_name, obj)
         trial = _trial_record(
-            focus, window,
-            _trial_outcome(tool_signals, run_hits, is_error=False,
-                           has_events=bool(_event_ids(obj))),
+            focus,
+            window,
+            _trial_outcome(
+                tool_signals, run_hits, is_error=False, has_events=bool(_event_ids(obj))
+            ),
             run_hits,
             evidence=_evidence_digest(snapshots),
         )
@@ -760,7 +844,8 @@ def build_observation(
     signals = _dedupe(signals)
 
     evidence_queries = sum(
-        1 for run in tool_runs
+        1
+        for run in tool_runs
         if str(run.get("name") or "") in _EVIDENCE_TOOLS and not run_is_error(run)
     )
     if evidence_queries == 0:
@@ -773,14 +858,26 @@ def build_observation(
 
     prior_markers = set((prior_observation or {}).get("evidence_markers") or [])
     if evidence_queries > 0 and not evidence_markers:
-        if prior_observation and (prior_observation.get("objective") or "") == objective:
+        if (
+            prior_observation
+            and (prior_observation.get("objective") or "") == objective
+        ):
             signals = _dedupe(signals + ["NO_NEW_EVIDENCE"])
     elif prior_markers and set(evidence_markers).issubset(prior_markers):
-        if prior_observation and (prior_observation.get("objective") or "") == objective:
+        if (
+            prior_observation
+            and (prior_observation.get("objective") or "") == objective
+        ):
             signals = _dedupe(signals + ["NO_NEW_EVIDENCE"])
 
-    advanced_objective = bool(evidence_markers) and not any(s in _STRONG_SIGNALS for s in signals)
-    if evidence_queries > 0 and "EMPTY" not in signals and "WRONG_REPRESENTATION" not in signals:
+    advanced_objective = bool(evidence_markers) and not any(
+        s in _STRONG_SIGNALS for s in signals
+    )
+    if (
+        evidence_queries > 0
+        and "EMPTY" not in signals
+        and "WRONG_REPRESENTATION" not in signals
+    ):
         advanced_objective = advanced_objective or not any(
             s in signals for s in ("TRUNCATED", "SATURATED", "FLOODED")
         )
@@ -801,9 +898,17 @@ def build_observation(
         discriminators[0] if discriminators else None,
     )
     moves = _recommended_moves(signals)
-    if discriminator and discriminator.get("field") and discriminator.get("minority") is not None:
-        values = ", ".join(str(v) for v in (discriminator.get("minority_values") or [])[:8])
-        sample_ids = ", ".join(str(v) for v in (discriminator.get("sample_event_ids") or [])[:6])
+    if (
+        discriminator
+        and discriminator.get("field")
+        and discriminator.get("minority") is not None
+    ):
+        values = ", ".join(
+            str(v) for v in (discriminator.get("minority_values") or [])[:8]
+        )
+        sample_ids = ", ".join(
+            str(v) for v in (discriminator.get("sample_event_ids") or [])[:6]
+        )
         sample_part = f" sample events: {sample_ids};" if sample_ids else ""
         moves = moves + [
             f"the residue is on `{discriminator['field']}` with minority candidates "

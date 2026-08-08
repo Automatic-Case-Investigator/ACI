@@ -8,6 +8,7 @@ updating case status, promoting an alert, or dispatching a follow-up investigati
 
 Called from dispatch.py for automatic (non-interactive) runs only.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -22,6 +23,7 @@ from .workflow import (
     read_decision,
     store_decision,
 )
+
 
 def execute_response(run: AgentRun) -> None:
     """Execute the side effect for a completed run's response decision.
@@ -45,7 +47,10 @@ def execute_response(run: AgentRun) -> None:
     # `promote_case` is the one write that TARGETS an alert, so it must be reached
     # before the guard below that skips alert-subject runs for lack of a case id —
     # creating that case is the whole point of the action.
-    if action != policy.PROMOTE_CASE and (run.metadata or {}).get("source_entity_type") == "alert":
+    if (
+        action != policy.PROMOTE_CASE
+        and (run.metadata or {}).get("source_entity_type") == "alert"
+    ):
         emit(
             "workflow",
             "note",
@@ -60,7 +65,9 @@ def execute_response(run: AgentRun) -> None:
 
     try:
         _provider = get_provider("aci-thehive")
-        _resolved = resolve_settings("aci-thehive", _provider.setting_defaults() if _provider else {})
+        _resolved = resolve_settings(
+            "aci-thehive", _provider.setting_defaults() if _provider else {}
+        )
         client = TheHiveClient(
             base_url=_resolved.get("base_url") or "",
             host=_resolved.get("host") or "",
@@ -81,7 +88,11 @@ def execute_response(run: AgentRun) -> None:
                 title=_report_title(run, verdict_label, decision),
             )
             client.update_case(run.case_id, {"status": status})
-            emit("workflow", AUDIT_POSTED, f"case {run.case_id}: resolved as {status} in TheHive")
+            emit(
+                "workflow",
+                AUDIT_POSTED,
+                f"case {run.case_id}: resolved as {status} in TheHive",
+            )
 
         elif action == policy.DOCUMENT:
             client.post_report(
@@ -89,7 +100,11 @@ def execute_response(run: AgentRun) -> None:
                 _report_body(run, verdict_label, confidence, decision),
                 title=_report_title(run, verdict_label, decision),
             )
-            emit("workflow", AUDIT_POSTED, f"case {run.case_id}: investigation report posted")
+            emit(
+                "workflow",
+                AUDIT_POSTED,
+                f"case {run.case_id}: investigation report posted",
+            )
 
         elif action == policy.PROMOTE_CASE:
             # Promote first so the case exists, then document onto it. TheHive copies
@@ -108,15 +123,22 @@ def execute_response(run: AgentRun) -> None:
                 _report_body(run, verdict_label, confidence, decision),
                 title=_report_title(run, verdict_label, decision),
             )
-            emit("workflow", AUDIT_POSTED,
-                 f"alert {run.case_id}: promoted to case {new_case_id} and documented")
+            emit(
+                "workflow",
+                AUDIT_POSTED,
+                f"alert {run.case_id}: promoted to case {new_case_id} and documented",
+            )
             _mark_executed(run, promoted_case_id=new_case_id)
             return
 
         _mark_executed(run)
 
     except Exception as exc:
-        emit("workflow", AUDIT_FAILED, f"case {run.case_id}: response execution failed: {exc}")
+        emit(
+            "workflow",
+            AUDIT_FAILED,
+            f"case {run.case_id}: response execution failed: {exc}",
+        )
         _mark_error(run, str(exc))
 
 
@@ -132,8 +154,9 @@ def _report_title(run: AgentRun, verdict_label: str, decision: dict) -> str:
     return f"ACI {verdict_label} — {run.agent_name} report"
 
 
-def _report_body(run: AgentRun, verdict_label: str, confidence: str,
-                 decision: dict | None = None) -> str:
+def _report_body(
+    run: AgentRun, verdict_label: str, confidence: str, decision: dict | None = None
+) -> str:
     """The agent's report, headed by the verdict that drove the response.
 
     `run.result` already ends with the fenced verdict JSON block, so the header is
@@ -171,8 +194,11 @@ def _launch_investigation(run: AgentRun) -> None:
     idempotency guard must already be in place so a retry cannot double-launch.
     """
     if run.agent_name == "investigation":
-        emit("workflow", "note",
-             f"{run.case_id}: investigation already ran; not re-launching")
+        emit(
+            "workflow",
+            "note",
+            f"{run.case_id}: investigation already ran; not re-launching",
+        )
         _mark_executed(run, skipped_reason="already_investigation")
         return
 
@@ -183,28 +209,41 @@ def _launch_investigation(run: AgentRun) -> None:
         from ..engine.dispatch import dispatch_run
 
         meta = dict(run.metadata or {})
-        asyncio.run(dispatch_run(
-            "investigation",
-            run.case_id,
-            f"Investigate {run.case_id} — triage returned "
-            f"{(run.verdict or {}).get('verdict', 'needs_investigation')}.",
-            trigger=AgentRun.TRIGGER_AUTO,
-            metadata={
-                "source_entity_id": meta.get("source_entity_id") or run.case_id,
-                "source_entity_type": meta.get("source_entity_type") or "case",
-                "trigger_provider": meta.get("trigger_provider", ""),
-                "parent_run_id": str(run.id),
-            },
-        ))
-        emit("workflow", AUDIT_INVESTIGATED,
-             f"{run.case_id}: investigation dispatched by response policy")
+        asyncio.run(
+            dispatch_run(
+                "investigation",
+                run.case_id,
+                f"Investigate {run.case_id} — triage returned "
+                f"{(run.verdict or {}).get('verdict', 'needs_investigation')}.",
+                trigger=AgentRun.TRIGGER_AUTO,
+                metadata={
+                    "source_entity_id": meta.get("source_entity_id") or run.case_id,
+                    "source_entity_type": meta.get("source_entity_type") or "case",
+                    "trigger_provider": meta.get("trigger_provider", ""),
+                    "parent_run_id": str(run.id),
+                },
+            )
+        )
+        emit(
+            "workflow",
+            AUDIT_INVESTIGATED,
+            f"{run.case_id}: investigation dispatched by response policy",
+        )
     except Exception as exc:
-        emit("workflow", AUDIT_FAILED, f"{run.case_id}: investigation dispatch failed: {exc}")
+        emit(
+            "workflow",
+            AUDIT_FAILED,
+            f"{run.case_id}: investigation dispatch failed: {exc}",
+        )
         _mark_error(run, str(exc))
 
 
-def _mark_executed(run: AgentRun, *, skipped_reason: str | None = None,
-                   promoted_case_id: str | None = None) -> None:
+def _mark_executed(
+    run: AgentRun,
+    *,
+    skipped_reason: str | None = None,
+    promoted_case_id: str | None = None,
+) -> None:
     meta = dict(run.metadata or {})
     decision = {**read_decision(run)}
     decision.pop("execution_error", None)

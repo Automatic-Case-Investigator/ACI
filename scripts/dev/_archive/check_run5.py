@@ -1,8 +1,10 @@
 import sys, os, time
-sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'aci.settings')
-sys.path.insert(0, '.')
+
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
+sys.path.insert(0, ".")
 import django
+
 django.setup()
 from agent.models import AgentEvent
 
@@ -18,7 +20,9 @@ while time.time() - start < POLL_SECS:
     if len(events) != last_count:
         for e in events[last_count:]:
             elapsed = int(time.time() - start)
-            print(f"[{elapsed:5d}s] {e.source or 'sys':8s} {e.kind:12s} | {str(e.summary or '')[:120]}")
+            print(
+                f"[{elapsed:5d}s] {e.source or 'sys':8s} {e.kind:12s} | {str(e.summary or '')[:120]}"
+            )
         last_count = len(events)
         answers = [e for e in events if e.kind == "answer"]
         # Wait for 2 answers: triage + investigation

@@ -5,6 +5,7 @@ id cursor (reliable across the writer thread / event loop boundary) and pushes
 server-rendered HTML frames. Three frame types: `log` (one event), `queue`, `status`.
 The browser only swaps innerHTML — all rendering lives in the cotton components.
 """
+
 from __future__ import annotations
 
 import inspect
@@ -24,9 +25,7 @@ ACTIVE_STATUSES = {"pending", "claimed", "blocked"}
 # Note: the fallback no-handoff task ("Investigate case <id>") is filtered by exact
 # match below (using case_id) so that real seeder tasks whose titles begin with
 # "Investigate case <id>: ..." are not accidentally hidden.
-_INTERNAL_TASK_PREFIXES = (
-    "Populate investigation queue",
-)
+_INTERNAL_TASK_PREFIXES = ("Populate investigation queue",)
 
 # The board content for a TI result is formatted as
 # "TI[provider] kind value: <verdict> (<score>) — <indicators>" (see
@@ -34,23 +33,19 @@ _INTERNAL_TASK_PREFIXES = (
 # after the colon.
 _TI_VERDICT_RE = re.compile(r":\s*(malicious|suspicious|clean|unknown)\b")
 
+
 async def _resolve_coroutines(obj):
     if inspect.iscoroutine(obj):
         return await obj
 
     if isinstance(obj, dict):
-        return {
-            k: await _resolve_coroutines(v)
-            for k, v in obj.items()
-        }
+        return {k: await _resolve_coroutines(v) for k, v in obj.items()}
 
     if isinstance(obj, list):
-        return [
-            await _resolve_coroutines(v)
-            for v in obj
-        ]
+        return [await _resolve_coroutines(v) for v in obj]
 
     return obj
+
 
 def _ti_display_rows(board_entries: list) -> list[dict]:
     """Project ti_result board entries into display rows with a parsed verdict."""
@@ -85,7 +80,9 @@ def _resolve_restartable_specialist(session_id: str):
     from agent.dashboard import runner
 
     try:
-        runs = AgentRun.objects.filter(metadata__session_id=session_id).order_by("-created_at")
+        runs = AgentRun.objects.filter(metadata__session_id=session_id).order_by(
+            "-created_at"
+        )
     except Exception:
         runs = AgentRun.objects.order_by("-created_at")[:200]
     for run in runs:
@@ -115,7 +112,8 @@ def _snapshot(session_id: str) -> dict:
             raw = task_store.list_tasks(case_id, run_id, "investigation")
             fallback_title = f"Investigate case {case_id}"
             raw = [
-                t for t in raw
+                t
+                for t in raw
                 if not any(t["title"].startswith(p) for p in _INTERNAL_TASK_PREFIXES)
                 and t["title"] != fallback_title
             ]
@@ -136,10 +134,16 @@ def _snapshot(session_id: str) -> dict:
     processing = runner.is_processing(session_id) or bool(active_specialist)
     processing_source = ""
     if active_specialist:
-        processing_source = "inv" if active_specialist.agent_name == "investigation" else "tri"
+        processing_source = (
+            "inv" if active_specialist.agent_name == "investigation" else "tri"
+        )
     elif runner.is_processing(session_id):
         processing_source = "orch"
-    restart_source = inv if (inv and runner.can_restart_from_prior_run(inv)) else _resolve_restartable_specialist(session_id)
+    restart_source = (
+        inv
+        if (inv and runner.can_restart_from_prior_run(inv))
+        else _resolve_restartable_specialist(session_id)
+    )
     can_restart = bool(restart_source)
     # Surface the latest structured verdict for the diagnosis card. Prefer the
     # investigation run; fall back to the most recent run with a verdict for this
@@ -148,6 +152,7 @@ def _snapshot(session_id: str) -> dict:
     analyst_verdict = ""
     if verdict_run:
         from agent.models import FeedbackEntry
+
         fb = FeedbackEntry.objects.filter(run_id=str(verdict_run.id)).first()
         if fb and fb.analyst_verdict:
             av = fb.analyst_verdict
@@ -174,7 +179,11 @@ def _snapshot(session_id: str) -> dict:
         "can_restart": can_restart,
         "restart_agent": restart_source.agent_name if restart_source else "",
         "restart_run_id": str(restart_source.id) if restart_source else "",
-        "restart_url": reverse("dashboard:run_restart", args=[restart_source.id]) if restart_source else "",
+        "restart_url": (
+            reverse("dashboard:run_restart", args=[restart_source.id])
+            if restart_source
+            else ""
+        ),
         # B4: the queue/Findings Board column is only meaningful once investigation has work or is
         # active. A fresh/triage-only session shows a full-width chat.
         "show_queue": bool(tasks or board_entries),
@@ -203,7 +212,9 @@ def _apply_queue_action(session_id: str, msg: dict) -> None:
     action = msg.get("action")
     if action == "add":
         store.create_task(
-            inv.case_id, str(inv.id), "investigation",
+            inv.case_id,
+            str(inv.id),
+            "investigation",
             title=(msg.get("title") or "(untitled)").strip(),
             description=msg.get("description", ""),
             priority=int(msg.get("priority") or 50),
@@ -221,7 +232,8 @@ def _apply_queue_action(session_id: str, msg: dict) -> None:
             store.update_task(msg.get("task_id", ""), **fields)
     elif action == "move":
         active = [
-            t for t in store.list_tasks(inv.case_id, str(inv.id), "investigation")
+            t
+            for t in store.list_tasks(inv.case_id, str(inv.id), "investigation")
             if t["status"] in ACTIVE_STATUSES
         ]
         tid = msg.get("task_id", "")
@@ -274,9 +286,13 @@ class RunConsumer(AsyncWebsocketConsumer):
             question = (msg.get("question") or "").strip()
             if question:
                 from agent.dashboard import runner
-                await database_sync_to_async(runner.send_message)(self.session_id, question)
+
+                await database_sync_to_async(runner.send_message)(
+                    self.session_id, question
+                )
         elif msg.get("action") == "stop":
             from agent.dashboard import runner
+
             await database_sync_to_async(runner.stop_processing)(self.session_id)
         elif msg.get("action") in {"add", "del", "edit", "move"}:
             await database_sync_to_async(_apply_queue_action)(self.session_id, msg)
@@ -289,10 +305,10 @@ class RunConsumer(AsyncWebsocketConsumer):
         tick = 0
         try:
             while True:
-                await asyncio.sleep(0.05)   # 50 ms — smooth token delivery
+                await asyncio.sleep(0.05)  # 50 ms — smooth token delivery
                 await self._push_stream_chunks()
                 tick += 1
-                if tick % 8 == 0:           # every ~400 ms — DB events + queue
+                if tick % 8 == 0:  # every ~400 ms — DB events + queue
                     await self._push_new_events()
                     await self._push_queue_and_status()
         except asyncio.CancelledError:
@@ -300,42 +316,53 @@ class RunConsumer(AsyncWebsocketConsumer):
 
     async def _push_stream_chunks(self):
         from agent.dashboard.events import drain_stream_chunks
+
         chunks = drain_stream_chunks(self.session_id)
         for chunk in chunks:
-            await self.send(text_data=json.dumps({
-                "type": "log",
-                "kind": chunk.get("kind", "stream"),
-                "html": "",
-                "seq": chunk.get("seq"),
-                "source": chunk.get("source"),
-                "run_id": chunk.get("run_id", ""),
-                "detail": chunk.get("detail", ""),
-                "metadata": chunk.get("metadata", {}),
-            }))
+            await self.send(
+                text_data=json.dumps(
+                    {
+                        "type": "log",
+                        "kind": chunk.get("kind", "stream"),
+                        "html": "",
+                        "seq": chunk.get("seq"),
+                        "source": chunk.get("source"),
+                        "run_id": chunk.get("run_id", ""),
+                        "detail": chunk.get("detail", ""),
+                        "metadata": chunk.get("metadata", {}),
+                    }
+                )
+            )
 
     @database_sync_to_async
     def _fetch_events(self, after_id):
         from agent.models import AgentEvent
 
         return list(
-            AgentEvent.objects.filter(session_id=self.session_id, id__gt=after_id).order_by("id")
+            AgentEvent.objects.filter(
+                session_id=self.session_id, id__gt=after_id
+            ).order_by("id")
         )
 
     async def _push_new_events(self):
         for ev in await self._fetch_events(self.cursor):
             html = render_to_string("dashboard/_event.html", {"ev": ev})
-            await self.send(text_data=json.dumps({
-                "type": "log",
-                "id": ev.id,
-                "html": html,
-                "seq": ev.seq,
-                "source": ev.source,
-                "kind": ev.kind,
-                "run_id": ev.run_id,
-                "summary": ev.summary,
-                "detail": ev.detail,
-                "metadata": ev.metadata or {},
-            }))
+            await self.send(
+                text_data=json.dumps(
+                    {
+                        "type": "log",
+                        "id": ev.id,
+                        "html": html,
+                        "seq": ev.seq,
+                        "source": ev.source,
+                        "kind": ev.kind,
+                        "run_id": ev.run_id,
+                        "summary": ev.summary,
+                        "detail": ev.detail,
+                        "metadata": ev.metadata or {},
+                    }
+                )
+            )
             self.cursor = ev.id
 
     async def _push_queue_and_status(self):
@@ -343,39 +370,75 @@ class RunConsumer(AsyncWebsocketConsumer):
         snap = await _resolve_coroutines(snap)
 
         ctx = snap["ctx"]
-        verdict_sig = (snap.get("verdict") or {}).get("verdict") if snap.get("verdict") else None
+        verdict_sig = (
+            (snap.get("verdict") or {}).get("verdict") if snap.get("verdict") else None
+        )
         status_sig = (
-            snap["status"], snap["case_id"], snap["run_id"], snap["inv_status"],
-            snap["processing"], snap.get("processing_source"), ctx["tokens"], ctx.get("run_id"), ctx.get("source"),
-            ctx.get("limit"), ctx.get("ts"), ctx.get("warn_frac"), verdict_sig, snap.get("verdict_run_id"),
-            snap.get("can_restart"), snap.get("restart_agent"), snap.get("restart_run_id"),
+            snap["status"],
+            snap["case_id"],
+            snap["run_id"],
+            snap["inv_status"],
+            snap["processing"],
+            snap.get("processing_source"),
+            ctx["tokens"],
+            ctx.get("run_id"),
+            ctx.get("source"),
+            ctx.get("limit"),
+            ctx.get("ts"),
+            ctx.get("warn_frac"),
+            verdict_sig,
+            snap.get("verdict_run_id"),
+            snap.get("can_restart"),
+            snap.get("restart_agent"),
+            snap.get("restart_run_id"),
             snap.get("analyst_verdict"),
         )
         if status_sig != self._status_sig:
             self._status_sig = status_sig
             html = render_to_string("dashboard/_status.html", {"snap": snap})
-            await self.send(text_data=json.dumps({
-                "type": "status",
-                "html": html,
-                "processing": snap["processing"],
-                "processing_source": snap.get("processing_source", ""),
-                "ctx_tokens": ctx["tokens"],
-                "ctx_limit": ctx["limit"],
-                "ctx_run_id": ctx.get("run_id", ""),
-                "ctx_source": ctx.get("source", ""),
-                "ctx_ts": ctx.get("ts"),
-                "ctx_warn_frac": ctx.get("warn_frac"),
-            }))
-        queue_sig = (snap["show_queue"],) + tuple(
-            (t["id"], t["status"], t["priority"], t["title"], t.get("summary"), t.get("updated_at"))
-            for t in snap["tasks"]
-        ) + tuple(
-            (e["id"], e["kind"], e["status"], e["content"], e.get("updated_at"))
-            for e in snap["board_entries"]
+            await self.send(
+                text_data=json.dumps(
+                    {
+                        "type": "status",
+                        "html": html,
+                        "processing": snap["processing"],
+                        "processing_source": snap.get("processing_source", ""),
+                        "ctx_tokens": ctx["tokens"],
+                        "ctx_limit": ctx["limit"],
+                        "ctx_run_id": ctx.get("run_id", ""),
+                        "ctx_source": ctx.get("source", ""),
+                        "ctx_ts": ctx.get("ts"),
+                        "ctx_warn_frac": ctx.get("warn_frac"),
+                    }
+                )
+            )
+        queue_sig = (
+            (snap["show_queue"],)
+            + tuple(
+                (
+                    t["id"],
+                    t["status"],
+                    t["priority"],
+                    t["title"],
+                    t.get("summary"),
+                    t.get("updated_at"),
+                )
+                for t in snap["tasks"]
+            )
+            + tuple(
+                (e["id"], e["kind"], e["status"], e["content"], e.get("updated_at"))
+                for e in snap["board_entries"]
+            )
         )
         if queue_sig != self._queue_sig:
             self._queue_sig = queue_sig
             html = render_to_string("dashboard/_queue.html", {"snap": snap})
-            await self.send(text_data=json.dumps({
-                "type": "queue", "html": html, "show_queue": snap["show_queue"],
-            }))
+            await self.send(
+                text_data=json.dumps(
+                    {
+                        "type": "queue",
+                        "html": html,
+                        "show_queue": snap["show_queue"],
+                    }
+                )
+            )

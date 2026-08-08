@@ -7,6 +7,7 @@ suspected instead of confirmed" failure. Severity/scope are surfaced in `detail`
 not gate the match: the verdict block carries no severity field, and its `scope_state`
 is an enum rather than the host list `expected_verdict.scope` uses.
 """
+
 from __future__ import annotations
 
 from ..base import Metric, MetricResult

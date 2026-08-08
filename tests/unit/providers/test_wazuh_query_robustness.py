@@ -12,6 +12,7 @@ Covers the deterministic guards added to the Wazuh client:
     `filter` time range returned 10,000+ truncated hits because `should` provided no
     actual filtering.
 """
+
 from __future__ import annotations
 
 import json
@@ -21,7 +22,9 @@ import unittest
 
 import httpx
 
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 sys.path.insert(0, project_root)
 sys.path.insert(0, os.path.join(project_root, "aci-mcp-servers", "aci-wazuh"))
 
@@ -54,54 +57,73 @@ class StripTemporalTokensTest(unittest.TestCase):
 
 class QueryErrorHintTest(unittest.TestCase):
     def test_parsing_exception_gets_hint(self):
-        err = {"error": {"root_cause": [
-            {"type": "parsing_exception", "reason": "[should] query malformed"}]}}
+        err = {
+            "error": {
+                "root_cause": [
+                    {"type": "parsing_exception", "reason": "[should] query malformed"}
+                ]
+            }
+        }
         hint = W._query_error_hint(err)
         self.assertIsNotNone(hint)
         self.assertIn("bool", hint)
 
     def test_query_malformed_string_gets_hint(self):
-        self.assertIsNotNone(W._query_error_hint("[should] query malformed, expected END_OBJECT"))
+        self.assertIsNotNone(
+            W._query_error_hint("[should] query malformed, expected END_OBJECT")
+        )
 
     def test_unrelated_error_gets_no_hint(self):
-        self.assertIsNone(W._query_error_hint({"error": {"type": "index_not_found_exception"}}))
+        self.assertIsNone(
+            W._query_error_hint({"error": {"type": "index_not_found_exception"}})
+        )
 
 
 class NoopShouldDetectionTest(unittest.TestCase):
     def test_filter_plus_should_no_must_is_flagged(self):
         # The exact shape observed live: time-range filter + should discriminators,
         # no must, no minimum_should_match — should is scoring-only here.
-        dsl = {"bool": {
-            "filter": [{"range": {"@timestamp": {"gte": "x", "lte": "y"}}}],
-            "should": [{"match": {"full_log": "172.17.130.196"}}],
-        }}
+        dsl = {
+            "bool": {
+                "filter": [{"range": {"@timestamp": {"gte": "x", "lte": "y"}}}],
+                "should": [{"match": {"full_log": "172.17.130.196"}}],
+            }
+        }
         self.assertTrue(W._has_noop_should(dsl))
 
     def test_should_with_must_is_not_flagged(self):
-        dsl = {"bool": {
-            "must": [{"term": {"data.srcip": "1.2.3.4"}}],
-            "should": [{"term": {"rule.groups": "attack"}}],
-        }}
+        dsl = {
+            "bool": {
+                "must": [{"term": {"data.srcip": "1.2.3.4"}}],
+                "should": [{"term": {"rule.groups": "attack"}}],
+            }
+        }
         self.assertFalse(W._has_noop_should(dsl))
 
     def test_should_with_minimum_should_match_is_not_flagged(self):
-        dsl = {"bool": {
-            "filter": [{"range": {"@timestamp": {}}}],
-            "should": [{"term": {"a": "b"}}],
-            "minimum_should_match": 1,
-        }}
+        dsl = {
+            "bool": {
+                "filter": [{"range": {"@timestamp": {}}}],
+                "should": [{"term": {"a": "b"}}],
+                "minimum_should_match": 1,
+            }
+        }
         self.assertFalse(W._has_noop_should(dsl))
 
     def test_nested_noop_should_under_outer_must_is_flagged(self):
         # search() wraps the caller's dsl in an outer {"bool": {"must": dsl, "filter": [...]}}.
         # The caller's own noop-should shape, now nested under "must", must still be caught.
-        dsl = {"bool": {
-            "must": {"bool": {
+        dsl = {
+            "bool": {
+                "must": {
+                    "bool": {
+                        "filter": [{"range": {"@timestamp": {}}}],
+                        "should": [{"match": {"full_log": "x"}}],
+                    }
+                },
                 "filter": [{"range": {"@timestamp": {}}}],
-                "should": [{"match": {"full_log": "x"}}],
-            }},
-            "filter": [{"range": {"@timestamp": {}}}],
-        }}
+            }
+        }
         self.assertTrue(W._has_noop_should(dsl))
 
     def test_plain_term_query_no_bool_is_not_flagged(self):
@@ -122,8 +144,12 @@ class SearchNoopShouldNoteTest(unittest.TestCase):
         def post(self, path, json):
             return httpx.Response(
                 200,
-                json={"hits": {"total": {"value": self._total, "relation": self._relation},
-                               "hits": []}},
+                json={
+                    "hits": {
+                        "total": {"value": self._total, "relation": self._relation},
+                        "hits": [],
+                    }
+                },
                 request=httpx.Request("POST", f"https://wazuh.local{path}"),
             )
 
@@ -161,7 +187,9 @@ class SearchMaxResultsTest(unittest.TestCase):
             self.bodies = []
 
         def post(self, path, json):
-            if not (json.get("aggs") or {}).get("clauses"):  # ignore the diagnostics side-call
+            if not (json.get("aggs") or {}).get(
+                "clauses"
+            ):  # ignore the diagnostics side-call
                 self.bodies.append(json)
             return httpx.Response(
                 200,
@@ -177,7 +205,9 @@ class SearchMaxResultsTest(unittest.TestCase):
         return client
 
     def _main_size(self, fake):
-        return next(b["size"] for b in fake.bodies if "size" in b and b.get("size") != 0)
+        return next(
+            b["size"] for b in fake.bodies if "size" in b and b.get("size") != 0
+        )
 
     def test_caller_max_results_becomes_body_size(self):
         fake = self._CapturingClient()
@@ -208,24 +238,36 @@ class SearchMaxResultsTest(unittest.TestCase):
 
 class ClauseLabelTest(unittest.TestCase):
     def test_labels_common_clause_shapes(self):
-        self.assertEqual(W._clause_label({"term": {"data.srcip": "1.2.3.4"}}), "data.srcip=1.2.3.4")
-        self.assertEqual(W._clause_label({"match": {"full_log": {"query": "x"}}}), "full_log=x")
+        self.assertEqual(
+            W._clause_label({"term": {"data.srcip": "1.2.3.4"}}), "data.srcip=1.2.3.4"
+        )
+        self.assertEqual(
+            W._clause_label({"match": {"full_log": {"query": "x"}}}), "full_log=x"
+        )
         self.assertEqual(
             W._clause_label({"terms": {"rule.groups": ["a", "b", "c", "d", "e"]}}),
             "rule.groups in [a,b,c,d…]",
         )
-        self.assertEqual(W._clause_label({"exists": {"field": "data.dstip"}}), "exists data.dstip")
+        self.assertEqual(
+            W._clause_label({"exists": {"field": "data.dstip"}}), "exists data.dstip"
+        )
 
 
 class ExtractBoolClausesTest(unittest.TestCase):
     def test_splits_must_and_should_and_drops_timestamp(self):
-        dsl = {"bool": {
-            "must": [{"term": {"data.srcip": "1.2.3.4"}},
-                     {"range": {"@timestamp": {"gte": "a", "lte": "b"}}}],
-            "should": [{"term": {"rule.groups": "attack"}}],
-        }}
+        dsl = {
+            "bool": {
+                "must": [
+                    {"term": {"data.srcip": "1.2.3.4"}},
+                    {"range": {"@timestamp": {"gte": "a", "lte": "b"}}},
+                ],
+                "should": [{"term": {"rule.groups": "attack"}}],
+            }
+        }
         musts, shoulds = W._extract_bool_clauses(dsl)
-        self.assertEqual(musts, [{"term": {"data.srcip": "1.2.3.4"}}])  # @timestamp dropped
+        self.assertEqual(
+            musts, [{"term": {"data.srcip": "1.2.3.4"}}]
+        )  # @timestamp dropped
         self.assertEqual(shoulds, [{"term": {"rule.groups": "attack"}}])
 
     def test_bare_leaf_is_one_must(self):
@@ -256,14 +298,24 @@ class ClauseDiagnosticsTest(unittest.TestCase):
             req = httpx.Request("POST", f"https://wazuh.local{path}")
             if "clauses" in (json.get("aggs") or {}):
                 buckets = {k: {"doc_count": v} for k, v in self._counts.items()}
-                return httpx.Response(200, json={
-                    "hits": {"total": {"value": self._window}},
-                    "aggregations": {"clauses": {"buckets": buckets}},
-                }, request=req)
-            return httpx.Response(200, json={
-                "hits": {"total": {"value": self._main_total, "relation": "eq"},
-                         "hits": [{"_id": "e1"}]},
-            }, request=req)
+                return httpx.Response(
+                    200,
+                    json={
+                        "hits": {"total": {"value": self._window}},
+                        "aggregations": {"clauses": {"buckets": buckets}},
+                    },
+                    request=req,
+                )
+            return httpx.Response(
+                200,
+                json={
+                    "hits": {
+                        "total": {"value": self._main_total, "relation": "eq"},
+                        "hits": [{"_id": "e1"}],
+                    },
+                },
+                request=req,
+            )
 
     def _client(self, fake):
         client = W.__new__(W)
@@ -273,28 +325,45 @@ class ClauseDiagnosticsTest(unittest.TestCase):
         return client
 
     def test_per_clause_counts_attached(self):
-        fake = self._DualFake(main_total=3, window_docs=1_300_000,
-                              clause_counts={"m0": 1_200_000, "s0": 12})
+        fake = self._DualFake(
+            main_total=3,
+            window_docs=1_300_000,
+            clause_counts={"m0": 1_200_000, "s0": 12},
+        )
         client = self._client(fake)
         result = client.search(
-            query={"bool": {
-                "must": [{"term": {"data.srcip": "172.17.130.196"}}],
-                "should": [{"terms": {"rule.groups": ["authentication_success"]}}],
-            }},
+            query={
+                "bool": {
+                    "must": [{"term": {"data.srcip": "172.17.130.196"}}],
+                    "should": [{"terms": {"rule.groups": ["authentication_success"]}}],
+                }
+            },
             time_range={"from": "2022-01-18T00:00:00Z", "to": "2022-01-19T00:00:00Z"},
         )
         diag = result["clause_diagnostics"]
         self.assertEqual(diag["window_docs"], 1_300_000)
-        self.assertEqual(diag["clauses"], [
-            {"clause": "data.srcip=172.17.130.196", "type": "must", "matches": 1_200_000},
-            {"clause": "rule.groups in [authentication_success]", "type": "should", "matches": 12},
-        ])
+        self.assertEqual(
+            diag["clauses"],
+            [
+                {
+                    "clause": "data.srcip=172.17.130.196",
+                    "type": "must",
+                    "matches": 1_200_000,
+                },
+                {
+                    "clause": "rule.groups in [authentication_success]",
+                    "type": "should",
+                    "matches": 12,
+                },
+            ],
+        )
 
     def test_no_clauses_no_diagnostics(self):
         fake = self._DualFake(main_total=5, window_docs=0, clause_counts={})
         result = self._client(fake).search(
             query={"match_all": {}},
-            time_range={"from": "2022-01-18T00:00:00Z", "to": "2022-01-19T00:00:00Z"})
+            time_range={"from": "2022-01-18T00:00:00Z", "to": "2022-01-19T00:00:00Z"},
+        )
         self.assertNotIn("clause_diagnostics", result)
 
 
@@ -315,14 +384,25 @@ class FloodBreakdownTest(unittest.TestCase):
         def post(self, path, json):
             req = httpx.Request("POST", f"https://wazuh.local{path}")
             if "clauses" in (json.get("aggs") or {}):  # clause_diagnostics side-request
-                return httpx.Response(200, json={
-                    "hits": {"total": {"value": 0}},
-                    "aggregations": {"clauses": {"buckets": {}}}}, request=req)
-            return httpx.Response(200, json={
-                "hits": {"total": {"value": self._total, "relation": self._rel},
-                         "hits": [{"_id": "e1"}]},
-                "aggregations": {"rule_groups": {"buckets": self._rg}},
-            }, request=req)
+                return httpx.Response(
+                    200,
+                    json={
+                        "hits": {"total": {"value": 0}},
+                        "aggregations": {"clauses": {"buckets": {}}},
+                    },
+                    request=req,
+                )
+            return httpx.Response(
+                200,
+                json={
+                    "hits": {
+                        "total": {"value": self._total, "relation": self._rel},
+                        "hits": [{"_id": "e1"}],
+                    },
+                    "aggregations": {"rule_groups": {"buckets": self._rg}},
+                },
+                request=req,
+            )
 
     def _client(self, fake):
         c = W.__new__(W)
@@ -335,8 +415,11 @@ class FloodBreakdownTest(unittest.TestCase):
         rg = [{"key": "ids", "doc_count": 745000}, {"key": "web", "doc_count": 5200}]
         result = self._client(self._Fake(10000, "gte", rg)).search(
             query={"bool": {"must": [{"term": {"data.srcip": "10.35.35.206"}}]}},
-            time_range={"from": "2022-01-18T00:00:00Z", "to": "2022-01-19T00:00:00Z"})
-        self.assertEqual(result["rule_groups_breakdown"][0], {"group": "ids", "count": 745000})
+            time_range={"from": "2022-01-18T00:00:00Z", "to": "2022-01-19T00:00:00Z"},
+        )
+        self.assertEqual(
+            result["rule_groups_breakdown"][0], {"group": "ids", "count": 745000}
+        )
         self.assertIn("rule.groups", result["note"])
         self.assertIn("ids", result["note"])
         self.assertIn("union", result["note"].lower())  # the entity-union guidance
@@ -344,9 +427,16 @@ class FloodBreakdownTest(unittest.TestCase):
     def test_class_scoped_flood_gets_generic_note_not_entity_note(self):
         rg = [{"key": "web", "doc_count": 600}]
         result = self._client(self._Fake(600, "eq", rg)).search(
-            query={"bool": {"must": [{"term": {"agent.name": "h"}},
-                                     {"term": {"rule.groups": "web"}}]}},
-            time_range={"from": "2022-01-18T00:00:00Z", "to": "2022-01-19T00:00:00Z"})
+            query={
+                "bool": {
+                    "must": [
+                        {"term": {"agent.name": "h"}},
+                        {"term": {"rule.groups": "web"}},
+                    ]
+                }
+            },
+            time_range={"from": "2022-01-18T00:00:00Z", "to": "2022-01-19T00:00:00Z"},
+        )
         self.assertIn("rule_groups_breakdown", result)
         self.assertNotIn("union", result["note"].lower())  # already class-scoped
 
@@ -354,7 +444,8 @@ class FloodBreakdownTest(unittest.TestCase):
         rg = [{"key": "web", "doc_count": 5}]
         result = self._client(self._Fake(5, "eq", rg)).search(
             query={"bool": {"must": [{"term": {"data.srcip": "1.2.3.4"}}]}},
-            time_range={"from": "2022-01-18T00:00:00Z", "to": "2022-01-19T00:00:00Z"})
+            time_range={"from": "2022-01-18T00:00:00Z", "to": "2022-01-19T00:00:00Z"},
+        )
         self.assertNotIn("rule_groups_breakdown", result)
         self.assertNotIn("note", result)
 

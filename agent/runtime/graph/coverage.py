@@ -22,10 +22,17 @@ from .toolio import _is_error_tool_result
 # Tools that constitute genuine SIEM EVIDENCE retrieval, as opposed to orientation
 # (get_case, list_tasks, get_board, search_patterns, ls/cat). The evidence floor and
 # the depth signals both key on this boundary.
-_EVIDENCE_TOOLS = frozenset({
-    "search", "search_keyword", "profile_field", "get_event_volume",
-    "correlate_entity", "correlate_techniques", "get_event",
-})
+_EVIDENCE_TOOLS = frozenset(
+    {
+        "search",
+        "search_keyword",
+        "profile_field",
+        "get_event_volume",
+        "correlate_entity",
+        "correlate_techniques",
+        "get_event",
+    }
+)
 # Search tools whose result hit count signals query specificity.
 _SEARCH_RESULT_TOOLS = frozenset({"search", "search_keyword"})
 # Minimum unqueried span worth reporting as a coverage gap.
@@ -106,7 +113,9 @@ def _unqueried_post_peak_clusters(messages: list) -> list[str]:
             continue
         if not isinstance(data, dict):
             continue
-        flanking = (data.get("pre_spike_active_bins") or []) + (data.get("post_spike_active_bins") or [])
+        flanking = (data.get("pre_spike_active_bins") or []) + (
+            data.get("post_spike_active_bins") or []
+        )
         for b in flanking:
             t = _parse_iso(b.get("time") if isinstance(b, dict) else None)
             if t:
@@ -142,7 +151,9 @@ def _interval_seconds(interval: str) -> int | None:
     return int(m.group(1)) * {"s": 1, "m": 60, "h": 3600, "d": 86400}[m.group(2)]
 
 
-def _merge_intervals(intervals: list[tuple[datetime, datetime]]) -> list[tuple[datetime, datetime]]:
+def _merge_intervals(
+    intervals: list[tuple[datetime, datetime]],
+) -> list[tuple[datetime, datetime]]:
     """Union overlapping/adjacent (start, end) intervals into a minimal sorted list."""
     merged: list[tuple[datetime, datetime]] = []
     for f, t in sorted(intervals):

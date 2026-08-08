@@ -6,7 +6,9 @@ import unittest
 
 import httpx
 
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 sys.path.insert(0, project_root)
 sys.path.insert(0, os.path.join(project_root, "aci-mcp-servers", "aci-wazuh"))
 
@@ -146,10 +148,14 @@ class TestWazuhEventVolume(unittest.TestCase):
         # All five plateau bins are active; the four quiet edge bins are not.
         self.assertEqual(len(result["active_bins"]), 5)
         # Peak (95) is at 03:00 — one active bin ramps up before it, three wind down after.
-        self.assertEqual([b["time"] for b in result["pre_spike_active_bins"]],
-                         ["2026-06-25T02:00:00Z"])
-        self.assertEqual([b["time"] for b in result["post_spike_active_bins"]],
-                         ["2026-06-25T04:00:00Z", "2026-06-25T05:00:00Z", "2026-06-25T06:00:00Z"])
+        self.assertEqual(
+            [b["time"] for b in result["pre_spike_active_bins"]],
+            ["2026-06-25T02:00:00Z"],
+        )
+        self.assertEqual(
+            [b["time"] for b in result["post_spike_active_bins"]],
+            ["2026-06-25T04:00:00Z", "2026-06-25T05:00:00Z", "2026-06-25T06:00:00Z"],
+        )
         self.assertIn("Sustained elevated activity", result["note"])
         self.assertIn("plateau", result["note"])
         # Resolution caveat: the edges are only located to the bin width; re-profile finer.
@@ -188,8 +194,10 @@ class TestWazuhEventVolume(unittest.TestCase):
         fake = _FakeOpenSearchClient(buckets=self._buckets(counts), total=sum(counts))
         result = self._client(fake).get_event_volume(_START, _END, interval="1h")
 
-        self.assertEqual([b["time"] for b in result["pre_spike_active_bins"]],
-                         ["2026-06-25T01:00:00Z"])
+        self.assertEqual(
+            [b["time"] for b in result["pre_spike_active_bins"]],
+            ["2026-06-25T01:00:00Z"],
+        )
         self.assertEqual(result["post_spike_active_bins"], [])
         self.assertIn("ramps up BEFORE", result["note"])
         self.assertNotIn("Sustained elevated activity", result["note"])
@@ -205,11 +213,15 @@ class TestWazuhEventVolume(unittest.TestCase):
         result = self._client(fake).get_event_volume(_START, _END, interval="1h")
 
         self.assertEqual(result["active_threshold"], 118125.0)
-        self.assertEqual(result["onset"]["time"], "2026-06-25T03:00:00Z")  # the 118125 bin
+        self.assertEqual(
+            result["onset"]["time"], "2026-06-25T03:00:00Z"
+        )  # the 118125 bin
         self.assertEqual(len(result["active_bins"]), 4)
         # Peak (317965) is at 04:00; the 118125 ramp bin precedes it.
-        self.assertEqual([b["time"] for b in result["pre_spike_active_bins"]],
-                         ["2026-06-25T03:00:00Z"])
+        self.assertEqual(
+            [b["time"] for b in result["pre_spike_active_bins"]],
+            ["2026-06-25T03:00:00Z"],
+        )
         self.assertIn("ramps up BEFORE", result["note"])
 
     def test_two_bursts_separated_by_gap_are_detected(self):

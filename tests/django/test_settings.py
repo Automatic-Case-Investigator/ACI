@@ -9,29 +9,35 @@ from agent.models import WorkflowTriggerConfig
 class WorkflowTriggerSettingsTests(TestCase):
     def test_trigger_save_edit_and_delete(self):
         save_url = reverse("dashboard:settings_trigger_save")
-        response = self.client.post(save_url, {
-            "id": "thehive-case-webhook",
-            "name": "TheHive case webhook",
-            "provider_key": "thehive",
-            "event_type": "new_case",
-            "dedupe_window": "120",
-            "secret": "first",
-            "enabled": "1",
-        })
+        response = self.client.post(
+            save_url,
+            {
+                "id": "thehive-case-webhook",
+                "name": "TheHive case webhook",
+                "provider_key": "thehive",
+                "event_type": "new_case",
+                "dedupe_window": "120",
+                "secret": "first",
+                "enabled": "1",
+            },
+        )
         self.assertRedirects(response, reverse("dashboard:settings"))
         trigger = WorkflowTriggerConfig.objects.get(id="thehive-case-webhook")
         self.assertEqual(trigger.name, "TheHive case webhook")
         self.assertEqual(trigger.dedupe_window, 120)
         self.assertTrue(trigger.enabled)
 
-        response = self.client.post(save_url, {
-            "existing_id": "thehive-case-webhook",
-            "name": "Renamed trigger",
-            "provider_key": "thehive",
-            "event_type": "new_case",
-            "dedupe_window": "30",
-            "secret": "",
-        })
+        response = self.client.post(
+            save_url,
+            {
+                "existing_id": "thehive-case-webhook",
+                "name": "Renamed trigger",
+                "provider_key": "thehive",
+                "event_type": "new_case",
+                "dedupe_window": "30",
+                "secret": "",
+            },
+        )
         self.assertRedirects(response, reverse("dashboard:settings"))
         trigger.refresh_from_db()
         self.assertEqual(trigger.name, "Renamed trigger")
@@ -39,41 +45,59 @@ class WorkflowTriggerSettingsTests(TestCase):
         self.assertFalse(trigger.enabled)
         self.assertEqual(trigger.secret, "")
 
-        response = self.client.post(reverse("dashboard:settings_trigger_delete"), {
-            "id": "thehive-case-webhook",
-        })
+        response = self.client.post(
+            reverse("dashboard:settings_trigger_delete"),
+            {
+                "id": "thehive-case-webhook",
+            },
+        )
         self.assertRedirects(response, reverse("dashboard:settings"))
-        self.assertFalse(WorkflowTriggerConfig.objects.filter(id="thehive-case-webhook").exists())
+        self.assertFalse(
+            WorkflowTriggerConfig.objects.filter(id="thehive-case-webhook").exists()
+        )
 
     def test_trigger_save_rejects_unregistered_event(self):
-        response = self.client.post(reverse("dashboard:settings_trigger_save"), {
-            "id": "bad-event",
-            "name": "Bad event",
-            "provider_key": "thehive",
-            "event_type": "not_registered",
-        })
+        response = self.client.post(
+            reverse("dashboard:settings_trigger_save"),
+            {
+                "id": "bad-event",
+                "name": "Bad event",
+                "provider_key": "thehive",
+                "event_type": "not_registered",
+            },
+        )
         self.assertRedirects(response, reverse("dashboard:settings"))
         self.assertFalse(WorkflowTriggerConfig.objects.filter(id="bad-event").exists())
 
     def test_trigger_save_rejects_unsupported_provider(self):
-        response = self.client.post(reverse("dashboard:settings_trigger_save"), {
-            "id": "bad-provider",
-            "name": "Bad provider",
-            "provider_key": "aci-board",
-            "event_type": "new_case",
-        })
+        response = self.client.post(
+            reverse("dashboard:settings_trigger_save"),
+            {
+                "id": "bad-provider",
+                "name": "Bad provider",
+                "provider_key": "aci-board",
+                "event_type": "new_case",
+            },
+        )
         self.assertRedirects(response, reverse("dashboard:settings"))
-        self.assertFalse(WorkflowTriggerConfig.objects.filter(id="bad-provider").exists())
+        self.assertFalse(
+            WorkflowTriggerConfig.objects.filter(id="bad-provider").exists()
+        )
 
     def test_trigger_save_rejects_unsupported_provider_event(self):
-        response = self.client.post(reverse("dashboard:settings_trigger_save"), {
-            "id": "bad-provider-event",
-            "name": "Bad provider event",
-            "provider_key": "wazuh",
-            "event_type": "new_case",
-        })
+        response = self.client.post(
+            reverse("dashboard:settings_trigger_save"),
+            {
+                "id": "bad-provider-event",
+                "name": "Bad provider event",
+                "provider_key": "wazuh",
+                "event_type": "new_case",
+            },
+        )
         self.assertRedirects(response, reverse("dashboard:settings"))
-        self.assertFalse(WorkflowTriggerConfig.objects.filter(id="bad-provider-event").exists())
+        self.assertFalse(
+            WorkflowTriggerConfig.objects.filter(id="bad-provider-event").exists()
+        )
 
     def test_settings_trigger_provider_options_are_not_mcp_providers(self):
         response = self.client.get(reverse("dashboard:settings"))
@@ -103,7 +127,9 @@ class ConfiguredWebhookTests(TestCase):
         self._trigger(secret="s3cr3t")
         with patch("agent.views.webhooks._start_trigger_dispatch") as dispatch:
             response = self.client.post(
-                reverse("configured_webhook", kwargs={"trigger_id": "thehive-case-webhook"}),
+                reverse(
+                    "configured_webhook", kwargs={"trigger_id": "thehive-case-webhook"}
+                ),
                 data={
                     "objectType": "case",
                     "operation": "creation",
@@ -125,7 +151,9 @@ class ConfiguredWebhookTests(TestCase):
         self._trigger(enabled=False)
         with patch("agent.views.webhooks._start_trigger_dispatch") as dispatch:
             response = self.client.post(
-                reverse("configured_webhook", kwargs={"trigger_id": "thehive-case-webhook"}),
+                reverse(
+                    "configured_webhook", kwargs={"trigger_id": "thehive-case-webhook"}
+                ),
                 data={"objectType": "case", "object": {"id": "case-1"}},
                 content_type="application/json",
             )
@@ -137,7 +165,9 @@ class ConfiguredWebhookTests(TestCase):
         self._trigger(secret="expected")
         with patch("agent.views.webhooks._start_trigger_dispatch") as dispatch:
             response = self.client.post(
-                reverse("configured_webhook", kwargs={"trigger_id": "thehive-case-webhook"}),
+                reverse(
+                    "configured_webhook", kwargs={"trigger_id": "thehive-case-webhook"}
+                ),
                 data={"objectType": "case", "object": {"id": "case-1"}},
                 content_type="application/json",
                 HTTP_X_ACI_WEBHOOK_SECRET="wrong",
@@ -149,7 +179,9 @@ class ConfiguredWebhookTests(TestCase):
         self._trigger(secret="")
         with patch("agent.views.webhooks._start_trigger_dispatch") as dispatch:
             response = self.client.post(
-                reverse("configured_webhook", kwargs={"trigger_id": "thehive-case-webhook"}),
+                reverse(
+                    "configured_webhook", kwargs={"trigger_id": "thehive-case-webhook"}
+                ),
                 data={"objectType": "case", "object": {"id": "case-1"}},
                 content_type="application/json",
             )
@@ -168,7 +200,9 @@ class ConfiguredWebhookTests(TestCase):
         self._trigger(event_type="missing_event")
         with patch("agent.views.webhooks._start_trigger_dispatch") as dispatch:
             response = self.client.post(
-                reverse("configured_webhook", kwargs={"trigger_id": "thehive-case-webhook"}),
+                reverse(
+                    "configured_webhook", kwargs={"trigger_id": "thehive-case-webhook"}
+                ),
                 data={"objectType": "case", "object": {"id": "case-1"}},
                 content_type="application/json",
             )
@@ -202,7 +236,9 @@ class ConfiguredWebhookTests(TestCase):
         )
         with patch("agent.views.webhooks._start_trigger_dispatch") as dispatch:
             response = self.client.post(
-                reverse("configured_webhook", kwargs={"trigger_id": "wazuh-alert-webhook"}),
+                reverse(
+                    "configured_webhook", kwargs={"trigger_id": "wazuh-alert-webhook"}
+                ),
                 data={"id": "alert-42", "rule": {"id": "100001"}},
                 content_type="application/json",
             )
@@ -214,7 +250,9 @@ class ConfiguredWebhookTests(TestCase):
         self._trigger(provider_key="aci-thehive")
         with patch("agent.views.webhooks._start_trigger_dispatch") as dispatch:
             response = self.client.post(
-                reverse("configured_webhook", kwargs={"trigger_id": "thehive-case-webhook"}),
+                reverse(
+                    "configured_webhook", kwargs={"trigger_id": "thehive-case-webhook"}
+                ),
                 data={"objectType": "case", "object": {"id": "case-legacy"}},
                 content_type="application/json",
             )
@@ -225,7 +263,9 @@ class ConfiguredWebhookTests(TestCase):
         self._trigger(provider_key="aci-board")
         with patch("agent.views.webhooks._start_trigger_dispatch") as dispatch:
             response = self.client.post(
-                reverse("configured_webhook", kwargs={"trigger_id": "thehive-case-webhook"}),
+                reverse(
+                    "configured_webhook", kwargs={"trigger_id": "thehive-case-webhook"}
+                ),
                 data={"id": "case-1"},
                 content_type="application/json",
             )

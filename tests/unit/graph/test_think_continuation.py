@@ -19,6 +19,7 @@ things that were sharing one list:
 
 These pin all three.
 """
+
 import asyncio
 import unittest
 
@@ -79,8 +80,11 @@ def _retained_history(anchor_text: str) -> list:
         SystemMessage(content="SYS"),
         HumanMessage(content="# USER\n" + anchor_text),
         AIMessage(content="", tool_calls=[{"name": "search", "args": {}, "id": "c1"}]),
-        ToolMessage(content='{"total": 3, "events": [{"_id": "evt-1"}]}',
-                    tool_call_id="c1", name="search"),
+        ToolMessage(
+            content='{"total": 3, "events": [{"_id": "evt-1"}]}',
+            tool_call_id="c1",
+            name="search",
+        ),
     ]
 
 
@@ -108,14 +112,20 @@ class ThinkPromptShapeTest(unittest.TestCase):
         return "\n".join(str(getattr(m, "content", "")) for m in self._sent())
 
     def _config(self):
-        return {"configurable": {"model": _StubModel(), "tools": [], "system_prompt": "SYS"}}
+        return {
+            "configurable": {"model": _StubModel(), "tools": [], "system_prompt": "SYS"}
+        }
 
     # ── the anchor ──────────────────────────────────────────────────────────────
 
     def test_fresh_claim_carries_the_full_task_description(self):
         # Turn 1 still shows the whole startup sequence — it is only the REPLAY of it
         # that was harmful.
-        _run(nodes_loop.think(_state(ledger={"next_step_instruction": ""}), self._config()))
+        _run(
+            nodes_loop.think(
+                _state(ledger={"next_step_instruction": ""}), self._config()
+            )
+        )
         text = self._all_text()
         self.assertIn("1. Load the case record.", text)
         self.assertIn("6. Load other alerts", text)
@@ -137,8 +147,11 @@ class ThinkPromptShapeTest(unittest.TestCase):
             "next_step_instruction": "Orientation is complete — issue your first SIEM query now.",
             "evidence_state": "orientation",
         }
-        _run(nodes_loop.think(_state(ledger=ledger, messages=_retained_history("A")),
-                              self._config()))
+        _run(
+            nodes_loop.think(
+                _state(ledger=ledger, messages=_retained_history("A")), self._config()
+            )
+        )
         steering = self._last_human()
         self.assertIn("REQUIRED next step", steering)
         self.assertIn("issue your first SIEM query", steering)
@@ -146,7 +159,9 @@ class ThinkPromptShapeTest(unittest.TestCase):
     def test_steering_is_not_persisted(self):
         ledger = {"next_step_instruction": "Query the SIEM now."}
         history = _retained_history("A")
-        out = _run(nodes_loop.think(_state(ledger=ledger, messages=history), self._config()))
+        out = _run(
+            nodes_loop.think(_state(ledger=ledger, messages=history), self._config())
+        )
         # History grows by the model's reply only — the steering never lands in state,
         # so instructions cannot accumulate over a long task.
         self.assertEqual(len(out["messages"]), len(history) + 1)
@@ -159,8 +174,11 @@ class ThinkPromptShapeTest(unittest.TestCase):
         # The property the whole flattening exists for: the model choosing the next
         # tool call can see what earlier cycles retrieved.
         ledger = {"next_step_instruction": "Keep going."}
-        _run(nodes_loop.think(_state(ledger=ledger, messages=_retained_history("A")),
-                              self._config()))
+        _run(
+            nodes_loop.think(
+                _state(ledger=ledger, messages=_retained_history("A")), self._config()
+            )
+        )
         self.assertIn("evt-1", self._all_text())
 
 

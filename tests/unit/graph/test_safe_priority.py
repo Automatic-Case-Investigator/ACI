@@ -8,13 +8,16 @@ mid-point (which would destroy the lead's ranking signal).
 Run from project root with:
     python -m pytest tests/unit/graph/test_safe_priority.py
 """
+
 from __future__ import annotations
 
 import os
 import sys
 import unittest
 
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 sys.path.insert(0, project_root)
 
 from agent.runtime.graph.leads import _safe_priority

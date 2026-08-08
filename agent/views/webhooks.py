@@ -20,7 +20,6 @@ log = logging.getLogger(__name__)
 from .public import PublicAPIView
 
 
-
 def _request_secret(request) -> str:
     return (
         request.headers.get("X-ACI-Webhook-Secret")
@@ -42,20 +41,26 @@ def _trigger_metadata(trigger_config: WorkflowTriggerConfig) -> dict:
     }
 
 
-def _start_trigger_dispatch(trigger_config: WorkflowTriggerConfig, case_id: str, body: dict):
+def _start_trigger_dispatch(
+    trigger_config: WorkflowTriggerConfig, case_id: str, body: dict
+):
     import asyncio
 
     from ..runtime.triggers.base import Trigger, dispatch_trigger
 
-    trigger = Trigger(event_type=trigger_config.event_type, case_id=str(case_id), payload=body)
+    trigger = Trigger(
+        event_type=trigger_config.event_type, case_id=str(case_id), payload=body
+    )
 
     def _run():
         try:
-            asyncio.run(dispatch_trigger(
-                trigger,
-                dedupe_window_override=trigger_config.dedupe_window,
-                metadata_extra=_trigger_metadata(trigger_config),
-            ))
+            asyncio.run(
+                dispatch_trigger(
+                    trigger,
+                    dedupe_window_override=trigger_config.dedupe_window,
+                    metadata_extra=_trigger_metadata(trigger_config),
+                )
+            )
         except Exception:
             log.exception("workflow dispatch thread crashed for case %s", case_id)
 
@@ -72,14 +77,25 @@ def _handle_configured_webhook(request, trigger_config: WorkflowTriggerConfig):
     if not trigger_config.enabled:
         return Response({"ignored": True, "reason": "trigger disabled"})
     if trigger_config.secret and _request_secret(request) != trigger_config.secret:
-        return Response({"error": "invalid webhook secret"}, status=status.HTTP_403_FORBIDDEN)
+        return Response(
+            {"error": "invalid webhook secret"}, status=status.HTTP_403_FORBIDDEN
+        )
     from ..runtime.config.runtime_config import workflows_enabled
+
     if not workflows_enabled():
-        return Response({"error": "automatic workflows are disabled"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        return Response(
+            {"error": "automatic workflows are disabled"},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
 
     binding = get_binding(trigger_config.event_type)
     if binding is None:
-        return Response({"ignored": True, "reason": f"no workflow binding registered for {trigger_config.event_type!r}"})
+        return Response(
+            {
+                "ignored": True,
+                "reason": f"no workflow binding registered for {trigger_config.event_type!r}",
+            }
+        )
 
     enabled, _window = resolve_workflow(
         trigger_config.event_type,
@@ -92,17 +108,22 @@ def _handle_configured_webhook(request, trigger_config: WorkflowTriggerConfig):
     from ..runtime.triggers.providers import parse_trigger_payload
 
     body = _payload_dict(request)
-    case_id, ignored_reason = parse_trigger_payload(trigger_config.provider_key, trigger_config.event_type, body)
+    case_id, ignored_reason = parse_trigger_payload(
+        trigger_config.provider_key, trigger_config.event_type, body
+    )
     if ignored_reason:
         return Response({"ignored": True, "reason": ignored_reason})
 
     _start_trigger_dispatch(trigger_config, case_id, body)
-    return Response({
-        "accepted": True,
-        "trigger_id": trigger_config.id,
-        "event_type": trigger_config.event_type,
-        "case_id": str(case_id),
-    }, status=status.HTTP_202_ACCEPTED)
+    return Response(
+        {
+            "accepted": True,
+            "trigger_id": trigger_config.id,
+            "event_type": trigger_config.event_type,
+            "case_id": str(case_id),
+        },
+        status=status.HTTP_202_ACCEPTED,
+    )
 
 
 class ConfiguredWebhookView(PublicAPIView):
@@ -111,7 +132,9 @@ class ConfiguredWebhookView(PublicAPIView):
     def post(self, request, trigger_id):
         trigger_config = WorkflowTriggerConfig.objects.filter(id=trigger_id).first()
         if trigger_config is None:
-            return Response({"error": "trigger not found"}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"error": "trigger not found"}, status=status.HTTP_404_NOT_FOUND
+            )
         return _handle_configured_webhook(request, trigger_config)
 
 
@@ -126,13 +149,17 @@ class TheHiveWebhookView(PublicAPIView):
         from ..runtime.triggers.base import EVENT_NEW_ALERT, EVENT_NEW_CASE
 
         body = _payload_dict(request)
-        object_type = str(body.get("objectType") or body.get("object_type") or "").lower()
+        object_type = str(
+            body.get("objectType") or body.get("object_type") or ""
+        ).lower()
         if object_type == "case":
             event_type = EVENT_NEW_CASE
         elif object_type == "alert":
             event_type = EVENT_NEW_ALERT
         else:
-            return Response({"ignored": True, "reason": f"unhandled objectType {object_type!r}"})
+            return Response(
+                {"ignored": True, "reason": f"unhandled objectType {object_type!r}"}
+            )
 
         trigger_config = WorkflowTriggerConfig.objects.filter(
             enabled=True,
@@ -140,6 +167,10 @@ class TheHiveWebhookView(PublicAPIView):
             provider_key__in=("thehive", "aci-thehive"),
         ).first()
         if trigger_config is None:
-            return Response({"ignored": True, "reason": "no enabled TheHive webhook trigger configured"})
+            return Response(
+                {
+                    "ignored": True,
+                    "reason": "no enabled TheHive webhook trigger configured",
+                }
+            )
         return _handle_configured_webhook(request, trigger_config)
-

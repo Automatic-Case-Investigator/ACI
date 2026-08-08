@@ -15,6 +15,7 @@ into a queue tied to the wrong loop and never reach the consumer. Instead, strea
 events are placed in a per-session in-memory buffer (thread-safe); the consumer
 drains that buffer every 50 ms from within the ASGI loop.
 """
+
 from __future__ import annotations
 
 import logging
@@ -61,14 +62,16 @@ class _EnqueueHandler(logging.Handler):
                 if ev.kind == "intent_delta" or ev.source == "orch":
                     with _stream_lock:
                         buf = _stream_buffers.setdefault(ev.session_id, [])
-                        buf.append({
-                            "seq": ev.seq,
-                            "source": ev.source,
-                            "run_id": ev.run_id or "",
-                            "kind": ev.kind,
-                            "detail": ev.detail or "",
-                            "metadata": ev.metadata or {},
-                        })
+                        buf.append(
+                            {
+                                "seq": ev.seq,
+                                "source": ev.source,
+                                "run_id": ev.run_id or "",
+                                "kind": ev.kind,
+                                "detail": ev.detail or "",
+                                "metadata": ev.metadata or {},
+                            }
+                        )
                 return  # never persist stream events to DB
             _queue.put(ev)
         except Exception:
@@ -110,5 +113,7 @@ def install() -> None:
         if not any(isinstance(h, _EnqueueHandler) for h in lg.handlers):
             lg.addHandler(_EnqueueHandler())
         lg.setLevel(logging.INFO)
-        threading.Thread(target=_writer_loop, name="aci-event-writer", daemon=True).start()
+        threading.Thread(
+            target=_writer_loop, name="aci-event-writer", daemon=True
+        ).start()
         _installed = True

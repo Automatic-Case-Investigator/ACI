@@ -1,4 +1,5 @@
 """Wazuh SIEM provider (stdio subprocess)."""
+
 from __future__ import annotations
 
 import sys
@@ -39,18 +40,20 @@ def _build(resolved: dict, run_ctx: dict | None = None) -> dict:
     }
 
 
-register(MCPProvider(
-    key="aci-wazuh",
-    kind=KIND_SIEM,
-    setting_defaults=_defaults,
-    build_config=_build,
-    capabilities={
-        "search_events": ("search",),
-        "fetch_event": ("get_event",),
-        "inspect_schema": ("get_index_schema", "list_indices"),
-        "profile_field_values": ("profile_field",),
-        "quick_search": ("search_keyword",),
-        "correlate_entity": ("correlate_entity", "correlate_techniques"),
-        "summarize_volume": ("get_event_volume",),
-    },
-))
+register(
+    MCPProvider(
+        key="aci-wazuh",
+        kind=KIND_SIEM,
+        setting_defaults=_defaults,
+        build_config=_build,
+        capabilities={
+            "search_events": ("search",),
+            "fetch_event": ("get_event",),
+            "inspect_schema": ("get_index_schema", "list_indices"),
+            "profile_field_values": ("profile_field",),
+            "quick_search": ("search_keyword",),
+            "correlate_entity": ("correlate_entity", "correlate_techniques"),
+            "summarize_volume": ("get_event_volume",),
+        },
+    )
+)

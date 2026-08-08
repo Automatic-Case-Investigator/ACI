@@ -1,4 +1,5 @@
 """TI enrichment orchestrator: cache, rate-limiting, board writes, lead creation."""
+
 from __future__ import annotations
 
 import asyncio
@@ -107,6 +108,7 @@ class TIEnricher:
 
 # ── Module-level helpers ──────────────────────────────────────────────────────
 
+
 def _verdict_to_confidence(verdict: str) -> str:
     return {"malicious": "high", "suspicious": "medium"}.get(verdict, "low")
 
@@ -123,6 +125,7 @@ def write_ti_results(
     these are the ones that should trigger investigation leads.
     """
     from aci_board import store
+
     store.init_db()
 
     for result in results:
@@ -132,9 +135,7 @@ def write_ti_results(
             f"TI[{result.provider}] {result.artifact_kind} {result.artifact_value}: "
             f"{result.verdict} ({score_str}){indicators_str}"
         )
-        dedup_key = (
-            f"ti:{result.provider}:{result.artifact_kind}:{result.artifact_value.lower()}"
-        )
+        dedup_key = f"ti:{result.provider}:{result.artifact_kind}:{result.artifact_value.lower()}"
         store.add_entry(
             case_id=case_id,
             run_id=run_id,
@@ -161,6 +162,7 @@ def create_ti_leads(
     Returns the count of leads created.
     """
     from aci_taskqueue import store as tq_store
+
     tq_store.init_db()
 
     created = 0
@@ -270,7 +272,9 @@ def get_enricher() -> Optional[TIEnricher]:
 
             defaults = {
                 "api_key": getattr(dj_settings, "VT_API_KEY", ""),
-                "base_url": getattr(dj_settings, "VT_BASE_URL", "https://www.virustotal.com"),
+                "base_url": getattr(
+                    dj_settings, "VT_BASE_URL", "https://www.virustotal.com"
+                ),
                 "calls_per_minute": str(getattr(dj_settings, "TI_CALLS_PER_MINUTE", 4)),
             }
             try:
@@ -286,7 +290,9 @@ def get_enricher() -> Optional[TIEnricher]:
 
             provider = VirusTotalProvider(
                 api_key=api_key,
-                base_url=(effective.get("base_url") or "https://www.virustotal.com").strip(),
+                base_url=(
+                    effective.get("base_url") or "https://www.virustotal.com"
+                ).strip(),
             )
             cache = get_ti_cache()
             if cache is None:

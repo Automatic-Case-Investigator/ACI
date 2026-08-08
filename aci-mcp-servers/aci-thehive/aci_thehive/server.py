@@ -2,6 +2,7 @@
 
 Run as stdio: python -m aci_thehive.server
 """
+
 from __future__ import annotations
 
 import json
@@ -159,7 +160,10 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "case_id": {"type": "string", "description": "TheHive case ID (e.g. '~12345')."},
+                    "case_id": {
+                        "type": "string",
+                        "description": "TheHive case ID (e.g. '~12345').",
+                    },
                 },
                 "required": ["case_id"],
             },
@@ -266,7 +270,7 @@ async def list_tools() -> list[Tool]:
                     "case_id": {"type": "string", "description": "TheHive case ID."},
                     "fields": {
                         "type": "object",
-                        "description": "Fields to update, e.g. {\"status\": \"Resolved\"} or {\"severity\": 3}.",
+                        "description": 'Fields to update, e.g. {"status": "Resolved"} or {"severity": 3}.',
                     },
                 },
                 "required": ["case_id", "fields"],
@@ -279,7 +283,10 @@ async def list_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "case_id": {"type": "string", "description": "TheHive case ID."},
-                    "message": {"type": "string", "description": "Comment text (markdown supported)."},
+                    "message": {
+                        "type": "string",
+                        "description": "Comment text (markdown supported).",
+                    },
                 },
                 "required": ["case_id", "message"],
             },
@@ -294,7 +301,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         if name == "get_case":
             result = client.get_case(arguments["case_id"])
         elif name == "list_cases":
-            result = client.list_cases(max_results=int(arguments.get("max_results", 20)))
+            result = client.list_cases(
+                max_results=int(arguments.get("max_results", 20))
+            )
         elif name == "list_case_alerts":
             result = client.list_case_alerts(
                 arguments["case_id"],
@@ -316,7 +325,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         elif name == "update_case":
             result = client.update_case(arguments["case_id"], arguments["fields"])
         elif name == "post_case_comment":
-            result = client.post_case_comment(arguments["case_id"], arguments["message"])
+            result = client.post_case_comment(
+                arguments["case_id"], arguments["message"]
+            )
         else:
             result = {"error": f"Unknown tool: {name}"}
     except Exception as exc:
@@ -332,4 +343,5 @@ async def main() -> None:
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(main())

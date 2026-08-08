@@ -1,4 +1,5 @@
 """SQLite-backed Findings Board store."""
+
 from __future__ import annotations
 
 import os
@@ -18,7 +19,10 @@ def _now() -> str:
 
 @contextmanager
 def _conn():
-    conn = sqlite3.connect(os.path.abspath(os.environ.get("BOARD_DB_PATH", "board.db")), check_same_thread=False)
+    conn = sqlite3.connect(
+        os.path.abspath(os.environ.get("BOARD_DB_PATH", "board.db")),
+        check_same_thread=False,
+    )
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout = 5000")
     try:
@@ -52,7 +56,9 @@ def init_db() -> None:
         # fact cited with different event ids). Added via ALTER for existing DBs.
         cols = {row["name"] for row in conn.execute("PRAGMA table_info(board_entries)")}
         if "dedup_key" not in cols:
-            conn.execute("ALTER TABLE board_entries ADD COLUMN dedup_key TEXT NOT NULL DEFAULT ''")
+            conn.execute(
+                "ALTER TABLE board_entries ADD COLUMN dedup_key TEXT NOT NULL DEFAULT ''"
+            )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_board ON board_entries"
             "(case_id, run_id, agent_name, kind, created_at)"
@@ -105,8 +111,20 @@ def add_entry(
                (id, case_id, run_id, agent_name, kind, content, source,
                 confidence, status, created_at, updated_at, dedup_key)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (entry_id, case_id, run_id, agent_name, kind, content,
-             source, confidence, status, now, now, key),
+            (
+                entry_id,
+                case_id,
+                run_id,
+                agent_name,
+                kind,
+                content,
+                source,
+                confidence,
+                status,
+                now,
+                now,
+                key,
+            ),
         )
     return get_entry(entry_id)
 
@@ -119,9 +137,7 @@ def get_entry(entry_id: str) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
-def list_entries(
-    case_id: str, run_id: str, agent_name: str
-) -> list[dict[str, Any]]:
+def list_entries(case_id: str, run_id: str, agent_name: str) -> list[dict[str, Any]]:
     init_db()
     with _conn() as conn:
         rows = conn.execute(

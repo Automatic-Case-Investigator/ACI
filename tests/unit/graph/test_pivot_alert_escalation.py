@@ -7,7 +7,9 @@ import sys
 import tempfile
 import unittest
 
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, project_root)
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
 os.environ["SECRET_KEY"] = "test"
@@ -15,6 +17,7 @@ os.environ["TASKQUEUE_DB_PATH"] = tempfile.mktemp(suffix=".db")
 os.environ["BOARD_DB_PATH"] = tempfile.mktemp(suffix=".db")
 
 import django
+
 django.setup()
 
 from agent.runtime.graph.nodes_flow.pivot import pivot
@@ -53,9 +56,16 @@ class PivotAlertEscalationTests(unittest.TestCase):
             "last_findings_verification": None,
             "last_confirmed_findings": [],
         }
-        result = asyncio.run(pivot(state, {"configurable": {
-            "tools": [_Tool("post_case_comment", _post_case_comment)],
-        }}))
+        result = asyncio.run(
+            pivot(
+                state,
+                {
+                    "configurable": {
+                        "tools": [_Tool("post_case_comment", _post_case_comment)],
+                    }
+                },
+            )
+        )
 
         self.assertEqual(calls["post"], 0)
         self.assertTrue(result["escalation_posted"])

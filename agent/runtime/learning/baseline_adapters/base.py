@@ -15,6 +15,7 @@ The orchestrator owns the SIEM-agnostic policy: subject-selection precedence,
 the health gate (how many events make a baseline fresh / low_data / skipped),
 and persistence to `BaselineSnapshot`.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -46,6 +47,8 @@ class BaselineSIEMAdapter(Protocol):
         """Return subject IDs of the given type with activity in the window."""
         ...
 
-    def compute_features(self, subject_type: str, subject_id: str, days: int) -> list[FeatureResult]:
+    def compute_features(
+        self, subject_type: str, subject_id: str, days: int
+    ) -> list[FeatureResult]:
         """Return the behavioral features derivable for one subject."""
         ...

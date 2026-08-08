@@ -4,7 +4,6 @@ from django.db.models.signals import post_delete
 from django.dispatch import receiver
 
 
-
 class AgentRun(models.Model):
     STATUS_CREATED = "created"
     STATUS_QUEUED = "queued"
@@ -43,8 +42,12 @@ class AgentRun(models.Model):
     case_id = models.CharField(max_length=256)
     agent_name = models.CharField(max_length=64)
     question = models.TextField()
-    status = models.CharField(max_length=32, choices=STATUS_CHOICES, default=STATUS_CREATED)
-    trigger = models.CharField(max_length=16, choices=TRIGGER_CHOICES, default=TRIGGER_INTERACTIVE)
+    status = models.CharField(
+        max_length=32, choices=STATUS_CHOICES, default=STATUS_CREATED
+    )
+    trigger = models.CharField(
+        max_length=16, choices=TRIGGER_CHOICES, default=TRIGGER_INTERACTIVE
+    )
     result = models.TextField(blank=True)
     error = models.TextField(blank=True)
     metadata = models.JSONField(default=dict, blank=True)
@@ -113,10 +116,10 @@ def _cascade_delete_session_children(sender, instance, **kwargs):
     except Exception:
         # Backend without JSON-key lookup support: fall back to a Python-side scan.
         stale = [
-            r.id for r in AgentRun.objects.exclude(agent_name="orchestrator")
+            r.id
+            for r in AgentRun.objects.exclude(agent_name="orchestrator")
             if str((r.metadata or {}).get("session_id")) == sid
         ]
         if stale:
             AgentRun.objects.filter(id__in=stale).delete()
     AgentEvent.objects.filter(session_id=sid).delete()
-

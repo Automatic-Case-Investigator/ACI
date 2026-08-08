@@ -14,6 +14,7 @@ A provider describes one MCP server: its stable `key` (matched against an agent'
 Adding a new MCP platform = drop a module in this package that registers a provider.
 No edits to `mcp_client.py`.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -109,7 +110,12 @@ CAPABILITY_DOCS: dict[str, dict[str, str]] = {
 }
 
 REQUIRED_CAPABILITIES_BY_KIND: dict[str, tuple[str, ...]] = {
-    KIND_SIEM: ("search_events", "fetch_event", "inspect_schema", "profile_field_values"),
+    KIND_SIEM: (
+        "search_events",
+        "fetch_event",
+        "inspect_schema",
+        "profile_field_values",
+    ),
     KIND_SOAR: ("read_case", "list_case_alerts", "read_alert", "publish_case_report"),
 }
 

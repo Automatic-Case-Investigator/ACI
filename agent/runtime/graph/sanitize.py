@@ -3,9 +3,6 @@ from __future__ import annotations
 import json
 import re
 
-
-
-
 # gpt-oss emits the "harmony" format; vllm's parser sometimes leaks raw control
 # tokens (e.g. <|channel|>, <|end|>, <|start|>) into the assistant message. When
 # that text is echoed back in history, vllm fails to re-parse it ("unexpected
@@ -48,7 +45,11 @@ def _sanitize_history(messages: list, *, aggressive: bool = False) -> list:
         content = getattr(msg, "content", None)
         tool_calls = getattr(msg, "tool_calls", None)
         if aggressive and isinstance(content, str) and not tool_calls:
-            if "to=functions." in content or "<|start|>" in content or "<|end|>" in content:
+            if (
+                "to=functions." in content
+                or "<|start|>" in content
+                or "<|end|>" in content
+            ):
                 continue
         sanitized.append(msg)
 
@@ -60,9 +61,12 @@ def _sanitize_history(messages: list, *, aggressive: bool = False) -> list:
             if isinstance(tc, dict) and tc.get("id"):
                 known_ids.add(tc["id"])
     return [
-        msg for msg in sanitized
-        if not (getattr(msg, "tool_call_id", None) is not None
-                and getattr(msg, "tool_call_id") not in known_ids)
+        msg
+        for msg in sanitized
+        if not (
+            getattr(msg, "tool_call_id", None) is not None
+            and getattr(msg, "tool_call_id") not in known_ids
+        )
     ]
 
 

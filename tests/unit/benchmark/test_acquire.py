@@ -74,13 +74,15 @@ class AcquireTest(unittest.TestCase):
             stream_calls.append((method, url))
             return _Response(content=content)
 
-        with tempfile.TemporaryDirectory() as tmp, \
-                patch.object(acquire.httpx, "get", return_value=_Response(payload=meta)), \
-                patch.object(acquire.httpx, "stream", side_effect=fake_stream):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+            acquire.httpx, "get", return_value=_Response(payload=meta)
+        ), patch.object(acquire.httpx, "stream", side_effect=fake_stream):
             result = acquire.run(config, tmp)
             root = Path(tmp)
 
-            self.assertEqual(stream_calls, [("GET", "https://example.test/ait_ads.zip")])
+            self.assertEqual(
+                stream_calls, [("GET", "https://example.test/ait_ads.zip")]
+            )
             self.assertIn("ait_ads.zip", result["ait-ads"])
             self.assertTrue((root / "ait_ads.zip").exists())
             self.assertTrue((root / "fox_wazuh.json").exists())

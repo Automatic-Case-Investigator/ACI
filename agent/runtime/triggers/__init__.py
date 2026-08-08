@@ -1,5 +1,11 @@
 """Workflow trigger seam. Import `registry` to access registered bindings."""
-from .base import EVENT_NEW_ALERT, EVENT_NEW_CASE, Trigger, WorkflowBinding  # noqa: F401
+
+from .base import (
+    EVENT_NEW_ALERT,
+    EVENT_NEW_CASE,
+    Trigger,
+    WorkflowBinding,
+)  # noqa: F401
 from .registry import get_binding, list_bindings, register  # noqa: F401
 
 
@@ -26,5 +32,8 @@ def fire(trigger: Trigger):
         trigger.case_id,
         question,
         trigger=AgentRun.TRIGGER_AUTO,
-        metadata={"workflow_event": trigger.event_type, "workflow_payload": trigger.payload},
+        metadata={
+            "workflow_event": trigger.event_type,
+            "workflow_payload": trigger.payload,
+        },
     )

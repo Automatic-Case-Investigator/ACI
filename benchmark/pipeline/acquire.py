@@ -4,6 +4,7 @@ Driven by config/datasets.yaml. For a Zenodo dataset, the API lists the files an
 their md5 checksums, so download is checksum-verified and idempotent. The benchmark
 uses the single `ait_ads.zip` archive from Zenodo rather than per-scenario zips.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -36,7 +37,11 @@ def _extract_zip(path: Path, dest: Path, strip_prefix: str = "") -> list[str]:
                 parts = member.parts
                 if parts and parts[0] == prefix:
                     member = Path(*parts[1:])
-            if not member.parts or any(part in {"", ".."} for part in member.parts) or member.is_absolute():
+            if (
+                not member.parts
+                or any(part in {"", ".."} for part in member.parts)
+                or member.is_absolute()
+            ):
                 continue
             out = dest / member
             out.parent.mkdir(parents=True, exist_ok=True)
@@ -46,17 +51,28 @@ def _extract_zip(path: Path, dest: Path, strip_prefix: str = "") -> list[str]:
     return extracted
 
 
-def _download_zenodo(record: str, dest: Path, files: list[str] | None = None,
-                     extract: bool = False, strip_prefix: str = "") -> list[str]:
+def _download_zenodo(
+    record: str,
+    dest: Path,
+    files: list[str] | None = None,
+    extract: bool = False,
+    strip_prefix: str = "",
+) -> list[str]:
     dest.mkdir(parents=True, exist_ok=True)
-    meta = httpx.get(_ZENODO_API.format(record=record), timeout=60).raise_for_status().json()
+    meta = (
+        httpx.get(_ZENODO_API.format(record=record), timeout=60)
+        .raise_for_status()
+        .json()
+    )
     fetched: list[str] = []
     wanted = set(files or [])
     for entry in meta.get("files", []):
         name = entry.get("key") or entry.get("filename")
         if wanted and name not in wanted:
             continue
-        url = entry.get("links", {}).get("self") or entry.get("links", {}).get("download")
+        url = entry.get("links", {}).get("self") or entry.get("links", {}).get(
+            "download"
+        )
         want = (entry.get("checksum") or "").removeprefix("md5:")
         out = dest / name
         if out.exists() and want and _md5(out) == want:
@@ -77,7 +93,9 @@ def _download_zenodo(record: str, dest: Path, files: list[str] | None = None,
         found = {item.split(" ", 1)[0] for item in fetched}
         missing = sorted(wanted - found)
         if missing:
-            raise RuntimeError(f"Zenodo record {record} missing expected file(s): {missing}")
+            raise RuntimeError(
+                f"Zenodo record {record} missing expected file(s): {missing}"
+            )
     return fetched
 
 
@@ -95,5 +113,7 @@ def run(datasets_config: dict, dest: str | Path) -> dict:
                 strip_prefix=str(cfg.get("strip_prefix", "")),
             )
         else:
-            raise NotImplementedError(f"dataset {name!r}: only zenodo sources are supported")
+            raise NotImplementedError(
+                f"dataset {name!r}: only zenodo sources are supported"
+            )
     return out

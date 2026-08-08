@@ -1,9 +1,12 @@
 """Check session state and send 'yes' to test investigation routing."""
+
 import sys, os
+
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.path.insert(0, ".")
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
 import django
+
 django.setup()
 from agent.models import AgentRun, AgentEvent
 import requests

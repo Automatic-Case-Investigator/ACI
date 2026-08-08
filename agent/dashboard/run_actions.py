@@ -12,6 +12,7 @@ A run is stopped/deleted differently depending on what kind it is:
 the index-page session delete) don't have to special-case it. This lives in its own
 module to avoid a circular import between `runner.py` and `views.py`.
 """
+
 from __future__ import annotations
 
 from agent.models import AgentEvent, AgentRun, FeedbackEntry
@@ -42,7 +43,9 @@ def humanize_age(seconds: int) -> str:
 def is_orchestrator_session(run: AgentRun) -> bool:
     """True for an interactive live session (the chatbox), whose id is its own
     session_id and whose lifecycle is owned by `runner.py`."""
-    return run.agent_name == "orchestrator" and run.trigger == AgentRun.TRIGGER_INTERACTIVE
+    return (
+        run.agent_name == "orchestrator" and run.trigger == AgentRun.TRIGGER_INTERACTIVE
+    )
 
 
 def is_orphaned_interactive_child(run: AgentRun) -> bool:
@@ -72,6 +75,7 @@ def is_inferring(run: AgentRun) -> bool:
     """
     if is_orchestrator_session(run):
         from .runner import is_processing
+
         return is_processing(str(run.id))
     return run.status == AgentRun.STATUS_RUNNING
 
@@ -96,6 +100,7 @@ def stop_run(run: AgentRun) -> None:
     if is_orchestrator_session(run):
         # Local import: runner.py imports this module transitively via views.
         from .runner import stop_session
+
         stop_session(str(run.id))
 
     if run.status in ACTIVE_STATES:

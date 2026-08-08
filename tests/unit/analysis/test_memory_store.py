@@ -8,6 +8,7 @@ unique markers so it never collides with real data.
 Run from project root with:
     python .claude/skills/run-aci-backend/tests/test_memory_store.py -v
 """
+
 from __future__ import annotations
 
 import os
@@ -16,12 +17,15 @@ import unittest
 from datetime import timedelta
 
 # Navigate from .claude/skills/run-aci-backend/tests/ up to project root (4 levels)
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, project_root)
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
 os.environ.setdefault("SECRET_KEY", "test")
 
 import django
+
 django.setup()
 
 from django.conf import settings
@@ -115,8 +119,11 @@ class TestMemoryStore(unittest.TestCase):
         self.assertNotIn(MARK + "cron_backup_fp", names)
 
     def test_search_patterns_parses_json_fields(self):
-        pat = next(p for p in store.search_patterns(verdict="fp")
-                   if p["name"] == MARK + "cron_backup_fp")
+        pat = next(
+            p
+            for p in store.search_patterns(verdict="fp")
+            if p["name"] == MARK + "cron_backup_fp"
+        )
         self.assertEqual(pat["conditions"]["users"], ["backup"])
         self.assertEqual(pat["required_evidence"], ["matching user"])
         self.assertEqual(pat["invalidators"], ["external source IP"])

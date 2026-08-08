@@ -6,10 +6,9 @@ from typing import Optional
 from typing_extensions import TypedDict
 
 
-
-
 class AgentState(TypedDict):
     """Canonical mutable state consumed and returned by graph nodes."""
+
     run_id: str
     case_id: str
     source_entity_id: str
@@ -30,13 +29,27 @@ class AgentState(TypedDict):
     ctx_tokens: int  # input tokens from the most recent model call
     verdict: Optional[dict]  # structured diagnosis contract parsed at finish
     pivot_tasks_created: int  # follow-up tasks the pivot node has auto-created
-    task_call_floor: int  # tool_calls_made snapshot at claim time — bounds per-task call budget
+    task_call_floor: (
+        int  # tool_calls_made snapshot at claim time — bounds per-task call budget
+    )
     escalation_posted: bool  # True once an in-band escalation comment has been posted
-    last_findings_verification: Optional[dict]  # self-review verdicts on the current task's ## Findings (reused by pivot for board gating)
-    last_confirmed_findings: list  # durable confirmed findings from the just-completed task ledger
+    last_findings_verification: Optional[
+        dict
+    ]  # self-review verdicts on the current task's ## Findings (reused by pivot for board gating)
+    last_confirmed_findings: (
+        list  # durable confirmed findings from the just-completed task ledger
+    )
     completed_task_titles: list  # [{title, summary}] for each finished task — used by lead validator to block re-investigation
-    task_ledger: Optional[dict]  # durable per-task metacognition/evidence state updated after each observation
-    last_observation: Optional[dict]  # normalized summary of the most recent tool-observation batch
-    observation_retries: int  # consecutive observation cycles with no meaningful new evidence
+    task_ledger: Optional[
+        dict
+    ]  # durable per-task metacognition/evidence state updated after each observation
+    last_observation: Optional[
+        dict
+    ]  # normalized summary of the most recent tool-observation batch
+    observation_retries: (
+        int  # consecutive observation cycles with no meaningful new evidence
+    )
     no_progress_cycles: int  # consecutive interpret cycles with no NEW confirmed finding (convergence brake)
-    tool_result_cache: Optional[dict]  # run-local exact-argument cache for deterministic read tools
+    tool_result_cache: Optional[
+        dict
+    ]  # run-local exact-argument cache for deterministic read tools

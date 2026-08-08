@@ -24,6 +24,7 @@ The contract:
       "recommended_action": ""
     }
 """
+
 from __future__ import annotations
 
 import json
@@ -45,12 +46,14 @@ VERDICT_LABELS = {
 VALID_CONFIDENCE = frozenset({"low", "medium", "high"})
 VALID_IMPACT_STATE = frozenset({"active", "contained", "unknown"})
 VALID_SCOPE_STATE = frozenset({"isolated", "lateral_spread", "unknown"})
-VALID_CLASSIFICATION_BASIS = frozenset({
-    "malicious_evidence",
-    "benign_evidence",
-    "insufficient_evidence",
-    "conflicting_evidence",
-})
+VALID_CLASSIFICATION_BASIS = frozenset(
+    {
+        "malicious_evidence",
+        "benign_evidence",
+        "insufficient_evidence",
+        "conflicting_evidence",
+    }
+)
 
 # Verdicts that must be backed by cited evidence. `inconclusive` and
 # `needs_investigation` are honest "not enough" states and need no citation.
@@ -172,7 +175,11 @@ def _coerce(raw: dict) -> dict:
         out[field] = _list_value(raw, field)
     # Backward compatibility: older agents only emitted `missing_evidence`.
     # Classify those gaps without letting a mere count of open leads change TP/FP.
-    if out["missing_evidence"] and "blocking_gaps" not in raw and "nonblocking_gaps" not in raw:
+    if (
+        out["missing_evidence"]
+        and "blocking_gaps" not in raw
+        and "nonblocking_gaps" not in raw
+    ):
         out["blocking_gaps"] = [
             g for g in out["missing_evidence"] if _BLOCKING_GAP_RE.search(str(g))
         ]
@@ -233,9 +240,7 @@ def validate_verdict(v: dict) -> list[str]:
         )
 
     if verdict in _CITATION_REQUIRED and not v.get("supporting_evidence"):
-        problems.append(
-            f"{verdict!r} verdict requires non-empty supporting_evidence"
-        )
+        problems.append(f"{verdict!r} verdict requires non-empty supporting_evidence")
 
     basis = v.get("classification_basis")
     if basis and basis not in VALID_CLASSIFICATION_BASIS:
@@ -278,7 +283,9 @@ def normalize_followup_gaps(v: dict) -> dict:
     if verdict not in ("tp", "fp"):
         return v
     expected_basis = "malicious_evidence" if verdict == "tp" else "benign_evidence"
-    if v.get("classification_basis") != expected_basis or not v.get("supporting_evidence"):
+    if v.get("classification_basis") != expected_basis or not v.get(
+        "supporting_evidence"
+    ):
         return v
 
     blocking = list(v.get("blocking_gaps") or [])
@@ -373,7 +380,8 @@ def apply_completeness_floor(
     floored["verdict"] = "needs_investigation"
     note = (
         f"Original verdict {verdict.upper()} floored to NEEDS_INVESTIGATION: "
-        + "; ".join(reasons) + "."
+        + "; ".join(reasons)
+        + "."
     )
     floored["reassessment_reason"] = note
     action = floored.get("recommended_action") or ""
@@ -395,7 +403,8 @@ def apply_open_gaps_policy(v: dict, *, strict: bool = True) -> tuple[dict, bool]
     expected_basis = "malicious_evidence" if verdict == "tp" else "benign_evidence"
     explicit_blocking = list(v.get("blocking_gaps") or [])
     legacy_blocking = [
-        g for g in (v.get("missing_evidence") or [])
+        g
+        for g in (v.get("missing_evidence") or [])
         if _BLOCKING_GAP_RE.search(str(g)) and g not in explicit_blocking
     ]
     blocking_gaps = explicit_blocking + legacy_blocking
@@ -471,7 +480,9 @@ _BENIGN_JUSTIFICATION_RE = re.compile(
 
 def _verdict_text(v: dict) -> str:
     """Flatten the verdict fields that describe what was matched/observed."""
-    parts = list(v.get("matched_patterns") or []) + list(v.get("supporting_evidence") or [])
+    parts = list(v.get("matched_patterns") or []) + list(
+        v.get("supporting_evidence") or []
+    )
     parts.append(str(v.get("recommended_action") or ""))
     return " ".join(str(p) for p in parts)
 
@@ -496,12 +507,12 @@ def classify_fp_gaps(v: dict) -> tuple[dict, bool]:
     blocking = list(v.get("blocking_gaps") or [])
     keep_nonblocking: list = []
     promoted: list = []
-    for gap in (v.get("nonblocking_gaps") or []):
+    for gap in v.get("nonblocking_gaps") or []:
         if _OFFENSIVE_DOWNSTREAM_GAP_RE.search(str(gap)):
             promoted.append(gap)
         else:
             keep_nonblocking.append(gap)
-    for gap in (v.get("missing_evidence") or []):
+    for gap in v.get("missing_evidence") or []:
         if _OFFENSIVE_DOWNSTREAM_GAP_RE.search(str(gap)) and gap not in promoted:
             promoted.append(gap)
     promoted = [g for g in promoted if g not in blocking]
@@ -513,7 +524,9 @@ def classify_fp_gaps(v: dict) -> tuple[dict, bool]:
     return out, True
 
 
-def apply_success_verification_floor(v: dict, *, offensive_alert: bool) -> tuple[dict, bool]:
+def apply_success_verification_floor(
+    v: dict, *, offensive_alert: bool
+) -> tuple[dict, bool]:
     """Floor a benign close of an OFFENSIVE alert that never ruled out success.
 
     An ``fp`` on a scan/recon/brute/exploit alert must rest on positive benign evidence
@@ -586,7 +599,9 @@ def apply_agent_scope_floor(v: dict, agent_name: str) -> tuple[dict, bool]:
     # An unresolved triage is by definition missing the evidence that would resolve
     # it — surface that as a blocking gap so the response policy sees an open item.
     if not out.get("blocking_gaps"):
-        out["blocking_gaps"] = ["Triage could not determine a disposition from the evidence retrieved"]
+        out["blocking_gaps"] = [
+            "Triage could not determine a disposition from the evidence retrieved"
+        ]
     return out, True
 
 
@@ -623,64 +638,84 @@ def apply_verdict_integrity(
 
     verdict, demoted = apply_citation_policy(verdict)
     if demoted:
-        notes.append((
-            "note",
-            f"verdict {verdict.get('demoted_from', '').upper()} demoted to "
-            "INCONCLUSIVE — no supporting evidence cited",
-        ))
+        notes.append(
+            (
+                "note",
+                f"verdict {verdict.get('demoted_from', '').upper()} demoted to "
+                "INCONCLUSIVE — no supporting evidence cited",
+            )
+        )
 
     if classify_gaps:
         current = verdict.get("verdict")
         if current == "tp":
             normalized = normalize_followup_gaps(verdict)
-            if (
-                normalized is not verdict
-                and normalized.get("blocking_gaps") != verdict.get("blocking_gaps")
-            ):
-                notes.append(("note", "verdict contract: moved follow-up gaps to nonblocking_gaps"))
+            if normalized is not verdict and normalized.get(
+                "blocking_gaps"
+            ) != verdict.get("blocking_gaps"):
+                notes.append(
+                    (
+                        "note",
+                        "verdict contract: moved follow-up gaps to nonblocking_gaps",
+                    )
+                )
             verdict = normalized
         elif current == "fp":
             verdict, promoted = classify_fp_gaps(verdict)
             if promoted:
-                notes.append((
-                    "note",
-                    "verdict contract: promoted overturning gaps (unconfirmed success / "
-                    "lateral / execution) to blocking_gaps for FP",
-                ))
+                notes.append(
+                    (
+                        "note",
+                        "verdict contract: promoted overturning gaps (unconfirmed success / "
+                        "lateral / execution) to blocking_gaps for FP",
+                    )
+                )
 
     verdict, demoted = apply_open_gaps_policy(verdict, strict=strict)
     if demoted:
-        reason = "blocking gaps" if verdict.get("blocking_gaps") else "classification basis"
-        notes.append((
-            "note",
-            f"verdict {verdict.get('demoted_from', '').upper()} demoted to "
-            f"NEEDS_INVESTIGATION — {reason}",
-        ))
+        reason = (
+            "blocking gaps" if verdict.get("blocking_gaps") else "classification basis"
+        )
+        notes.append(
+            (
+                "note",
+                f"verdict {verdict.get('demoted_from', '').upper()} demoted to "
+                f"NEEDS_INVESTIGATION — {reason}",
+            )
+        )
 
-    verdict, floored = apply_success_verification_floor(verdict, offensive_alert=offensive_alert)
+    verdict, floored = apply_success_verification_floor(
+        verdict, offensive_alert=offensive_alert
+    )
     if floored:
-        notes.append((
-            "note",
-            f"verdict {verdict.get('demoted_from', '').upper()} floored to "
-            "NEEDS_INVESTIGATION — offensive alert closed benign without a success check",
-        ))
+        notes.append(
+            (
+                "note",
+                f"verdict {verdict.get('demoted_from', '').upper()} floored to "
+                "NEEDS_INVESTIGATION — offensive alert closed benign without a success check",
+            )
+        )
 
     verdict, floored = apply_completeness_floor(
         verdict, escalation_posted=escalation_posted, over_budget=over_budget
     )
     if floored:
-        notes.append((
-            "note",
-            f"verdict {verdict.get('demoted_from', '').upper()} floored to "
-            f"NEEDS_INVESTIGATION — {verdict.get('reassessment_reason', '')[:160]}",
-        ))
+        notes.append(
+            (
+                "note",
+                f"verdict {verdict.get('demoted_from', '').upper()} floored to "
+                f"NEEDS_INVESTIGATION — {verdict.get('reassessment_reason', '')[:160]}",
+            )
+        )
 
     verdict, rescoped = apply_agent_scope_floor(verdict, agent_name)
     if rescoped:
-        notes.append((
-            "note",
-            f"verdict {verdict.get('demoted_from', '').upper()} rescoped to "
-            f"NEEDS_INVESTIGATION — not a terminal verdict for {agent_name}",
-        ))
+        notes.append(
+            (
+                "note",
+                f"verdict {verdict.get('demoted_from', '').upper()} rescoped to "
+                f"NEEDS_INVESTIGATION — not a terminal verdict for {agent_name}",
+            )
+        )
 
     return verdict, notes

@@ -8,6 +8,7 @@ that mutate, drop a `messages` entry, and redirect back to the current segment.
 Child specialist runs of a live session (those with `metadata.session_id`) are hidden
 here — they're reachable inside the session's chatbox.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -76,13 +77,16 @@ def _has_investigation_child(session_id: str) -> bool:
     except Exception:
         return any(
             (r.metadata or {}).get("session_id") == str(session_id)
-            for r in AgentRun.objects.filter(agent_name="investigation").order_by("-updated_at")[:200]
+            for r in AgentRun.objects.filter(agent_name="investigation").order_by(
+                "-updated_at"
+            )[:200]
         )
 
 
 def review_rows(limit: int = 5) -> list[dict]:
     runs = [
-        r for r in AgentRun.objects.order_by("-updated_at")[:_SCAN_LIMIT]
+        r
+        for r in AgentRun.objects.order_by("-updated_at")[:_SCAN_LIMIT]
         if is_reviewable_workflow(r)
     ][:limit]
     now = datetime.now(timezone.utc)
@@ -92,7 +96,11 @@ def review_rows(limit: int = 5) -> list[dict]:
             "agent_name": r.agent_name,
             "case_id": r.case_id,
             "question": r.question,
-            "confidence": (r.verdict or {}).get("confidence") if isinstance(r.verdict, dict) else "",
+            "confidence": (
+                (r.verdict or {}).get("confidence")
+                if isinstance(r.verdict, dict)
+                else ""
+            ),
             "age": _humanize_age(int((now - r.created_at).total_seconds())),
             "review_url": reverse("dashboard:run_review", args=[r.id]),
         }
@@ -111,9 +119,16 @@ def _is_child_run(run: AgentRun) -> bool:
 
 def _matches_query(run: AgentRun, ql: str) -> bool:
     verdict = run.verdict.get("verdict", "") if isinstance(run.verdict, dict) else ""
-    return any(ql in field.lower() for field in (
-        str(run.id), run.case_id or "", run.agent_name or "", run.question or "", verdict,
-    ))
+    return any(
+        ql in field.lower()
+        for field in (
+            str(run.id),
+            run.case_id or "",
+            run.agent_name or "",
+            run.question or "",
+            verdict,
+        )
+    )
 
 
 def _visible_runs(seg: str, query: str = "", verdict: str = "") -> list[AgentRun]:
@@ -122,7 +137,8 @@ def _visible_runs(seg: str, query: str = "", verdict: str = "") -> list[AgentRun
     set are always identical. 'Active' / 'completed' are split by live inference, not
     raw status: an idle session reads as completed."""
     runs = [
-        r for r in AgentRun.objects.order_by("-updated_at")[:_SCAN_LIMIT]
+        r
+        for r in AgentRun.objects.order_by("-updated_at")[:_SCAN_LIMIT]
         if not _is_child_run(r)
     ]
     if seg == "live":
@@ -135,6 +151,7 @@ def _visible_runs(seg: str, query: str = "", verdict: str = "") -> list[AgentRun
         runs = [r for r in runs if not is_inferring(r)]
     if verdict in _VALID_VERDICTS:
         from agent.stats import _build_feedback_map, _verdict_of
+
         fmap = _build_feedback_map([str(r.id) for r in runs])
         runs = [r for r in runs if _verdict_of(r, fmap) == verdict]
     if query:
@@ -164,27 +181,35 @@ def _run_rows(seg: str, query: str = "", verdict: str = "") -> list[dict]:
             type_label = "Workflow"
         else:
             type_label = r.trigger.title() if r.trigger else "Run"
-        rows.append({
-            "id": str(r.id),
-            "is_live": is_live,
-            "type_label": type_label,
-            "agent_name": r.agent_name,
-            "case_id": r.case_id,
-            "question": r.question,
-            "status": display_status(r),
-            "is_inferring": is_inferring(r),
-            "verdict": _verdict_of(r, feedback_map),
-            "recommended_action": verdict_contract.get("recommended_action") or "",
-            "response_label": _RESPONSE_LABEL.get(action, action),
-            "execution_error": decision.get("execution_error") or "",
-            "age": _humanize_age(int((now - r.created_at).total_seconds())),
-            "open_url": reverse("dashboard:session", args=[r.id]) if is_live else reverse("dashboard:run_detail", args=[r.id]),
-            "open_tip": "Open chatbox" if is_live else "Open run",
-            "can_review": can_review,
-            "review_url": reverse("dashboard:run_review", args=[r.id]) if can_review else None,
-            "can_restart": can_restart_from_prior_run(r),
-            "restart_url": reverse("dashboard:run_restart", args=[r.id]),
-        })
+        rows.append(
+            {
+                "id": str(r.id),
+                "is_live": is_live,
+                "type_label": type_label,
+                "agent_name": r.agent_name,
+                "case_id": r.case_id,
+                "question": r.question,
+                "status": display_status(r),
+                "is_inferring": is_inferring(r),
+                "verdict": _verdict_of(r, feedback_map),
+                "recommended_action": verdict_contract.get("recommended_action") or "",
+                "response_label": _RESPONSE_LABEL.get(action, action),
+                "execution_error": decision.get("execution_error") or "",
+                "age": _humanize_age(int((now - r.created_at).total_seconds())),
+                "open_url": (
+                    reverse("dashboard:session", args=[r.id])
+                    if is_live
+                    else reverse("dashboard:run_detail", args=[r.id])
+                ),
+                "open_tip": "Open chatbox" if is_live else "Open run",
+                "can_review": can_review,
+                "review_url": (
+                    reverse("dashboard:run_review", args=[r.id]) if can_review else None
+                ),
+                "can_restart": can_restart_from_prior_run(r),
+                "restart_url": reverse("dashboard:run_restart", args=[r.id]),
+            }
+        )
     return rows
 
 
@@ -216,43 +241,59 @@ def runs_view(request):
     f = _filters_from(request.GET)
     rows = _run_rows(f["seg"], f["query"], f["verdict"])
     rows_page = Paginator(rows, _RUNS_PER_PAGE).get_page(request.GET.get("p"))
-    return render(request, "dashboard/runs.html", {
-        "rows_page": rows_page,
-        "segment": f["seg"],
-        "segments": SEGMENTS,
-        "query": f["query"],
-        "verdict": f["verdict"],
-        "subtitle": "Runs",
-    })
+    return render(
+        request,
+        "dashboard/runs.html",
+        {
+            "rows_page": rows_page,
+            "segment": f["seg"],
+            "segments": SEGMENTS,
+            "query": f["query"],
+            "verdict": f["verdict"],
+            "subtitle": "Runs",
+        },
+    )
 
 
 def run_detail(request, run_id):
     run = get_object_or_404(AgentRun, id=str(run_id))
     events = list(AgentEvent.objects.filter(session_id=str(run.id)).order_by("id"))
-    return render(request, "dashboard/run_detail.html", {
-        "run": run,
-        "events": events,
-        "subtitle": "Run",
-    })
+    return render(
+        request,
+        "dashboard/run_detail.html",
+        {
+            "run": run,
+            "events": events,
+            "subtitle": "Run",
+        },
+    )
 
 
 def run_review(request, run_id):
     run = get_object_or_404(AgentRun, id=str(run_id))
     verdict = run.verdict if isinstance(run.verdict, dict) else {}
     decision = read_decision(run)
-    existing_session_id = ((run.metadata or {}).get("review") or {}).get("investigation_session_id")
+    existing_session_id = ((run.metadata or {}).get("review") or {}).get(
+        "investigation_session_id"
+    )
     existing_session = None
     if existing_session_id:
-        existing = AgentRun.objects.filter(id=existing_session_id, agent_name="orchestrator").first()
+        existing = AgentRun.objects.filter(
+            id=existing_session_id, agent_name="orchestrator"
+        ).first()
         if existing is not None and _has_investigation_child(str(existing.id)):
             existing_session = existing
-    return render(request, "dashboard/run_review.html", {
-        "run": run,
-        "verdict": verdict,
-        "response": decision,
-        "can_investigate": is_reviewable_workflow(run),
-        "existing_session": existing_session,
-    })
+    return render(
+        request,
+        "dashboard/run_review.html",
+        {
+            "run": run,
+            "verdict": verdict,
+            "response": decision,
+            "can_investigate": is_reviewable_workflow(run),
+            "existing_session": existing_session,
+        },
+    )
 
 
 @csrf_exempt
@@ -263,13 +304,17 @@ def run_investigate(request, run_id):
         messages.error(request, "Workflow run not found.")
         return redirect("dashboard:runs")
     if not is_reviewable_workflow(run):
-        messages.error(request, "This workflow is not waiting for investigation review.")
+        messages.error(
+            request, "This workflow is not waiting for investigation review."
+        )
         return redirect("dashboard:run_review", run_id=run.id)
 
     review = dict((run.metadata or {}).get("review") or {})
     existing_session_id = review.get("investigation_session_id")
     if existing_session_id:
-        existing = AgentRun.objects.filter(id=existing_session_id, agent_name="orchestrator").first()
+        existing = AgentRun.objects.filter(
+            id=existing_session_id, agent_name="orchestrator"
+        ).first()
         if existing is not None and _has_investigation_child(str(existing.id)):
             return redirect("dashboard:session", session_id=existing.id)
 
@@ -279,7 +324,9 @@ def run_investigate(request, run_id):
     meta["review"] = review
     run.metadata = meta
     run.save(update_fields=["metadata", "updated_at"])
-    messages.success(request, "Investigation session started from the approved triage report.")
+    messages.success(
+        request, "Investigation session started from the approved triage report."
+    )
     return redirect("dashboard:session", session_id=session_id)
 
 
@@ -291,7 +338,10 @@ def run_restart(request, run_id):
         messages.error(request, "Run not found.")
         return redirect("dashboard:runs")
     if not can_restart_from_prior_run(source):
-        messages.error(request, "Only budget-exhausted triage and investigation runs can be restarted.")
+        messages.error(
+            request,
+            "Only budget-exhausted triage and investigation runs can be restarted.",
+        )
         return _redirect_back(request)
     try:
         new_run = restart_from_prior_run(source)

@@ -132,13 +132,10 @@ async def _model_config() -> dict:
         "base_url": row.base_url or defaults["base_url"],
         "api_key": row.api_key or defaults["api_key"],
         "model": row.model or defaults["model"],
-        "tool_calling_mode": row.tool_calling_mode
-        or defaults["tool_calling_mode"],
+        "tool_calling_mode": row.tool_calling_mode or defaults["tool_calling_mode"],
         "timeout": row.timeout,
-        "context_length": row.context_length
-        or defaults["context_length"],
-        "retry_policy": row.retry_policy
-        or defaults["retry_policy"],
+        "context_length": row.context_length or defaults["context_length"],
+        "retry_policy": row.retry_policy or defaults["retry_policy"],
         "sampling_params": {
             **defaults["sampling_params"],
             **(row.sampling_params or {}),

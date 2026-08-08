@@ -2,15 +2,19 @@ from __future__ import annotations
 
 import re
 
-
 # Pivot-scoring ladders — how strongly a candidate pivot is preferred, ranked by the
 # provenance of the evidence that produced it (`source`), the analytic role it plays
 # (`role`), and its stated confidence. Shared by the interpret pivot selector
 # (`interpretation`) and the observation deduper (`observation`) so the two never drift.
-_PIVOT_SOURCE_SCORE = {"case": 1, "alert_aggregate": 2, "board_inference": 2, "raw_event": 4, "decoded_payload": 5}
+_PIVOT_SOURCE_SCORE = {
+    "case": 1,
+    "alert_aggregate": 2,
+    "board_inference": 2,
+    "raw_event": 4,
+    "decoded_payload": 5,
+}
 _PIVOT_ROLE_SCORE = {"hypothesis": 1, "exemplar": 1, "anchor": 2, "discriminator": 4}
 _PIVOT_CONF_SCORE = {"low": 1, "medium": 2, "high": 3}
-
 
 
 def _extract_report_section(text: str, heading: str) -> str:
@@ -20,7 +24,7 @@ def _extract_report_section(text: str, heading: str) -> str:
         re.IGNORECASE | re.MULTILINE | re.DOTALL,
     )
     match = pattern.search(text or "")
-    return (match.group(1).strip() if match else "")
+    return match.group(1).strip() if match else ""
 
 
 def _section_has_concrete_items(body: str) -> bool:
@@ -61,9 +65,9 @@ _SECTION_HEADER_RE = re.compile(
 
 def _section_body(text: str, match: re.Match) -> str:
     """Return the body after a markdown section header until the next section."""
-    rest = (text or "")[match.end():]
+    rest = (text or "")[match.end() :]
     next_header = _SECTION_HEADER_RE.search(rest)
-    return rest[:next_header.start()] if next_header else rest
+    return rest[: next_header.start()] if next_header else rest
 
 
 # The three sections every investigation per-task report must contain. The
@@ -115,9 +119,9 @@ def _missing_summary_sections(report: str) -> list[str]:
         if not match:
             missing.append(name)
             continue
-        rest = text[match.end():]
+        rest = text[match.end() :]
         next_header = _NEXT_HEADER_RE.search(rest)
-        body = rest[:next_header.start()] if next_header else rest
+        body = rest[: next_header.start()] if next_header else rest
         if not _FACT_BULLET_RE.search(body):
             missing.append(name)
     return missing
@@ -137,9 +141,9 @@ def _missing_triage_sections(report: str) -> list[str]:
         if not match:
             missing.append(name)
             continue
-        rest = text[match.end():]
+        rest = text[match.end() :]
         next_header = _NEXT_HEADER_RE.search(rest)
-        body = rest[:next_header.start()] if next_header else rest
+        body = rest[: next_header.start()] if next_header else rest
         if name == "Triage Summary":
             if not _section_has_concrete_items(body):
                 missing.append(name)
@@ -148,18 +152,27 @@ def _missing_triage_sections(report: str) -> list[str]:
                 missing.append(name)
     return missing
 
+
 # Regex to parse a bullet like "- Crontab modified at ... (event ...)."
 # Grabs everything after the leading "- ".
 _FACT_BULLET_RE = re.compile(r"^\s*-\s+(.+)$", re.MULTILINE)
 
 # Placeholder bullets the model emits when a section has no content. Recording
 # these as facts/hypotheses is noise, so both paths skip them.
-_NONE_BULLETS = frozenset({
-    "none", "none.", "none confirmed", "none confirmed.",
-    "no facts confirmed", "no facts confirmed.",
-    "no open hypotheses", "no open hypotheses.",
-    "no new leads", "no new leads.",
-})
+_NONE_BULLETS = frozenset(
+    {
+        "none",
+        "none.",
+        "none confirmed",
+        "none confirmed.",
+        "no facts confirmed",
+        "no facts confirmed.",
+        "no open hypotheses",
+        "no open hypotheses.",
+        "no new leads",
+        "no new leads.",
+    }
+)
 
 # Placeholder "nothing found" bullets the model emits in many phrasings
 # ("None confirmed in this task.", "No confirmed findings", "N/A", ...). These
@@ -167,8 +180,14 @@ _NONE_BULLETS = frozenset({
 # report's Key Findings / Confirmed Facts / Hypotheses lists, so they must be
 # dropped there. Match on a normalized prefix so variants are all caught.
 _NONE_PREFIXES = (
-    "none confirmed", "no facts confirmed", "no confirmed", "no open hypotheses",
-    "no new leads", "no open leads", "no hypotheses", "no findings",
+    "none confirmed",
+    "no facts confirmed",
+    "no confirmed",
+    "no open hypotheses",
+    "no new leads",
+    "no open leads",
+    "no hypotheses",
+    "no findings",
 )
 
 
@@ -189,7 +208,11 @@ def _is_provenance_only(content: str) -> bool:
     so real but terse facts are never dropped.
     """
     key = _normalize_fact_key(content)
-    words = [w for w in re.findall(r"[a-z0-9]+", key) if w not in {"event", "id", "ids", "alert", "at"}]
+    words = [
+        w
+        for w in re.findall(r"[a-z0-9]+", key)
+        if w not in {"event", "id", "ids", "alert", "at"}
+    ]
     return len(words) <= 1
 
 
@@ -221,6 +244,7 @@ def _fact_dedup_key(content: str) -> str:
     if ids:
         return "ids:" + ",".join(sorted(ids))
     return _normalize_fact_key(content)
+
 
 # Markers the model prepends to a restated hypothesis, in any combination/order:
 #   bold/emphasis (`**`/`__`), an entry id the board context showed it
@@ -255,16 +279,33 @@ _ISO_TS_RE = re.compile(
 # "2025‑04‑20 03:41:00" has a narrow no-break space the `[T ]` class misses.
 _CHAR_TRANSLATION = {ord(c): "-" for c in "‐‑‒–—―−"}
 _CHAR_TRANSLATION.update(
-    {cp: " " for cp in (
-        0x00A0, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008,
-        0x2009, 0x200A, 0x202F, 0x205F, 0x2060, 0xFEFF,
-    )}
+    {
+        cp: " "
+        for cp in (
+            0x00A0,
+            0x2002,
+            0x2003,
+            0x2004,
+            0x2005,
+            0x2006,
+            0x2007,
+            0x2008,
+            0x2009,
+            0x200A,
+            0x202F,
+            0x205F,
+            0x2060,
+            0xFEFF,
+        )
+    }
 )
 
 
 def _ascii_dashes(text: str) -> str:
     """Fold Unicode dashes/exotic spaces to ASCII so date/id regexes match."""
     return (text or "").translate(_CHAR_TRANSLATION)
+
+
 # A "fact" that is just a list of event ids is provenance, not a finding.
 _EVENT_ID_DUMP_RE = re.compile(r"^\s*event\s+ids?\s*[:\-]", re.IGNORECASE)
 _IP_LITERAL_RE = re.compile(
@@ -274,14 +315,21 @@ _DOMAIN_LITERAL_RE = re.compile(
     r"\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}\b",
     re.IGNORECASE,
 )
-_HASH_LITERAL_RE = re.compile(r"\b(?:[a-fA-F0-9]{32}|[a-fA-F0-9]{40}|[a-fA-F0-9]{64})\b")
-_PATH_LITERAL_RE = re.compile(r"(?:~?/[\w.+@=-]+(?:/[\w.+@=-]+)+|~/[\w.+@=-]+(?:/[\w.+@=-]+)*)")
+_HASH_LITERAL_RE = re.compile(
+    r"\b(?:[a-fA-F0-9]{32}|[a-fA-F0-9]{40}|[a-fA-F0-9]{64})\b"
+)
+_PATH_LITERAL_RE = re.compile(
+    r"(?:~?/[\w.+@=-]+(?:/[\w.+@=-]+)+|~/[\w.+@=-]+(?:/[\w.+@=-]+)*)"
+)
 _JSON_EVENT_ID_RE = re.compile(
     r"""["'](?:_id|event[._]?id|event_id)["']\s*:\s*["']([^"']{6,})["']""",
     re.IGNORECASE,
 )
 _COMMAND_LITERAL_PATTERNS = (
-    ("reverse-shell", re.compile(r"(/dev/tcp/|bash\s+-i|sh\s+-i|nc\s+-e|netcat)", re.IGNORECASE)),
+    (
+        "reverse-shell",
+        re.compile(r"(/dev/tcp/|bash\s+-i|sh\s+-i|nc\s+-e|netcat)", re.IGNORECASE),
+    ),
 )
 # Long hex strings that may be hex-encoded shell commands (min 32 chars, even length).
 _LONG_HEX_RE = re.compile(r"\b([0-9a-fA-F]{32,})\b")
@@ -293,8 +341,12 @@ _REVERSE_SHELL_RE = re.compile(
     r"(reverse shell|/dev/tcp/|sh\s+-i|bash\s+-i|nc\s+-e|netcat)",
     re.IGNORECASE,
 )
-_PERSISTENCE_RE = re.compile(r"\b(crontab|cron|persistence|scheduled task)\b", re.IGNORECASE)
-_TROJAN_RE = re.compile(r"\b(trojaned|rootkit|known bad|malicious binary)\b", re.IGNORECASE)
+_PERSISTENCE_RE = re.compile(
+    r"\b(crontab|cron|persistence|scheduled task)\b", re.IGNORECASE
+)
+_TROJAN_RE = re.compile(
+    r"\b(trojaned|rootkit|known bad|malicious binary)\b", re.IGNORECASE
+)
 _ANTI_FORENSIC_RE = re.compile(
     r"\b(wazuh-agent|agent restart|agent stopped|anti-forensic|tamper|impair defenses)\b",
     re.IGNORECASE,
@@ -323,10 +375,10 @@ def _strip_markers(text: str) -> tuple[str, str | None]:
         m = _STATUS_TOKEN_RE.match(s)
         if m:
             status = m.group(1).lower()
-            s, changed = s[m.end():].strip(), True
+            s, changed = s[m.end() :].strip(), True
         m = _ID_MARKER_RE.match(s)
         if m:
-            s, changed = s[m.end():].strip(), True
+            s, changed = s[m.end() :].strip(), True
     return s.strip(), status
 
 
@@ -397,6 +449,8 @@ def _normalize_fact_key(text: str) -> str:
     cleaned = _SOURCE_REF_RE.sub(" ", cleaned)
     cleaned = _ISO_TS_RE.sub(" ", cleaned)
     # collapse leftover punctuation/whitespace and parenthetical provenance husks
-    cleaned = re.sub(r"\(\s*(?:event|id|@?timestamp)?[ ,;:]*\)", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(
+        r"\(\s*(?:event|id|@?timestamp)?[ ,;:]*\)", " ", cleaned, flags=re.IGNORECASE
+    )
     cleaned = re.sub(r"[\s`(),]+", " ", cleaned)
     return cleaned.strip().lower()

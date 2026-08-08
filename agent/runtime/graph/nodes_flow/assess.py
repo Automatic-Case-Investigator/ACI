@@ -4,6 +4,7 @@ It does NOT decide whether the task is done — `interpret` owns that. This node
 synthesises or repairs the three-section report, classifies each `## Findings`
 bullet for the pivot node's board gating, and completes the task.
 """
+
 from __future__ import annotations
 
 from ...infra.logbus import emit, src_label
@@ -16,7 +17,14 @@ from ..sanitize import _sanitize_history, _sanitize_message
 from ..state import AgentState
 from ..synthesis import _execution_record
 from ..timeutil import _find_timestamp_range
-from ..toolio import _SEED_TASK_TITLE, _call, _emit_node_entry, _is_error_tool_result, _tmap, _track_input_tokens
+from ..toolio import (
+    _SEED_TASK_TITLE,
+    _call,
+    _emit_node_entry,
+    _is_error_tool_result,
+    _tmap,
+    _track_input_tokens,
+)
 from ..validation import _board_compromise_facts, _unpivoted_network_iocs
 from datetime import datetime, timedelta
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
@@ -25,16 +33,28 @@ import re
 import logging
 
 from ..coverage import (
-    _count_evidence_queries, _last_search_hit_count,
-    _unqueried_post_peak_clusters, _unqueried_time_ranges,
+    _count_evidence_queries,
+    _last_search_hit_count,
+    _unqueried_post_peak_clusters,
+    _unqueried_time_ranges,
 )
-from ._shared import _finding_bullet, _findings_section_text, _merge_preserved_findings, _new_leads_section_text, _preserved_findings_from_state
+from ._shared import (
+    _finding_bullet,
+    _findings_section_text,
+    _merge_preserved_findings,
+    _new_leads_section_text,
+    _preserved_findings_from_state,
+)
 
 log = logging.getLogger(__name__)
 
 
 async def _force_report_sections(
-    state: AgentState, config, src, new_ctx: int, missing: list[str],
+    state: AgentState,
+    config,
+    src,
+    new_ctx: int,
+    missing: list[str],
 ) -> tuple[str, int]:
     """Last-resort structured rewrite when synthesis still left sections missing.
 
@@ -48,17 +68,20 @@ async def _force_report_sections(
     sys_prompt = config["configurable"].get("system_prompt", "")
     try:
         text_only = model.bind_tools([])
-        prompt = HumanMessage(content=(
-            f"Your report is missing or has an empty {', '.join(missing)} section. Your "
-            "evidence is sufficient — do not make further tool calls. Write the FINAL "
-            "report now using the mandatory three-section format:\n\n"
-            "## Findings\n## Hypotheses\n## New Leads\n\n"
-            "Populate every section from the tool results above; put each confirmed "
-            "indicator (reverse shell, C2/callback, command execution) under ## Findings "
-            "as a bullet with its event ID. Use '- None.' only for a genuinely empty section."
-        ))
+        prompt = HumanMessage(
+            content=(
+                f"Your report is missing or has an empty {', '.join(missing)} section. Your "
+                "evidence is sufficient — do not make further tool calls. Write the FINAL "
+                "report now using the mandatory three-section format:\n\n"
+                "## Findings\n## Hypotheses\n## New Leads\n\n"
+                "Populate every section from the tool results above; put each confirmed "
+                "indicator (reverse shell, C2/callback, command execution) under ## Findings "
+                "as a bullet with its event ID. Use '- None.' only for a genuinely empty section."
+            )
+        )
         resp = await text_only.ainvoke(
-            [SystemMessage(content=sys_prompt)] + _sanitize_history(state["messages"] + [prompt])
+            [SystemMessage(content=sys_prompt)]
+            + _sanitize_history(state["messages"] + [prompt])
         )
         _sanitize_message(resp)
         return (resp.content or "").strip(), _track_input_tokens(resp, src, new_ctx)
@@ -67,7 +90,9 @@ async def _force_report_sections(
         return "", new_ctx
 
 
-async def _synthesize_investigation_report(state: AgentState, config, src, new_ctx: int) -> tuple[str, int]:
+async def _synthesize_investigation_report(
+    state: AgentState, config, src, new_ctx: int
+) -> tuple[str, int]:
     """Write the final three-section per-task report from the gathered evidence.
 
     Used on conclude (after the evidence review passes) when the agent deferred or
@@ -103,13 +128,17 @@ async def _synthesize_investigation_report(state: AgentState, config, src, new_c
     )
     try:
         text_only = model.bind_tools([])
-        msgs = _sanitize_history(state["messages"] + [HumanMessage(content=instruction)])
+        msgs = _sanitize_history(
+            state["messages"] + [HumanMessage(content=instruction)]
+        )
         resp = await text_only.ainvoke([SystemMessage(content=sys_prompt)] + msgs)
         _sanitize_message(resp)
         return (resp.content or "").strip(), _track_input_tokens(resp, src, new_ctx)
     except Exception as exc:
         log.warning("[%s] task report synthesis failed: %s", state["agent_name"], exc)
         return "", new_ctx
+
+
 async def assess(state: AgentState, config) -> dict:
     """Validate the latest task output and decide whether to retry, persist, or advance."""
     src = src_label(state["agent_name"])
@@ -133,7 +162,9 @@ async def assess(state: AgentState, config) -> dict:
             text_only = model.bind_tools([])
             try:
                 if state["agent_name"] == "triage":
-                    vicinity_hours = int(state.get("default_vicinity_window_hours") or 24)
+                    vicinity_hours = int(
+                        state.get("default_vicinity_window_hours") or 24
+                    )
                     synth_instruction = (
                         "Based on the tool results above, write your complete triage report "
                         "as text now. Do not make any further tool calls. In ## Investigation "
@@ -153,12 +184,16 @@ async def assess(state: AgentState, config) -> dict:
                 synth_msgs = _sanitize_history(
                     state["messages"] + [HumanMessage(content=synth_instruction)]
                 )
-                synth_resp = await text_only.ainvoke([SystemMessage(content=sys_prompt)] + synth_msgs)
+                synth_resp = await text_only.ainvoke(
+                    [SystemMessage(content=sys_prompt)] + synth_msgs
+                )
                 _sanitize_message(synth_resp)
                 final_answer = (synth_resp.content or "").strip()
                 new_ctx = _track_input_tokens(synth_resp, src, new_ctx)
             except Exception as exc:
-                log.warning("[%s] assess synthesis failed: %s", state["agent_name"], exc)
+                log.warning(
+                    "[%s] assess synthesis failed: %s", state["agent_name"], exc
+                )
         if not final_answer:
             final_answer = _execution_record(state["messages"])
 
@@ -166,7 +201,11 @@ async def assess(state: AgentState, config) -> dict:
     if preserved_findings:
         merged_answer = _merge_preserved_findings(final_answer, preserved_findings)
         if merged_answer != final_answer:
-            emit(src, "note", "task review: restored confirmed finding(s) from task ledger")
+            emit(
+                src,
+                "note",
+                "task review: restored confirmed finding(s) from task ledger",
+            )
             final_answer = merged_answer
 
     # --- Per-task findings review -------------------------------------------------------
@@ -177,8 +216,7 @@ async def assess(state: AgentState, config) -> dict:
     # completeness check and the task still completes.
     findings_verification_state: dict | None = None
     reviewable = (
-        task is not None
-        and _SEED_TASK_TITLE not in (task.get("title") or "").lower()
+        task is not None and _SEED_TASK_TITLE not in (task.get("title") or "").lower()
     )
 
     if reviewable and state["agent_name"] == "investigation":
@@ -197,10 +235,14 @@ async def assess(state: AgentState, config) -> dict:
         # Board compromise artifacts the agent has NOT surfaced in its ## Findings — the
         # decoded evidence is on its board but its report doesn't reflect it.
         _fa_lower = final_answer.lower()
-        unreported = [bf for bf in _board_compromise_facts(state) if bf.lower() not in _fa_lower]
+        unreported = [
+            bf for bf in _board_compromise_facts(state) if bf.lower() not in _fa_lower
+        ]
         # The completion contract the interpret loop derived for this task (skip the
         # generic default — only a real objective decomposition is a usable yardstick).
-        ledger_stop = str((state.get("task_ledger") or {}).get("stop_condition") or "").strip()
+        ledger_stop = str(
+            (state.get("task_ledger") or {}).get("stop_condition") or ""
+        ).strip()
         if ledger_stop == _DEFAULT_STOP_CONDITION:
             ledger_stop = ""
         review = await review_task_model(
@@ -214,7 +256,8 @@ async def assess(state: AgentState, config) -> dict:
             signals={
                 "evidence_queries": evidence_queries,
                 "hit_count": hit_count,
-                "hit_ceiling": hit_count is not None and hit_count >= BROAD_HIT_THRESHOLD,
+                "hit_ceiling": hit_count is not None
+                and hit_count >= BROAD_HIT_THRESHOLD,
                 "unpivoted_iocs": _unpivoted_network_iocs(final_answer),
                 "unqueried_clusters": _unqueried_post_peak_clusters(state["messages"]),
                 "unqueried_time_ranges": _unqueried_time_ranges(state["messages"]),
@@ -239,23 +282,34 @@ async def assess(state: AgentState, config) -> dict:
             if synthesized:
                 final_answer = synthesized
                 if preserved_findings:
-                    final_answer = _merge_preserved_findings(final_answer, preserved_findings)
+                    final_answer = _merge_preserved_findings(
+                        final_answer, preserved_findings
+                    )
                 report_synthesized = True
                 missing = _missing_summary_sections(final_answer)
             if missing:
                 # Repair in place rather than routing back to `think`. The task IS done —
                 # interpret decided that — so sending it back around the loop to fix a
                 # heading would re-open a closed completion decision.
-                emit(src, "note",
-                     f"task review: report still missing section(s) {', '.join(missing)} — "
-                     "forcing structured finalization")
+                emit(
+                    src,
+                    "note",
+                    f"task review: report still missing section(s) {', '.join(missing)} — "
+                    "forcing structured finalization",
+                )
                 repaired, new_ctx = await _force_report_sections(
-                    state, config, src, new_ctx, missing,
+                    state,
+                    config,
+                    src,
+                    new_ctx,
+                    missing,
                 )
                 if repaired and len(_missing_summary_sections(repaired)) < len(missing):
                     final_answer = repaired
                     if preserved_findings:
-                        final_answer = _merge_preserved_findings(final_answer, preserved_findings)
+                        final_answer = _merge_preserved_findings(
+                            final_answer, preserved_findings
+                        )
                     report_synthesized = True
                     missing = _missing_summary_sections(final_answer)
 
@@ -275,17 +329,26 @@ async def assess(state: AgentState, config) -> dict:
                     current_task=task,
                     agent_name=state["agent_name"],
                 )
-                findings_verification_state = verification.to_state() if verification else None
+                findings_verification_state = (
+                    verification.to_state() if verification else None
+                )
 
     if complete_fn and task:
-        await _call(complete_fn, {"task_id": task["id"], "summary": final_answer}, _dbg=src)
-        emit(src, "note",
-             f"completed '{task.get('title', task['id'])}' "
-             f"(steps={state['steps']}, calls={state['tool_calls_made']})",
-             detail=final_answer)
+        await _call(
+            complete_fn, {"task_id": task["id"], "summary": final_answer}, _dbg=src
+        )
+        emit(
+            src,
+            "note",
+            f"completed '{task.get('title', task['id'])}' "
+            f"(steps={state['steps']}, calls={state['tool_calls_made']})",
+            detail=final_answer,
+        )
     prior = list(state.get("completed_task_titles") or [])
     if task:
-        prior = prior + [{"title": task.get("title", ""), "summary": final_answer[:800]}]
+        prior = prior + [
+            {"title": task.get("title", ""), "summary": final_answer[:800]}
+        ]
     return {
         "current_task": None,
         "last_completed_task": task,

@@ -4,18 +4,22 @@ Offline test: analyst-editable settings overrides + MCP categorization rules.
 Run from project root with:
     python .claude/skills/run-aci-backend/tests/test_settings_overrides.py -v
 """
+
 from __future__ import annotations
 
 import os
 import sys
 import unittest
 
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, project_root)
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
 os.environ.setdefault("SECRET_KEY", "test")
 
 import django
+
 django.setup()
 
 from django.test import RequestFactory, TestCase as DjangoTestCase
@@ -25,11 +29,23 @@ from django.contrib.sessions.backends.db import SessionStore
 from agent.agents.registry import get_agent
 from agent.dashboard import settings_views as sv
 from agent.models import (
-    AgentConfig, WorkflowConfig, ResponsePolicy, MCPServerConfig, ProviderConfig,
+    AgentConfig,
+    WorkflowConfig,
+    ResponsePolicy,
+    MCPServerConfig,
+    ProviderConfig,
 )
-from agent.runtime.config import is_enabled, provider_category, resolve_settings, INTERNAL_PROVIDERS, DEFAULT_PROVIDERS
+from agent.runtime.config import (
+    is_enabled,
+    provider_category,
+    resolve_settings,
+    INTERNAL_PROVIDERS,
+    DEFAULT_PROVIDERS,
+)
 from agent.runtime.config.overrides import (
-    resolve_agent_definition, resolve_workflow, resolve_response_policy,
+    resolve_agent_definition,
+    resolve_workflow,
+    resolve_response_policy,
 )
 from agent.runtime.config.prompts import compose_system_prompt
 
@@ -64,11 +80,18 @@ class TestAgentOverride(DjangoTestCase):
         AgentConfig.objects.filter(agent_name="investigation").delete()
 
     def test_budget_and_tools_override(self):
-        sv.settings_agent_save(_post({
-            "agent_name": "triage", "max_steps": "5", "max_tool_calls": "6",
-            "tool_policy": ["aci-thehive", "aci-memory"], "stream_intent": "1",
-            "vicinity_window_hours": "12",
-        }))
+        sv.settings_agent_save(
+            _post(
+                {
+                    "agent_name": "triage",
+                    "max_steps": "5",
+                    "max_tool_calls": "6",
+                    "tool_policy": ["aci-thehive", "aci-memory"],
+                    "stream_intent": "1",
+                    "vicinity_window_hours": "12",
+                }
+            )
+        )
         a = resolve_agent_definition(get_agent("triage"))
         self.assertEqual(a.budget.max_steps, 5)
         self.assertEqual(a.budget.max_tool_calls, 6)
@@ -77,7 +100,9 @@ class TestAgentOverride(DjangoTestCase):
 
     def test_blank_budget_keeps_default(self):
         base = get_agent("triage")
-        sv.settings_agent_save(_post({"agent_name": "triage", "max_steps": "", "max_tool_calls": ""}))
+        sv.settings_agent_save(
+            _post({"agent_name": "triage", "max_steps": "", "max_tool_calls": ""})
+        )
         a = resolve_agent_definition(get_agent("triage"))
         self.assertEqual(a.budget.max_steps, base.budget.max_steps)
         self.assertEqual(a.default_vicinity_window_hours, 24)
@@ -87,10 +112,15 @@ class TestAgentOverride(DjangoTestCase):
             agent_name="triage",
             defaults={"vicinity_window_hours": 18},
         )
-        sv.settings_agent_save(_post({"agent_name": "triage", "vicinity_window_hours": ""}))
+        sv.settings_agent_save(
+            _post({"agent_name": "triage", "vicinity_window_hours": ""})
+        )
         row = AgentConfig.objects.get(agent_name="triage")
         self.assertIsNone(row.vicinity_window_hours)
-        self.assertEqual(resolve_agent_definition(get_agent("triage")).default_vicinity_window_hours, 24)
+        self.assertEqual(
+            resolve_agent_definition(get_agent("triage")).default_vicinity_window_hours,
+            24,
+        )
 
     def test_agents_have_independent_vicinity_windows(self):
         AgentConfig.objects.update_or_create(
@@ -101,8 +131,16 @@ class TestAgentOverride(DjangoTestCase):
             agent_name="investigation",
             defaults={"vicinity_window_hours": 36},
         )
-        self.assertEqual(resolve_agent_definition(get_agent("triage")).default_vicinity_window_hours, 8)
-        self.assertEqual(resolve_agent_definition(get_agent("investigation")).default_vicinity_window_hours, 36)
+        self.assertEqual(
+            resolve_agent_definition(get_agent("triage")).default_vicinity_window_hours,
+            8,
+        )
+        self.assertEqual(
+            resolve_agent_definition(
+                get_agent("investigation")
+            ).default_vicinity_window_hours,
+            36,
+        )
 
     def test_prompt_includes_resolved_vicinity_window(self):
         prompt = compose_system_prompt(
@@ -130,22 +168,33 @@ class TestWorkflowOverride(DjangoTestCase):
         ResponsePolicy.objects.all().delete()
 
     def test_workflow_override(self):
-        sv.settings_workflow_save(_post({"event_type": "new_case", "enabled": "1", "dedupe_window": "90"}))
+        sv.settings_workflow_save(
+            _post({"event_type": "new_case", "enabled": "1", "dedupe_window": "90"})
+        )
         self.assertEqual(
-            resolve_workflow("new_case", default_enabled=True, default_window=600), (True, 90)
+            resolve_workflow("new_case", default_enabled=True, default_window=600),
+            (True, 90),
         )
 
     def test_workflow_disable(self):
-        sv.settings_workflow_save(_post({"event_type": "new_case", "dedupe_window": "60"}))
-        enabled, _ = resolve_workflow("new_case", default_enabled=True, default_window=600)
+        sv.settings_workflow_save(
+            _post({"event_type": "new_case", "dedupe_window": "60"})
+        )
+        enabled, _ = resolve_workflow(
+            "new_case", default_enabled=True, default_window=600
+        )
         self.assertFalse(enabled)
 
     def test_response_policy_override(self):
-        sv.settings_response_policy_save(_post({
-            "action_tp__case": "resolve",
-            "action_fp__case": "resolve",
-            "action_needs_investigation__case": "investigate",
-        }))
+        sv.settings_response_policy_save(
+            _post(
+                {
+                    "action_tp__case": "resolve",
+                    "action_fp__case": "resolve",
+                    "action_needs_investigation__case": "investigate",
+                }
+            )
+        )
         policy = resolve_response_policy()
         self.assertEqual(policy[("tp", "case")], "resolve")
         self.assertEqual(policy[("needs_investigation", "case")], "investigate")
@@ -153,16 +202,24 @@ class TestWorkflowOverride(DjangoTestCase):
     def test_response_policy_rejects_action_outside_the_cell_menu(self):
         # `resolve` is not offerable for needs_investigation, and `escalate` was
         # removed from that row entirely — neither may be persisted.
-        sv.settings_response_policy_save(_post({
-            "action_needs_investigation__case": "resolve",
-            "action_fp__alert": "escalate",
-        }))
+        sv.settings_response_policy_save(
+            _post(
+                {
+                    "action_needs_investigation__case": "resolve",
+                    "action_fp__alert": "escalate",
+                }
+            )
+        )
         from agent.runtime.response_policy import policy as matrix
 
         resolved = resolve_response_policy()
-        self.assertEqual(resolved[("needs_investigation", "case")],
-                         matrix.default_action("needs_investigation", "case"))
-        self.assertEqual(resolved[("fp", "alert")], matrix.default_action("fp", "alert"))
+        self.assertEqual(
+            resolved[("needs_investigation", "case")],
+            matrix.default_action("needs_investigation", "case"),
+        )
+        self.assertEqual(
+            resolved[("fp", "alert")], matrix.default_action("fp", "alert")
+        )
 
     def test_response_policy_falls_back_to_the_shipped_defaults(self):
         from agent.runtime.response_policy import policy as matrix
@@ -183,18 +240,33 @@ class TestMCPProtections(DjangoTestCase):
         self.assertFalse(ProviderConfig.objects.filter(key="aci-memory").exists())
 
     def test_custom_add_and_delete(self):
-        sv.settings_mcp_save(_post({
-            "id": "zztest-siem", "name": "Test", "transport": "stdio",
-            "command_or_url": "python -m x", "enabled": "1", "allowed_agents": "triage",
-        }))
+        sv.settings_mcp_save(
+            _post(
+                {
+                    "id": "zztest-siem",
+                    "name": "Test",
+                    "transport": "stdio",
+                    "command_or_url": "python -m x",
+                    "enabled": "1",
+                    "allowed_agents": "triage",
+                }
+            )
+        )
         self.assertTrue(MCPServerConfig.objects.filter(id="zztest-siem").exists())
         sv.settings_mcp_delete(_post({"id": "zztest-siem"}))
         self.assertFalse(MCPServerConfig.objects.filter(id="zztest-siem").exists())
 
     def test_reserved_key_rejected(self):
-        sv.settings_mcp_save(_post({
-            "id": "aci-wazuh", "name": "x", "transport": "stdio", "command_or_url": "y",
-        }))
+        sv.settings_mcp_save(
+            _post(
+                {
+                    "id": "aci-wazuh",
+                    "name": "x",
+                    "transport": "stdio",
+                    "command_or_url": "y",
+                }
+            )
+        )
         self.assertFalse(MCPServerConfig.objects.filter(id="aci-wazuh").exists())
 
     def test_builtin_delete_blocked(self):
@@ -215,6 +287,7 @@ class TestTheHiveDBSettings(DjangoTestCase):
         # Isolate the legacy ProviderConfig path: an active IntegrationConnection
         # would otherwise win in resolve_settings. Rolled back after each test.
         from agent.models import IntegrationConnection
+
         IntegrationConnection.objects.filter(provider_key="aci-thehive").delete()
 
     def test_db_row_settings_used(self):
@@ -230,16 +303,22 @@ class TestTheHiveDBSettings(DjangoTestCase):
             },
         )
         from agent.runtime.providers.registry import get_provider
+
         provider = get_provider("aci-thehive")
-        resolved = resolve_settings("aci-thehive", provider.setting_defaults() if provider else {})
+        resolved = resolve_settings(
+            "aci-thehive", provider.setting_defaults() if provider else {}
+        )
         self.assertEqual(resolved["base_url"], "http://test-hive:9001")
         self.assertEqual(resolved["api_key"], "testkey123")
         self.assertEqual(resolved["verify_tls"], "false")
 
     def test_no_db_row_yields_empty_defaults(self):
         from agent.runtime.providers.registry import get_provider
+
         provider = get_provider("aci-thehive")
-        resolved = resolve_settings("aci-thehive", provider.setting_defaults() if provider else {})
+        resolved = resolve_settings(
+            "aci-thehive", provider.setting_defaults() if provider else {}
+        )
         self.assertEqual(resolved["base_url"], "")
         self.assertEqual(resolved["api_key"], "")
 
@@ -252,16 +331,24 @@ class TestTheHiveDBSettings(DjangoTestCase):
             },
         )
         from agent.runtime.providers.registry import get_provider
+
         provider = get_provider("aci-thehive")
-        resolved = resolve_settings("aci-thehive", provider.setting_defaults() if provider else {})
-        self.assertEqual(resolved["base_url"], "")       # empty default
-        self.assertEqual(resolved["api_key"], "dbkey")   # DB wins
+        resolved = resolve_settings(
+            "aci-thehive", provider.setting_defaults() if provider else {}
+        )
+        self.assertEqual(resolved["base_url"], "")  # empty default
+        self.assertEqual(resolved["api_key"], "dbkey")  # DB wins
 
     def test_build_config_uses_base_url(self):
         from agent.runtime.providers.registry import get_provider
+
         provider = get_provider("aci-thehive")
         env = provider.build_config(
-            {"base_url": "https://hive.example:9000", "api_key": "k", "verify_tls": "true"}
+            {
+                "base_url": "https://hive.example:9000",
+                "api_key": "k",
+                "verify_tls": "true",
+            }
         )["env"]
         self.assertEqual(env["THEHIVE_URL"], "https://hive.example:9000")
         self.assertEqual(env["THEHIVE_API_KEY"], "k")
@@ -269,6 +356,7 @@ class TestTheHiveDBSettings(DjangoTestCase):
     def test_build_config_derives_url_from_legacy_host_port(self):
         # A pre-existing row still keyed by host/port must keep working.
         from agent.runtime.providers.registry import get_provider
+
         provider = get_provider("aci-thehive")
         env = provider.build_config(
             {"host": "http://legacy-hive", "port": "9001", "api_key": "k"}
@@ -281,18 +369,28 @@ class TestIntegrationConnections(DjangoTestCase):
 
     def setUp(self):
         from agent.models import IntegrationConnection
+
         IntegrationConnection.objects.all().delete()
         ProviderConfig.objects.filter(key="aci-wazuh").delete()
 
     def _wazuh(self, provider="aci-wazuh"):
         from agent.models import IntegrationConnection
+
         return list(IntegrationConnection.objects.filter(provider_key=provider))
 
     def test_first_connection_auto_active(self):
-        sv.settings_connection_save(_post({
-            "provider": "aci-wazuh", "name": "Prod", "url": "https://prod:9200",
-            "user": "admin", "password": "pw", "verify_tls": "true",
-        }))
+        sv.settings_connection_save(
+            _post(
+                {
+                    "provider": "aci-wazuh",
+                    "name": "Prod",
+                    "url": "https://prod:9200",
+                    "user": "admin",
+                    "password": "pw",
+                    "verify_tls": "true",
+                }
+            )
+        )
         conns = self._wazuh()
         self.assertEqual(len(conns), 1)
         self.assertTrue(conns[0].is_active)
@@ -300,38 +398,61 @@ class TestIntegrationConnections(DjangoTestCase):
 
     def test_second_connection_inactive_then_activate_flips(self):
         from agent.models import IntegrationConnection
-        sv.settings_connection_save(_post({"provider": "aci-wazuh", "name": "Prod", "url": "https://prod:9200"}))
-        sv.settings_connection_save(_post({"provider": "aci-wazuh", "name": "Lab", "url": "https://lab:9200"}))
+
+        sv.settings_connection_save(
+            _post({"provider": "aci-wazuh", "name": "Prod", "url": "https://prod:9200"})
+        )
+        sv.settings_connection_save(
+            _post({"provider": "aci-wazuh", "name": "Lab", "url": "https://lab:9200"})
+        )
         prod = IntegrationConnection.objects.get(name="Prod")
         lab = IntegrationConnection.objects.get(name="Lab")
         self.assertTrue(prod.is_active)
         self.assertFalse(lab.is_active)
 
         sv.settings_connection_activate(_post({"conn_id": str(lab.id)}))
-        prod.refresh_from_db(); lab.refresh_from_db()
+        prod.refresh_from_db()
+        lab.refresh_from_db()
         self.assertFalse(prod.is_active)
         self.assertTrue(lab.is_active)
         # exactly one active per provider
-        self.assertEqual(IntegrationConnection.objects.filter(provider_key="aci-wazuh", is_active=True).count(), 1)
+        self.assertEqual(
+            IntegrationConnection.objects.filter(
+                provider_key="aci-wazuh", is_active=True
+            ).count(),
+            1,
+        )
 
     def test_resolve_prefers_active_connection_with_env_fallback(self):
         from agent.models import IntegrationConnection
+
         base = {"url": "https://env:9200"}
         # No connections → env/legacy fallback unchanged.
         self.assertEqual(resolve_settings("aci-wazuh", base)["url"], "https://env:9200")
 
-        sv.settings_connection_save(_post({"provider": "aci-wazuh", "name": "Prod", "url": "https://prod:9200"}))
-        self.assertEqual(resolve_settings("aci-wazuh", base)["url"], "https://prod:9200")
+        sv.settings_connection_save(
+            _post({"provider": "aci-wazuh", "name": "Prod", "url": "https://prod:9200"})
+        )
+        self.assertEqual(
+            resolve_settings("aci-wazuh", base)["url"], "https://prod:9200"
+        )
 
-        sv.settings_connection_save(_post({"provider": "aci-wazuh", "name": "Lab", "url": "https://lab:9200"}))
+        sv.settings_connection_save(
+            _post({"provider": "aci-wazuh", "name": "Lab", "url": "https://lab:9200"})
+        )
         lab = IntegrationConnection.objects.get(name="Lab")
         sv.settings_connection_activate(_post({"conn_id": str(lab.id)}))
         self.assertEqual(resolve_settings("aci-wazuh", base)["url"], "https://lab:9200")
 
     def test_delete_active_promotes_sibling(self):
         from agent.models import IntegrationConnection
-        sv.settings_connection_save(_post({"provider": "aci-wazuh", "name": "Prod", "url": "https://prod:9200"}))
-        sv.settings_connection_save(_post({"provider": "aci-wazuh", "name": "Lab", "url": "https://lab:9200"}))
+
+        sv.settings_connection_save(
+            _post({"provider": "aci-wazuh", "name": "Prod", "url": "https://prod:9200"})
+        )
+        sv.settings_connection_save(
+            _post({"provider": "aci-wazuh", "name": "Lab", "url": "https://lab:9200"})
+        )
         prod = IntegrationConnection.objects.get(name="Prod")  # the active one
         sv.settings_connection_delete(_post({"conn_id": str(prod.id)}))
         remaining = self._wazuh()
@@ -340,9 +461,16 @@ class TestIntegrationConnections(DjangoTestCase):
 
     def test_bulk_delete_removes_all_and_promotes_active(self):
         from agent.models import IntegrationConnection
-        sv.settings_connection_save(_post({"provider": "aci-wazuh", "name": "Prod", "url": "https://prod:9200"}))
-        sv.settings_connection_save(_post({"provider": "aci-wazuh", "name": "Lab", "url": "https://lab:9200"}))
-        sv.settings_connection_save(_post({"provider": "aci-wazuh", "name": "Dev", "url": "https://dev:9200"}))
+
+        sv.settings_connection_save(
+            _post({"provider": "aci-wazuh", "name": "Prod", "url": "https://prod:9200"})
+        )
+        sv.settings_connection_save(
+            _post({"provider": "aci-wazuh", "name": "Lab", "url": "https://lab:9200"})
+        )
+        sv.settings_connection_save(
+            _post({"provider": "aci-wazuh", "name": "Dev", "url": "https://dev:9200"})
+        )
         prod = IntegrationConnection.objects.get(name="Prod")  # active (first)
         lab = IntegrationConnection.objects.get(name="Lab")
         # Bulk-delete the active one plus a sibling.
@@ -354,11 +482,20 @@ class TestIntegrationConnections(DjangoTestCase):
 
     def test_edit_updates_settings_keeps_provider(self):
         from agent.models import IntegrationConnection
-        sv.settings_connection_save(_post({"provider": "aci-wazuh", "name": "Prod", "url": "https://prod:9200"}))
+
+        sv.settings_connection_save(
+            _post({"provider": "aci-wazuh", "name": "Prod", "url": "https://prod:9200"})
+        )
         conn = IntegrationConnection.objects.get(name="Prod")
-        sv.settings_connection_save(_post({
-            "conn_id": str(conn.id), "name": "Prod DC1", "url": "https://prod-dc1:9200",
-        }))
+        sv.settings_connection_save(
+            _post(
+                {
+                    "conn_id": str(conn.id),
+                    "name": "Prod DC1",
+                    "url": "https://prod-dc1:9200",
+                }
+            )
+        )
         conn.refresh_from_db()
         self.assertEqual(conn.name, "Prod DC1")
         self.assertEqual(conn.provider_key, "aci-wazuh")
@@ -366,12 +503,20 @@ class TestIntegrationConnections(DjangoTestCase):
 
     def test_virustotal_bad_key_rejected(self):
         from agent.models import IntegrationConnection
-        sv.settings_connection_save(_post({"provider": "aci-ti", "name": "VT", "api_key": "not-a-valid-key"}))
-        self.assertEqual(IntegrationConnection.objects.filter(provider_key="aci-ti").count(), 0)
+
+        sv.settings_connection_save(
+            _post({"provider": "aci-ti", "name": "VT", "api_key": "not-a-valid-key"})
+        )
+        self.assertEqual(
+            IntegrationConnection.objects.filter(provider_key="aci-ti").count(), 0
+        )
 
     def test_virustotal_valid_key_accepted(self):
         from agent.models import IntegrationConnection
-        sv.settings_connection_save(_post({"provider": "aci-ti", "name": "VT", "api_key": "a" * 64}))
+
+        sv.settings_connection_save(
+            _post({"provider": "aci-ti", "name": "VT", "api_key": "a" * 64})
+        )
         conns = IntegrationConnection.objects.filter(provider_key="aci-ti")
         self.assertEqual(conns.count(), 1)
         self.assertTrue(conns.first().is_active)

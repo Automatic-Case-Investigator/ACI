@@ -2,16 +2,22 @@
 End-to-end test runner.
 Usage: python tests/test_run.py [--case-id CASE_ID] [--question "..."] [--poll-secs N]
 """
+
 import sys, os, time, json, argparse, requests
 
-sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
 # Navigate from .claude/skills/run-aci-backend/tests/ up to project root
 # (5 levels: tests -> run-aci-backend -> skills -> .claude -> ACI_Backend)
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+project_root = os.path.dirname(
+    os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    )
+)
 sys.path.insert(0, project_root)
 import django
+
 django.setup()
 
 from agent.models import AgentEvent, AgentRun
@@ -20,7 +26,9 @@ BASE = "http://localhost:8000"
 
 
 def submit(question):
-    r = requests.post(f"{BASE}/dashboard/ask", data={"question": question}, allow_redirects=False)
+    r = requests.post(
+        f"{BASE}/dashboard/ask", data={"question": question}, allow_redirects=False
+    )
     assert r.status_code == 302, f"Expected 302, got {r.status_code}: {r.text[:200]}"
     loc = r.headers["Location"]
     session_id = loc.rstrip("/").split("/")[-1]
@@ -38,7 +46,9 @@ def followup(session_id, text):
     print(f"  followup -> {r.status_code} {r.text[:100]}")
 
 
-def poll(session_id, poll_secs, stop_kinds=("answer", "error"), after_id=0, stop_source=None):
+def poll(
+    session_id, poll_secs, stop_kinds=("answer", "error"), after_id=0, stop_source=None
+):
     """Poll events until a stop_kind is seen or timeout. Returns (event, last_id).
 
     If stop_source is set, only events from that source count as stop conditions.
@@ -47,7 +57,9 @@ def poll(session_id, poll_secs, stop_kinds=("answer", "error"), after_id=0, stop
     last_id = after_id
     while time.time() < deadline:
         events = list(
-            AgentEvent.objects.filter(session_id=session_id, id__gt=last_id).order_by("id")
+            AgentEvent.objects.filter(session_id=session_id, id__gt=last_id).order_by(
+                "id"
+            )
         )
         for e in events:
             last_id = e.id
@@ -82,6 +94,7 @@ def board_entries(session_id):
         return []
     try:
         from aci_board import store as board_store
+
         return board_store.list_entries(inv.case_id, str(inv.id), "investigation")
     except Exception as ex:
         print(f"  [board] error: {ex}")
@@ -95,12 +108,15 @@ def task_summary(session_id):
         return
     try:
         from aci_taskqueue import store as tq_store
+
         tasks = tq_store.list_tasks(inv.case_id, str(inv.id), "investigation")
         total = len(tasks)
         done = sum(1 for t in tasks if t.get("status") == "completed")
         print(f"  tasks: {done}/{total} completed")
         for t in tasks:
-            print(f"  [{t.get('status'):10s}|pri={t.get('priority', 0):3d}] {t.get('title', '')[:80]}")
+            print(
+                f"  [{t.get('status'):10s}|pri={t.get('priority', 0):3d}] {t.get('title', '')[:80]}"
+            )
     except Exception as ex:
         print(f"  [tasks] error: {ex}")
 
@@ -141,8 +157,11 @@ def main():
 
     print(f"\n--- phase 3: investigation (waiting for answer, cursor={cursor}) ---")
     ev2, cursor2 = poll(
-        session_id, args.poll_secs, stop_kinds=("answer", "error"),
-        after_id=cursor, stop_source="orch",
+        session_id,
+        args.poll_secs,
+        stop_kinds=("answer", "error"),
+        after_id=cursor,
+        stop_source="orch",
     )
 
     if ev2 is None:

@@ -1,6 +1,7 @@
 """Metric registry: metrics self-register via `@register`, and the scorer iterates
 the registry rather than a hardcoded list. Adding a metric touches no code here.
 """
+
 from __future__ import annotations
 
 from .base import Metric, MetricResult

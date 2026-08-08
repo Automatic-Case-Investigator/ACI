@@ -13,11 +13,21 @@ from agent.runtime.infra import logbus
 from agent.runtime.engine.run import run_agent_sync
 from agent.runtime.orchestrator import OrchestratorSession, run_orchestrator
 
-from ._base import _ACTIVE_SPECIALIST_STATES, _RESTARTABLE_AGENTS, _active_sessions, _current_context_run, _load_session_state, _lock, _loops, _processing, _save_session_state, _set_status
-
-
+from ._base import (
+    _ACTIVE_SPECIALIST_STATES,
+    _RESTARTABLE_AGENTS,
+    _active_sessions,
+    _current_context_run,
+    _load_session_state,
+    _lock,
+    _loops,
+    _processing,
+    _save_session_state,
+    _set_status,
+)
 
 # ── public API ─────────────────────────────────────────────────────────────────
+
 
 def start_session(
     question: str,
@@ -67,9 +77,13 @@ def start_investigation_from_triage(source_run: AgentRun) -> str:
     ).strip()
     orch_state = {
         "src_entity_id": case_id,
-        "source_entity_type": (source_run.metadata or {}).get("source_entity_type", "unknown"),
+        "source_entity_type": (source_run.metadata or {}).get(
+            "source_entity_type", "unknown"
+        ),
         "last_triage_src_entity_id": case_id,
-        "last_triage_source_entity_type": (source_run.metadata or {}).get("source_entity_type", "unknown"),
+        "last_triage_source_entity_type": (source_run.metadata or {}).get(
+            "source_entity_type", "unknown"
+        ),
         "last_triage_report": source_run.result or "",
         "last_triage_run_id": str(source_run.id),
         "last_triage_status": source_run.status,
@@ -100,9 +114,11 @@ def stop_processing(session_id: str) -> None:
     with _lock:
         loop = _loops.get(session_id)
     if loop is not None:
+
         def _cancel_all():
             for task in asyncio.all_tasks(loop):
                 task.cancel()
+
         loop.call_soon_threadsafe(_cancel_all)
     try:
         runs = AgentRun.objects.filter(
@@ -144,7 +160,8 @@ def active_specialist_for_session(session_id: str) -> AgentRun | None:
         ).order_by("-updated_at", "-created_at")
     except Exception:
         runs = [
-            run for run in AgentRun.objects.order_by("-updated_at")[:200]
+            run
+            for run in AgentRun.objects.order_by("-updated_at")[:200]
             if (run.metadata or {}).get("session_id") == session_id
             and run.agent_name in _RESTARTABLE_AGENTS
             and run.status in _ACTIVE_SPECIALIST_STATES
@@ -170,7 +187,9 @@ def get_ctx(session_id: str) -> dict:
     # Freshest first: the orchestrator's own reading (keyed by session_id) is
     # often older than the specialist reading it handed off to.
     if ctx is None:
-        ctx = logbus.get_latest_context_usage(session_id) or logbus.get_context_usage(session_id)
+        ctx = logbus.get_latest_context_usage(session_id) or logbus.get_context_usage(
+            session_id
+        )
     if ctx is None:
         state = _load_session_state(session_id) or {}
         persisted_tokens = int(state.get("ctx_tokens") or 0)
@@ -235,9 +254,11 @@ def _session_loop(session_id: str, q: queue.Queue) -> None:
                 answer = "Stopped by analyst. Ask a follow-up to continue from here."
                 final_status = AgentRun.STATUS_CANCELLED
                 logbus.emit(
-                    "orch", "note",
+                    "orch",
+                    "note",
                     "stopped by analyst — ask a follow-up to continue",
-                    detail="resumable", expand=True,
+                    detail="resumable",
+                    expand=True,
                 )
             except Exception as exc:
                 answer = f"orchestrator error: {exc}"
@@ -246,7 +267,8 @@ def _session_loop(session_id: str, q: queue.Queue) -> None:
                 logbus.emit("orch", "error", "orchestrator crashed", detail=str(exc))
             else:
                 logbus.emit(
-                    "orch", "answer",
+                    "orch",
+                    "answer",
                     logbus.summarize_think(answer) or "answer",
                     detail=answer,
                     expand=True,
@@ -280,13 +302,19 @@ async def _run_review_investigation(
     """Deterministically continue a held workflow triage report into investigation."""
     case_id = sess.last_triage_src_entity_id or sess.src_entity_id or ""
     triage_report = (sess.last_triage_report or "").strip()
-    if not case_id or not triage_report or sess.last_triage_status != AgentRun.STATUS_COMPLETED:
+    if (
+        not case_id
+        or not triage_report
+        or sess.last_triage_status != AgentRun.STATUS_COMPLETED
+    ):
         msg = "Cannot start investigation: the approved workflow triage report was not available."
         logbus.emit("orch", "error", msg)
         return msg
 
     sess.src_entity_id = case_id
-    source_entity_type = sess.last_triage_source_entity_type or sess.source_entity_type or ""
+    source_entity_type = (
+        sess.last_triage_source_entity_type or sess.source_entity_type or ""
+    )
     handoff = Handoff(
         analyst_request=question,
         triage_report=triage_report,
@@ -325,7 +353,10 @@ async def _run_review_investigation(
     sess.last_investigation_report = run.result or ""
 
     if sess.last_investigation_report.strip():
-        answer = "The investigation is complete. Full report below:\n\n" + sess.last_investigation_report.strip()
+        answer = (
+            "The investigation is complete. Full report below:\n\n"
+            + sess.last_investigation_report.strip()
+        )
     else:
         answer = (
             f"Investigation run {str(run.id)[:8]} finished with status {run.status}, "

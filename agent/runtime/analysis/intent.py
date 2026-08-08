@@ -4,6 +4,7 @@ The summary reports established state, its significance, and the next action. It
 is not hidden chain-of-thought. It is generated without bound actions and fully
 streamed before the action model may request an external capability.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -32,16 +33,18 @@ async def generate_public_intent(
 ) -> IntentResult:
     """Generate and stream one state-grounded public reasoning summary."""
     tools = ", ".join(available_tools or []) or "(none)"
-    prompt = HumanMessage(content=(
-        "Before taking the next action, think out loud for the observer in a concise, "
-        "natural progress narrative. Explain what relevant state or results are already "
-        "established, how you currently interpret them, what remains uncertain or "
-        "blocked, and what you intend to do next and why. Use only information supported "
-        "by the available context.\n\n"
-        "Output only a few sentences only.\n\n"
-        f"Current objective: {task_title or '(use the active context)'}\n"
-        f"Available external capabilities: {tools}"
-    ))
+    prompt = HumanMessage(
+        content=(
+            "Before taking the next action, think out loud for the observer in a concise, "
+            "natural progress narrative. Explain what relevant state or results are already "
+            "established, how you currently interpret them, what remains uncertain or "
+            "blocked, and what you intend to do next and why. Use only information supported "
+            "by the available context.\n\n"
+            "Output only a few sentences only.\n\n"
+            f"Current objective: {task_title or '(use the active context)'}\n"
+            f"Available external capabilities: {tools}"
+        )
+    )
     metadata = {"intent_sequence": sequence}
     try:
         response = await invoke_streaming(

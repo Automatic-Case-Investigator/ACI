@@ -26,6 +26,7 @@ proof on its own — the caller must still confirm `required_evidence`.
 `signals` is the deterministic substrate for invalidator evaluation: an
 invalidator fires when its normalized text appears in `signals`.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -35,9 +36,9 @@ from datetime import datetime, timezone
 @dataclass
 class PatternMatch:
     name: str
-    verdict: str           # "tp" | "fp"
-    confidence: str        # "low" | "medium" | "high"
-    matched: bool          # conditions satisfied AND no invalidator fired
+    verdict: str  # "tp" | "fp"
+    confidence: str  # "low" | "medium" | "high"
+    matched: bool  # conditions satisfied AND no invalidator fired
     matched_conditions: list[str] = field(default_factory=list)
     unmet_conditions: list[str] = field(default_factory=list)
     invalidators_triggered: list[str] = field(default_factory=list)
@@ -93,7 +94,9 @@ def _match_conditions(conditions: dict, meta: dict) -> tuple[list[str], list[str
     prefixes = [p for p in (conditions.get("path_prefixes") or []) if str(p).strip()]
     if prefixes:
         meta_paths = [str(p).lower() for p in (meta.get("paths") or [])]
-        if any(path.startswith(pref.lower()) for pref in prefixes for path in meta_paths):
+        if any(
+            path.startswith(pref.lower()) for pref in prefixes for path in meta_paths
+        ):
             matched.append("path_prefixes")
         else:
             unmet.append("path_prefixes")
@@ -122,7 +125,9 @@ def evaluate(pattern: dict, meta: dict) -> PatternMatch:
     """Evaluate one pattern (dict shape, as stored) against alert metadata."""
     conditions = pattern.get("conditions") or {}
     matched_keys, unmet_keys = _match_conditions(conditions, meta)
-    invalidators_fired = _triggered_invalidators(pattern.get("invalidators") or [], meta)
+    invalidators_fired = _triggered_invalidators(
+        pattern.get("invalidators") or [], meta
+    )
 
     # A pattern is considered "applicable" only when it had at least one matched
     # condition and no unmet ones; it "matches" only if additionally no invalidator
@@ -166,7 +171,9 @@ def _load_active_patterns() -> list[dict]:
     return [_pattern_to_dict(p) for p in qs]
 
 
-def match_patterns(alert_metadata: dict, *, only_applicable: bool = True) -> list[PatternMatch]:
+def match_patterns(
+    alert_metadata: dict, *, only_applicable: bool = True
+) -> list[PatternMatch]:
     """Evaluate all active patterns against the metadata (sync; uses the ORM).
 
     By default returns only *applicable* patterns — those whose conditions were
@@ -183,7 +190,9 @@ def match_patterns(alert_metadata: dict, *, only_applicable: bool = True) -> lis
     return results
 
 
-async def amatch_patterns(alert_metadata: dict, *, only_applicable: bool = True) -> list[PatternMatch]:
+async def amatch_patterns(
+    alert_metadata: dict, *, only_applicable: bool = True
+) -> list[PatternMatch]:
     """Async wrapper for use inside the graph's async nodes."""
     from asgiref.sync import sync_to_async
 

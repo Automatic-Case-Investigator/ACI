@@ -5,6 +5,7 @@ A metric is a small, self-contained unit that reads a shared `ScoringContext`
 `MetricResult`s. `MetricResult.kind` tells the aggregator how to roll the metric up
 across trials, so adding a metric never requires editing the aggregator.
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

@@ -137,7 +137,7 @@ def _evidence_call_count(messages: list) -> int:
     """
     seen = 0
     for msg in messages:
-        for call in (getattr(msg, "tool_calls", None) or []):
+        for call in getattr(msg, "tool_calls", None) or []:
             if call.get("name") in _EVIDENCE_TOOLS:
                 seen += 1
     return seen
@@ -206,13 +206,17 @@ async def triage_think(state: AgentState, config) -> dict:
         available_tools=[getattr(t, "name", "") for t in model_tools],
     )
     if intent.text:
-        messages = messages + [HumanMessage(content=(
-            "[Public intent already shown to the analyst]\n"
-            f"{intent.text}\n\n"
-            "Perform that action now. Make the tool calls needed to answer the "
-            "analyst's question, or write your triage report as text if the "
-            "evidence you hold already answers it."
-        ))]
+        messages = messages + [
+            HumanMessage(
+                content=(
+                    "[Public intent already shown to the analyst]\n"
+                    f"{intent.text}\n\n"
+                    "Perform that action now. Make the tool calls needed to answer the "
+                    "analyst's question, or write your triage report as text if the "
+                    "evidence you hold already answers it."
+                )
+            )
+        ]
 
     response = await _invoke_bound_model(bound, messages, state["agent_name"])
     _sanitize_message(response)
@@ -278,7 +282,11 @@ async def triage_think(state: AgentState, config) -> dict:
 
 
 async def _force_report_shape(
-    model, messages: list, state: AgentState, src: str, missing: list[str],
+    model,
+    messages: list,
+    state: AgentState,
+    src: str,
+    missing: list[str],
 ) -> str:
     """Tool-free synthesis of a durable three-section report from the conversation.
 
@@ -286,20 +294,26 @@ async def _force_report_shape(
     model sees for a malformed triage handoff is unchanged by the move to the flat loop.
     """
     vicinity_hours = int(state.get("default_vicinity_window_hours") or 24)
-    emit(src, "note",
-         f"triage report malformed, missing {', '.join(missing)} — requesting text synthesis")
+    emit(
+        src,
+        "note",
+        f"triage report malformed, missing {', '.join(missing)} — requesting text synthesis",
+    )
     try:
         text_only = model.bind_tools([])
-        prompt = HumanMessage(content=(
-            "Your previous reply was not a valid triage handoff report. "
-            "Rewrite the triage handoff as a complete text report now. Do not make "
-            "any further tool calls, and do not paste raw JSON or entity dumps as the "
-            "report body — ground it only in the tool results already in this "
-            "conversation.\n\n"
-            + _report_format_instruction(vicinity_hours)
-        ))
+        prompt = HumanMessage(
+            content=(
+                "Your previous reply was not a valid triage handoff report. "
+                "Rewrite the triage handoff as a complete text report now. Do not make "
+                "any further tool calls, and do not paste raw JSON or entity dumps as the "
+                "report body — ground it only in the tool results already in this "
+                "conversation.\n\n" + _report_format_instruction(vicinity_hours)
+            )
+        )
         resp = await _invoke_bound_model(
-            text_only, _sanitize_history(messages + [prompt]), state["agent_name"],
+            text_only,
+            _sanitize_history(messages + [prompt]),
+            state["agent_name"],
         )
         _sanitize_message(resp)
         return (resp.content or "").strip()

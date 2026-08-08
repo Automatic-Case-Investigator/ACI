@@ -6,7 +6,9 @@ import types
 import unittest
 from importlib.util import module_from_spec, spec_from_file_location
 
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, project_root)
 
 agent_pkg = types.ModuleType("agent")
@@ -32,7 +34,9 @@ sys.modules.setdefault("agent.runtime.graph", graph_pkg)
 sys.modules.setdefault("agent.runtime.analysis", analysis_pkg)
 sys.modules.setdefault("agent.runtime.analysis.query_memo", query_memo)
 
-observation_path = os.path.join(project_root, "agent", "runtime", "graph", "observation.py")
+observation_path = os.path.join(
+    project_root, "agent", "runtime", "graph", "observation.py"
+)
 spec = spec_from_file_location("agent.runtime.graph.observation", observation_path)
 observation = module_from_spec(spec)
 assert spec and spec.loader
@@ -49,20 +53,30 @@ class InvalidToolRecoveryTest(unittest.TestCase):
             "absolute incident window unless the task explicitly provides a different one."
         )
 
-        obs = build_observation([{"name": "search", "raw": raw}], objective="check scan tail")
+        obs = build_observation(
+            [{"name": "search", "raw": raw}], objective="check scan tail"
+        )
 
         self.assertIn("INVALID_TIME_WINDOW", obs["signals"])
         self.assertNotIn("ORIENTATION_ONLY", obs["signals"])
         self.assertEqual(obs["evidence_queries"], 0)
-        self.assertEqual(obs["error_recoveries"][0]["requested_window"], {
-            "from": "2026-06-28T00:00:00Z",
-            "to": "2026-06-29T00:00:00Z",
-        })
-        self.assertEqual(obs["error_recoveries"][0]["required_window"], {
-            "from": "2022-01-18T12:17:29Z",
-            "to": "2022-01-19T12:21:57Z",
-        })
-        self.assertIn("claimed task's absolute time window", " ".join(obs["recommended_moves"]))
+        self.assertEqual(
+            obs["error_recoveries"][0]["requested_window"],
+            {
+                "from": "2026-06-28T00:00:00Z",
+                "to": "2026-06-29T00:00:00Z",
+            },
+        )
+        self.assertEqual(
+            obs["error_recoveries"][0]["required_window"],
+            {
+                "from": "2022-01-18T12:17:29Z",
+                "to": "2022-01-19T12:21:57Z",
+            },
+        )
+        self.assertIn(
+            "claimed task's absolute time window", " ".join(obs["recommended_moves"])
+        )
 
 
 if __name__ == "__main__":

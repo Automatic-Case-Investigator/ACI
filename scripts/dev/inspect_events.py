@@ -20,6 +20,7 @@ Examples
     # Most recent runs (no scope given)
     python scripts/dev/inspect_events.py --runs --agent triage
 """
+
 from __future__ import annotations
 
 import argparse
@@ -79,19 +80,39 @@ def _events_queryset(args: argparse.Namespace):
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     scope = p.add_mutually_exclusive_group()
     scope.add_argument("--session", help="filter events by session id")
     scope.add_argument("--run", help="filter events by run id")
-    scope.add_argument("--event", type=int, help="show a single event by id (full detail)")
-    scope.add_argument("--runs", action="store_true", help="list recent AgentRun rows instead of events")
+    scope.add_argument(
+        "--event", type=int, help="show a single event by id (full detail)"
+    )
+    scope.add_argument(
+        "--runs",
+        action="store_true",
+        help="list recent AgentRun rows instead of events",
+    )
     p.add_argument("--source", help="filter by source label (tri/inv/orch/...)")
     p.add_argument("--kind", help="filter by kind (answer/error/think/call/done/...)")
     p.add_argument("--agent", help="with --runs: filter by agent_name")
-    p.add_argument("--latest", type=int, default=20, help="show the last N events (default 20)")
-    p.add_argument("--count", action="store_true", help="print counts by source/kind instead of rows")
-    p.add_argument("--full", action="store_true", help="show full detail text rather than clipped summary")
-    p.add_argument("--limit", type=int, default=100, help="per-row clip length (default 100)")
+    p.add_argument(
+        "--latest", type=int, default=20, help="show the last N events (default 20)"
+    )
+    p.add_argument(
+        "--count",
+        action="store_true",
+        help="print counts by source/kind instead of rows",
+    )
+    p.add_argument(
+        "--full",
+        action="store_true",
+        help="show full detail text rather than clipped summary",
+    )
+    p.add_argument(
+        "--limit", type=int, default=100, help="per-row clip length (default 100)"
+    )
     args = p.parse_args()
 
     if args.event is not None:
@@ -114,7 +135,7 @@ def main() -> int:
 
     field = "detail" if args.full else "summary"
     limit = 4000 if args.full else args.limit
-    for e in events[-args.latest:]:
+    for e in events[-args.latest :]:
         _print_event_row(e, field=field, limit=limit)
     return 0
 

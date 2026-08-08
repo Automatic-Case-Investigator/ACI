@@ -8,17 +8,24 @@ if the prompt directory or any core layer goes missing again.
 Run from project root with:
     python -m pytest tests/unit/config/test_prompt_layers.py
 """
+
 from __future__ import annotations
 
 import os
 import sys
 import unittest
 
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 sys.path.insert(0, project_root)
 
 from agent.agents.registry import get_agent
-from agent.runtime.config.prompts import _PROMPTS_DIR, _load_layer, compose_system_prompt
+from agent.runtime.config.prompts import (
+    _PROMPTS_DIR,
+    _load_layer,
+    compose_system_prompt,
+)
 from agent.runtime.providers.base import format_provider_capability_contracts
 
 
@@ -27,7 +34,13 @@ class PromptLayerLoadingTests(unittest.TestCase):
         self.assertTrue(_PROMPTS_DIR.exists(), f"prompts dir missing: {_PROMPTS_DIR}")
 
     def test_core_layers_load_nonempty(self):
-        for layer in ("platform", "triage", "investigation", "siem_methodology", "playbook"):
+        for layer in (
+            "platform",
+            "triage",
+            "investigation",
+            "siem_methodology",
+            "playbook",
+        ):
             self.assertGreater(
                 len(_load_layer(layer)), 0, f"layer '{layer}' loaded empty"
             )
@@ -66,7 +79,12 @@ class PromptLayerLoadingTests(unittest.TestCase):
     def test_seeder_does_not_include_playbook(self):
         prompt = compose_system_prompt(
             get_agent("seeder").prompt_layers,
-            {"case_id": "~1", "run_id": "r", "agent_name": "seeder", "available_tools": []},
+            {
+                "case_id": "~1",
+                "run_id": "r",
+                "agent_name": "seeder",
+                "available_tools": [],
+            },
         )
         self.assertNotIn("Incident Response Playbook", prompt)
         self.assertNotIn("SIEM Investigation Methodology", prompt)
@@ -106,7 +124,10 @@ class PromptLayerLoadingTests(unittest.TestCase):
         self.assertIn("## Prior Analyst Conversation (Orchestrator)", prompt)
         self.assertIn("## Prior Run Restart Context", prompt)
         self.assertIn("## Tool Usage Instructions (from MCP Servers)", prompt)
-        self.assertLess(prompt.index("## Run Context"), prompt.index("## Tool Usage Instructions (from MCP Servers)"))
+        self.assertLess(
+            prompt.index("## Run Context"),
+            prompt.index("## Tool Usage Instructions (from MCP Servers)"),
+        )
 
     def test_investigation_prompt_includes_anchor_first_reverse_shell_guidance(self):
         prompt = compose_system_prompt(

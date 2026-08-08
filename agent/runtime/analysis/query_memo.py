@@ -15,6 +15,7 @@ turns that into a once-per-run board fact:
 Pure and deterministic; the graph (use_tools) records these to the findings board and
 `_format_board_context` surfaces them at task start.
 """
+
 from __future__ import annotations
 
 import json
@@ -75,7 +76,11 @@ def _collect_dsl_terms(node, out: list[str]) -> None:
                         if field in _VOLATILE_FIELDS:
                             continue
                         value = spec.get("value") if isinstance(spec, dict) else spec
-                        out.append(f"{field}={str(value).lower()}" if value is not None else field)
+                        out.append(
+                            f"{field}={str(value).lower()}"
+                            if value is not None
+                            else field
+                        )
                 continue
             if key in ("terms", "range", "exists", "wildcard", "prefix"):
                 if isinstance(val, dict):
@@ -154,7 +159,7 @@ def extract_schema_fields(tool_name: str, raw, *, limit: int = 60) -> list[str] 
                 if name:
                     names.append(str(name))
     if not names:
-        props = (((obj.get("mappings") or {}).get("properties")) or {})
+        props = ((obj.get("mappings") or {}).get("properties")) or {}
         if isinstance(props, dict):
             names = list(props.keys())
     if not names:

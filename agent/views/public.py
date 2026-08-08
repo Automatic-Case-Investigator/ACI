@@ -18,7 +18,6 @@ from ..runtime.engine.run import run_agent_sync
 log = logging.getLogger(__name__)
 
 
-
 class PublicAPIView(APIView):
     """APIView reachable without authentication.
 
@@ -48,12 +47,16 @@ class VerdictStatsView(PublicAPIView):
             days = 7
         group_by = request.query_params.get("group_by", "agent_name")
         runs, feedback_map = load_verdict_runs(days)
-        return Response({
-            "days": days,
-            "group_by": group_by,
-            "trend": verdict_trend(days, runs=runs, feedback_map=feedback_map),
-            "breakdown": verdict_breakdown(days, group_by, runs=runs, feedback_map=feedback_map),
-        })
+        return Response(
+            {
+                "days": days,
+                "group_by": group_by,
+                "trend": verdict_trend(days, runs=runs, feedback_map=feedback_map),
+                "breakdown": verdict_breakdown(
+                    days, group_by, runs=runs, feedback_map=feedback_map
+                ),
+            }
+        )
 
 
 class ActiveRunsView(PublicAPIView):
@@ -73,30 +76,32 @@ class ActiveRunsView(PublicAPIView):
         )
 
         candidates = list(
-            AgentRun.objects
-            .filter(status__in=ACTIVE_STATES)
-            .order_by("-updated_at")[:50]
+            AgentRun.objects.filter(status__in=ACTIVE_STATES).order_by("-updated_at")[
+                :50
+            ]
         )
         runs = [
-            r for r in candidates
+            r
+            for r in candidates
             if is_inferring(r) and not is_orphaned_interactive_child(r)
         ]
         now = datetime.now(timezone.utc)
-        return Response({
-            "runs": [
-                {
-                    "run_id": str(r.id),
-                    "short_id": str(r.id)[:8],
-                    "agent_name": r.agent_name,
-                    "case_id": r.case_id,
-                    "question": r.question,
-                    "trigger": r.trigger,
-                    "status": r.status,
-                    "age_seconds": int((now - r.created_at).total_seconds()),
-                    "age": humanize_age(int((now - r.created_at).total_seconds())),
-                    "updated_at": r.updated_at.isoformat(),
-                }
-                for r in runs
-            ]
-        })
-
+        return Response(
+            {
+                "runs": [
+                    {
+                        "run_id": str(r.id),
+                        "short_id": str(r.id)[:8],
+                        "agent_name": r.agent_name,
+                        "case_id": r.case_id,
+                        "question": r.question,
+                        "trigger": r.trigger,
+                        "status": r.status,
+                        "age_seconds": int((now - r.created_at).total_seconds()),
+                        "age": humanize_age(int((now - r.created_at).total_seconds())),
+                        "updated_at": r.updated_at.isoformat(),
+                    }
+                    for r in runs
+                ]
+            }
+        )

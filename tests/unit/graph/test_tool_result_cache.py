@@ -7,7 +7,9 @@ import sys
 import tempfile
 import unittest
 
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, project_root)
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
 os.environ["SECRET_KEY"] = "test"
@@ -15,6 +17,7 @@ os.environ["TASKQUEUE_DB_PATH"] = tempfile.mktemp(suffix=".db")
 os.environ["BOARD_DB_PATH"] = tempfile.mktemp(suffix=".db")
 
 import django
+
 django.setup()
 
 from langchain_core.messages import AIMessage
@@ -30,7 +33,9 @@ class _Tool:
 
     async def ainvoke(self, args: dict):
         self.calls += 1
-        return json.dumps({"field": args["field"], "buckets": [{"key": "web", "doc_count": 3}]})
+        return json.dumps(
+            {"field": args["field"], "buckets": [{"key": "web", "doc_count": 3}]}
+        )
 
 
 def _state(cache=None):
@@ -39,14 +44,24 @@ def _state(cache=None):
         "case_id": "~1",
         "source_entity_type": "case",
         "run_id": "not-a-real-run",
-        "messages": [AIMessage(content="", tool_calls=[{
-            "name": "profile_field",
-            "id": "call-1",
-            "args": {"field": "rule.groups", "time_range": {
-                "from": "2022-01-18T00:00:00Z",
-                "to": "2022-01-18T01:00:00Z",
-            }},
-        }])],
+        "messages": [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "profile_field",
+                        "id": "call-1",
+                        "args": {
+                            "field": "rule.groups",
+                            "time_range": {
+                                "from": "2022-01-18T00:00:00Z",
+                                "to": "2022-01-18T01:00:00Z",
+                            },
+                        },
+                    }
+                ],
+            )
+        ],
         "tool_calls_made": 0,
         "last_observation": None,
         "current_task": {"title": "cache test"},

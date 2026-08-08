@@ -7,6 +7,7 @@ Endpoint map (tested against v5.1.9):
   POST /api/v1/query              — flexible query engine (used for case alerts)
   POST /api/v1/case/{id}/page     — create a case page (investigation report)
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -71,21 +72,32 @@ def _normalize_case_timestamps(case: dict) -> dict:
 
 
 class TheHiveClient:
-    def __init__(self, *, base_url: str = "", api_key: str, verify_tls: str = "true",
-                 host: str = "", port: str = "9000") -> None:
+    def __init__(
+        self,
+        *,
+        base_url: str = "",
+        api_key: str,
+        verify_tls: str = "true",
+        host: str = "",
+        port: str = "9000",
+    ) -> None:
         # The connection is configured as a single base URL. `host`/`port` remain
         # accepted for backward compatibility (legacy env vars / direct callers).
         base = (base_url or "").strip().rstrip("/")
         if not base and host:
             base = f"{host.rstrip('/')}:{port}"
         if not base:
-            raise ValueError("TheHive base URL is not configured — set it in Settings → Integrations")
+            raise ValueError(
+                "TheHive base URL is not configured — set it in Settings → Integrations"
+            )
         if not base.startswith(("http://", "https://")):
             base = f"http://{base}"
         self._base = base
-        api_key = api_key.strip().replace('\r', '').replace('\n', '')
+        api_key = api_key.strip().replace("\r", "").replace("\n", "")
         if not api_key:
-            raise ValueError("TheHive API key is not configured — set it in Settings → Integrations")
+            raise ValueError(
+                "TheHive API key is not configured — set it in Settings → Integrations"
+            )
         verify = verify_tls.lower() == "true"
         self._client = httpx.Client(
             base_url=self._base,
@@ -127,7 +139,9 @@ class TheHiveClient:
 
     def get_case(self, case_id: str) -> dict:
         result = self._get(f"/api/case/{case_id}")
-        return _normalize_case_timestamps(result) if isinstance(result, dict) else result
+        return (
+            _normalize_case_timestamps(result) if isinstance(result, dict) else result
+        )
 
     def list_cases(self, max_results: int = 20) -> list[dict]:
         return self._get("/api/case", params={"range": f"0-{max_results}"})
@@ -144,8 +158,22 @@ class TheHiveClient:
         page_to = max(1, int(max_items or 20))
         base = [{"_name": "getCase", "idOrName": case_id}]
         attempts = (
-            ("similarCases", [*base, {"_name": "similarCases"}, {"_name": "page", "from": 0, "to": page_to}]),
-            ("linkedCases", [*base, {"_name": "linkedCases"}, {"_name": "page", "from": 0, "to": page_to}]),
+            (
+                "similarCases",
+                [
+                    *base,
+                    {"_name": "similarCases"},
+                    {"_name": "page", "from": 0, "to": page_to},
+                ],
+            ),
+            (
+                "linkedCases",
+                [
+                    *base,
+                    {"_name": "linkedCases"},
+                    {"_name": "page", "from": 0, "to": page_to},
+                ],
+            ),
         )
         last_exc: Exception | None = None
         for operator, query in attempts:
@@ -183,8 +211,16 @@ class TheHiveClient:
     # Fields kept when summarising alerts — full descriptions are dropped because
     # a single case can link thousands of alerts (megabytes of markdown).
     _ALERT_SUMMARY_FIELDS = (
-        "_id", "type", "source", "sourceRef", "title", "severity",
-        "date", "tags", "status", "read",
+        "_id",
+        "type",
+        "source",
+        "sourceRef",
+        "title",
+        "severity",
+        "date",
+        "tags",
+        "status",
+        "read",
     )
 
     # Hard ceiling on how many alert rows we ever return verbatim. A brute-force
@@ -203,12 +239,16 @@ class TheHiveClient:
         repeated noisy alerts collapse, and return that compact aggregate plus a
         small representative sample. Use get_alert for full detail on one alert.
         """
-        sample_cap = max(1, min(int(max_results or self._ALERT_SAMPLE_CAP), self._ALERT_SAMPLE_CAP))
-        alerts = self._query([
-            {"_name": "listAlert"},
-            {"_name": "filter", "_field": "case", "_value": case_id},
-            {"_name": "page", "from": 0, "to": self._ALERT_SCAN_CAP},
-        ])
+        sample_cap = max(
+            1, min(int(max_results or self._ALERT_SAMPLE_CAP), self._ALERT_SAMPLE_CAP)
+        )
+        alerts = self._query(
+            [
+                {"_name": "listAlert"},
+                {"_name": "filter", "_field": "case", "_value": case_id},
+                {"_name": "page", "from": 0, "to": self._ALERT_SCAN_CAP},
+            ]
+        )
         if not isinstance(alerts, list):
             return {"total": 0, "returned": 0, "groups": [], "alerts": []}
 
@@ -226,14 +266,21 @@ class TheHiveClient:
         # shape a triage analyst actually reasons over.
         groups: dict[tuple, dict] = {}
         for item in summarized:
-            key = (item.get("title") or item.get("type") or "(untitled)", item.get("severity"))
+            key = (
+                item.get("title") or item.get("type") or "(untitled)",
+                item.get("severity"),
+            )
             g = groups.get(key)
             iso = item.get("date_iso")
             if g is None:
                 groups[key] = {
-                    "title": key[0], "severity": key[1], "count": 1,
-                    "first_seen": iso, "last_seen": iso,
-                    "example_id": item.get("_id"), "tags": item.get("tags"),
+                    "title": key[0],
+                    "severity": key[1],
+                    "count": 1,
+                    "first_seen": iso,
+                    "last_seen": iso,
+                    "example_id": item.get("_id"),
+                    "tags": item.get("tags"),
                 }
             else:
                 g["count"] += 1
@@ -256,13 +303,18 @@ class TheHiveClient:
 
     # ── Reports ────────────────────────────────────────────────────────────────
 
-    def post_report(self, case_id: str, summary: str, title: str = "Investigation Report") -> dict:
+    def post_report(
+        self, case_id: str, summary: str, title: str = "Investigation Report"
+    ) -> dict:
         """Create a new case page with the investigation summary (TheHive 5 Pages API)."""
-        return self._post(f"/api/v1/case/{case_id}/page", {
-            "title": title,
-            "content": summary,
-            "category": "Investigation",
-        })
+        return self._post(
+            f"/api/v1/case/{case_id}/page",
+            {
+                "title": title,
+                "content": summary,
+                "category": "Investigation",
+            },
+        )
 
     def post_case_comment(self, case_id: str, message: str) -> dict:
         """Record an ACI workflow note on the case.

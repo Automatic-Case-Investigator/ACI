@@ -3,7 +3,12 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from agent.runtime.infra.avfs import bind_agent_id, home_dir, reset_agent_id, sessions_dir
+from agent.runtime.infra.avfs import (
+    bind_agent_id,
+    home_dir,
+    reset_agent_id,
+    sessions_dir,
+)
 
 
 class AVFSContextTest(unittest.TestCase):
@@ -17,11 +22,14 @@ class AVFSContextTest(unittest.TestCase):
 
     def test_provider_resolved_agent_id_does_not_use_orm_in_async_context(self):
         import asyncio
+
         try:
             from agent.runtime.providers import avfs
         except ModuleNotFoundError as exc:
             if exc.name == "django":
-                self.skipTest("Django not installed in this lightweight test environment")
+                self.skipTest(
+                    "Django not installed in this lightweight test environment"
+                )
             raise
 
         async def run():

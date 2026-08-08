@@ -12,8 +12,17 @@ from agent.runtime.infra import logbus
 from agent.runtime.engine.run import run_agent_sync
 from agent.runtime.orchestrator import OrchestratorSession, run_orchestrator
 
-from ._base import _EVENT_DETAIL_LIMIT, _RESTARTABLE_AGENTS, _RESTART_CONTEXT_LIMIT, _append_with_limit, _clip, _events_for_run, _prior_board_entries, _prior_tasks, publish_specialist_result_to_session
-
+from ._base import (
+    _EVENT_DETAIL_LIMIT,
+    _RESTARTABLE_AGENTS,
+    _RESTART_CONTEXT_LIMIT,
+    _append_with_limit,
+    _clip,
+    _events_for_run,
+    _prior_board_entries,
+    _prior_tasks,
+    publish_specialist_result_to_session,
+)
 
 
 def can_restart_from_prior_run(run: AgentRun | None) -> bool:
@@ -94,7 +103,9 @@ def _start_agent_thread(run: AgentRun, *, session_id: str = "") -> None:
         try:
             run_agent_sync(str(run.id), run.agent_name, run.case_id, run.question)
             if session_id:
-                publish_specialist_result_to_session(session_id, str(run.id), reason="restart")
+                publish_specialist_result_to_session(
+                    session_id, str(run.id), reason="restart"
+                )
         finally:
             if token is not None:
                 logbus.reset_session(token)
@@ -131,7 +142,9 @@ def _build_restart_context(run: AgentRun) -> str:
             if task.get("summary"):
                 lines.append(f"  Summary: {_clip(task.get('summary', ''), 2500)}")
             if task.get("description"):
-                lines.append(f"  Description: {_clip(task.get('description', ''), 1200)}")
+                lines.append(
+                    f"  Description: {_clip(task.get('description', ''), 1200)}"
+                )
 
     board_entries = _prior_board_entries(run)
     if board_entries:
@@ -225,4 +238,3 @@ def _copy_investigation_restart_state(source_run: AgentRun, new_run: AgentRun) -
             )
     except Exception:
         pass
-

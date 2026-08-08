@@ -1,4 +1,5 @@
 """Self-registering workflow-binding registry."""
+
 from __future__ import annotations
 
 from .base import WorkflowBinding

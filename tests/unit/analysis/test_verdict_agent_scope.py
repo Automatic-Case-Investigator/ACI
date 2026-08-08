@@ -4,13 +4,16 @@ Triage is a bounded first pass. "We looked hard and still cannot tell" is a clai
 is not entitled to make, so the same evidential state must surface as
 `needs_investigation` — a verdict the response matrix can route to an action.
 """
+
 from __future__ import annotations
 
 import os
 import sys
 import unittest
 
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, project_root)
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
 os.environ.setdefault("SECRET_KEY", "test")
@@ -29,7 +32,8 @@ from agent.runtime.analysis.verdict import (
 class AgentScopeFloorTests(unittest.TestCase):
     def test_triage_inconclusive_becomes_needs_investigation(self):
         out, changed = apply_agent_scope_floor(
-            {"verdict": "inconclusive", "confidence": "medium"}, "triage")
+            {"verdict": "inconclusive", "confidence": "medium"}, "triage"
+        )
         self.assertTrue(changed)
         self.assertEqual(out["verdict"], "needs_investigation")
         self.assertEqual(out["demoted_from"], "inconclusive")
@@ -49,7 +53,8 @@ class AgentScopeFloorTests(unittest.TestCase):
 
     def test_existing_blocking_gaps_are_preserved(self):
         out, _ = apply_agent_scope_floor(
-            {"verdict": "inconclusive", "blocking_gaps": ["original gap"]}, "triage")
+            {"verdict": "inconclusive", "blocking_gaps": ["original gap"]}, "triage"
+        )
         self.assertEqual(out["blocking_gaps"], ["original gap"])
 
 
@@ -57,8 +62,12 @@ class PipelineIntegrationTests(unittest.TestCase):
     def test_uncited_triage_tp_lands_on_needs_investigation_not_inconclusive(self):
         """The citation policy demotes to `inconclusive`; scope must catch that too."""
         verdict, notes = apply_verdict_integrity(
-            {"verdict": "tp", "confidence": "high",
-             "classification_basis": "malicious_evidence", "supporting_evidence": []},
+            {
+                "verdict": "tp",
+                "confidence": "high",
+                "classification_basis": "malicious_evidence",
+                "supporting_evidence": [],
+            },
             strict=True,
             agent_name="triage",
         )
@@ -66,8 +75,12 @@ class PipelineIntegrationTests(unittest.TestCase):
 
     def test_same_input_stays_inconclusive_for_investigation(self):
         verdict, _ = apply_verdict_integrity(
-            {"verdict": "tp", "confidence": "high",
-             "classification_basis": "malicious_evidence", "supporting_evidence": []},
+            {
+                "verdict": "tp",
+                "confidence": "high",
+                "classification_basis": "malicious_evidence",
+                "supporting_evidence": [],
+            },
             strict=False,
             agent_name="investigation",
         )
@@ -75,9 +88,9 @@ class PipelineIntegrationTests(unittest.TestCase):
 
     def test_pipeline_is_idempotent_under_rescoping(self):
         first, _ = apply_verdict_integrity(
-            {"verdict": "inconclusive"}, strict=True, agent_name="triage")
-        second, notes = apply_verdict_integrity(
-            first, strict=True, agent_name="triage")
+            {"verdict": "inconclusive"}, strict=True, agent_name="triage"
+        )
+        second, notes = apply_verdict_integrity(first, strict=True, agent_name="triage")
         self.assertEqual(second["verdict"], "needs_investigation")
         self.assertEqual(first["verdict"], second["verdict"])
 

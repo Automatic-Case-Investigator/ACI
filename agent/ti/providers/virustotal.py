@@ -1,4 +1,5 @@
 """VirusTotal API v3 TI provider."""
+
 from __future__ import annotations
 
 import json

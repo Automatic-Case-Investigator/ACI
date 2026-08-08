@@ -1,10 +1,27 @@
 """Next-action decision logic and instruction composition for the interpret loop."""
+
 from __future__ import annotations
 
 
-from ._const import _CONTINUE_ACTIONS, _DEFAULT_STOP_CONDITION, _FORCE_CONTINUE_SIGNALS, _REPORT_INSTRUCTION, _TERMINAL_ACTIONS
-from .ledger import _coerce_string_list, _coerce_trials, _confirmed_findings_from_observation, _merge_confirmed_findings
-from .pivots import _coerce_adjacency, _coerce_pivot, _pivot_instruction_fragment, _update_pivot_state
+from ._const import (
+    _CONTINUE_ACTIONS,
+    _DEFAULT_STOP_CONDITION,
+    _FORCE_CONTINUE_SIGNALS,
+    _REPORT_INSTRUCTION,
+    _TERMINAL_ACTIONS,
+)
+from .ledger import (
+    _coerce_string_list,
+    _coerce_trials,
+    _confirmed_findings_from_observation,
+    _merge_confirmed_findings,
+)
+from .pivots import (
+    _coerce_adjacency,
+    _coerce_pivot,
+    _pivot_instruction_fragment,
+    _update_pivot_state,
+)
 
 
 def _next_action_from_signals(obs: dict) -> str:
@@ -21,10 +38,14 @@ def _next_action_from_signals(obs: dict) -> str:
         return "retrieve_specific_event"
     if "EMPTY" in signals or "NO_NEW_EVIDENCE" in signals:
         return "pivot_entity"
-    has_concrete_evidence = bool((obs.get("event_ids") or []) or (obs.get("evidence_markers") or []))
+    has_concrete_evidence = bool(
+        (obs.get("event_ids") or []) or (obs.get("evidence_markers") or [])
+    )
     if obs.get("advanced_objective") and has_concrete_evidence:
         return "stop_completed"
     return "retrieve_specific_event"
+
+
 def _action_from_review(parsed: dict, observation: dict) -> str:
     """Resolve the next action from the model's review.
 
@@ -54,7 +75,11 @@ def _action_from_review(parsed: dict, observation: dict) -> str:
         # one, otherwise fall back to the default retrieval step.
         return claimed if claimed in _CONTINUE_ACTIONS else "retrieve_specific_event"
     return action
-def _should_assess(obs: dict, action: str, observation_retries: int, is_triage: bool = False) -> bool:
+
+
+def _should_assess(
+    obs: dict, action: str, observation_retries: int, is_triage: bool = False
+) -> bool:
     signals = set(obs.get("signals") or [])
     if action == "stop_completed":
         # Triage may hand off despite a flood on the latest batch — for triage a
@@ -67,7 +92,11 @@ def _should_assess(obs: dict, action: str, observation_retries: int, is_triage: 
     if action == "stop_negative":
         return observation_retries >= 1 or "NO_NEW_EVIDENCE" in signals
     return False
-def _evidence_state_from_observation(observation: dict, action: str, ready: bool) -> str:
+
+
+def _evidence_state_from_observation(
+    observation: dict, action: str, ready: bool
+) -> str:
     signals = set(observation.get("signals") or [])
     if ready and action == "stop_completed":
         return "sufficient_handoff"
@@ -77,19 +106,33 @@ def _evidence_state_from_observation(observation: dict, action: str, ready: bool
         return "scoped_hits"
     if "INVALID_TIME_WINDOW" in signals or "TOOL_ERROR" in signals:
         return "tool_error_recovery"
-    if "ORIENTATION_ONLY" in signals or int(observation.get("evidence_queries") or 0) <= 0:
+    if (
+        "ORIENTATION_ONLY" in signals
+        or int(observation.get("evidence_queries") or 0) <= 0
+    ):
         return "orientation"
     return "aggregate_signal"
+
+
 def _invalid_time_recovery_instruction(observation: dict) -> str:
     recoveries = [
-        item for item in (observation.get("error_recoveries") or [])
+        item
+        for item in (observation.get("error_recoveries") or [])
         if isinstance(item, dict) and item.get("signal") == "INVALID_TIME_WINDOW"
     ]
     if not recoveries:
         return ""
     recovery = recoveries[-1]
-    requested = recovery.get("requested_window") if isinstance(recovery.get("requested_window"), dict) else {}
-    required = recovery.get("required_window") if isinstance(recovery.get("required_window"), dict) else {}
+    requested = (
+        recovery.get("requested_window")
+        if isinstance(recovery.get("requested_window"), dict)
+        else {}
+    )
+    required = (
+        recovery.get("required_window")
+        if isinstance(recovery.get("required_window"), dict)
+        else {}
+    )
     requested_text = (
         f"{requested.get('from')} to {requested.get('to')}"
         if requested.get("from") and requested.get("to")
@@ -106,6 +149,8 @@ def _invalid_time_recovery_instruction(observation: dict) -> str:
         "Do not invent a new year, do not use TheHive createdAt/_createdAt, and do not "
         "change investigative direction until this corrected task-window query has run."
     )
+
+
 def _exhausted_shape(observation: dict, ledger: dict) -> str:
     """A short label for the dead query direction, recorded in forbidden_repeats so it is
     not re-proposed and downstream reads it as a settled negative."""
@@ -114,10 +159,14 @@ def _exhausted_shape(observation: dict, ledger: dict) -> str:
         return f"{pivot['field']}={pivot['value']} (returned nothing repeatedly — abandon this shape)"
     adj = ledger.get("next_adjacent_evidence_path") or {}
     if isinstance(adj, dict):
-        label = " ".join(str(adj.get(k) or "") for k in ("entity", "representation_hint")).strip()
+        label = " ".join(
+            str(adj.get(k) or "") for k in ("entity", "representation_hint")
+        ).strip()
         if label:
             return f"{label} (returned nothing repeatedly — abandon this shape)"
     return ""
+
+
 def _default_instruction(observation: dict, action: str) -> str:
     signals = set(observation.get("signals") or [])
     regimes = observation.get("volume_regimes") or []
@@ -152,7 +201,9 @@ def _default_instruction(observation: dict, action: str) -> str:
         return invalid_time_instruction
     if "TOOL_ERROR" in signals:
         recoveries = observation.get("error_recoveries") or []
-        latest = next((item for item in reversed(recoveries) if isinstance(item, dict)), {})
+        latest = next(
+            (item for item in reversed(recoveries) if isinstance(item, dict)), {}
+        )
         error_text = str(latest.get("error") or "the previous tool error").strip()
         return (
             f"The previous tool call failed: {error_text[:320]}. Recover from that concrete "
@@ -162,10 +213,16 @@ def _default_instruction(observation: dict, action: str) -> str:
     # A flooded result whose deviation axis the tool already isolated: route it into
     # the obeyed channel so the agent reads the sample before querying the flood head.
     disc = observation.get("discriminator")
-    if isinstance(disc, dict) and disc.get("field") and disc.get("minority") is not None:
+    if (
+        isinstance(disc, dict)
+        and disc.get("field")
+        and disc.get("minority") is not None
+    ):
         values = ", ".join(str(v) for v in (disc.get("minority_values") or [])[:8])
         sample_ids = ", ".join(str(v) for v in (disc.get("sample_event_ids") or [])[:6])
-        sample_part = f" Sample events already returned: {sample_ids}." if sample_ids else ""
+        sample_part = (
+            f" Sample events already returned: {sample_ids}." if sample_ids else ""
+        )
         return (
             f"The result is flood-dominated, and the events differ along `{disc['field']}` "
             f"(dominant `{disc.get('dominant')}` = the scan/noise; minority candidates: "
@@ -218,8 +275,14 @@ def _default_instruction(observation: dict, action: str) -> str:
             "case's host, user, source IP, and rule family."
         )
     return "Run the highest-yield concrete evidence query for the current objective."
+
+
 def _compose_instruction(
-    observation: dict, action: str, ready: bool, provided: str = "", ledger: dict | None = None
+    observation: dict,
+    action: str,
+    ready: bool,
+    provided: str = "",
+    ledger: dict | None = None,
 ) -> str:
     """The single imperative `think` follows next turn. Absorbs what used to be split
     across best_next_evidence_path / next_adjacent_evidence_path.
@@ -245,14 +308,23 @@ def _compose_instruction(
             "first state why the ledger is wrong."
         )
     return base
+
+
 def _forbidden_repeats(observation: dict) -> list[str]:
     tools = observation.get("tools") or []
     orientation_tools = {
-        "get_case", "list_case_alerts", "search_patterns", "search_feedback",
+        "get_case",
+        "list_case_alerts",
+        "search_patterns",
+        "search_feedback",
         "list_baseline_entities",
     }
     return [tool for tool in tools if tool in orientation_tools][:8]
-def _reconcile_terminal_action(observation: dict, action: str, status: str, ledger: dict) -> tuple[str, str]:
+
+
+def _reconcile_terminal_action(
+    observation: dict, action: str, status: str, ledger: dict
+) -> tuple[str, str]:
     """A terminal action (stop_*) is only honored when the gate agreed (ready). Otherwise
     demote it to a concrete continuation so the loop cannot stop on an unmet standard.
     """
@@ -262,29 +334,43 @@ def _reconcile_terminal_action(observation: dict, action: str, status: str, ledg
     if fallback in _TERMINAL_ACTIONS:
         fallback = "retrieve_specific_event"
     return fallback, "needs_more_work"
+
+
 def _fallback_interpretation(
     ledger: dict, observation: dict, observation_retries: int, is_triage: bool = False
 ) -> tuple[dict, str]:
     """Deterministic ledger update used when no model is configured or the model call
     fails/omits a field. Signals map to actions; the model refines the prose."""
     action = _next_action_from_signals(observation)
-    ready = _should_assess(observation, action, observation_retries, is_triage=is_triage)
+    ready = _should_assess(
+        observation, action, observation_retries, is_triage=is_triage
+    )
 
     updated = dict(ledger)
     updated["next_action"] = action
     updated["evidence_summary"] = observation.get("summary") or ""
     updated["blocker"] = "; ".join(observation.get("recommended_moves") or [])
-    updated["evidence_state"] = _evidence_state_from_observation(observation, action, ready)
+    updated["evidence_state"] = _evidence_state_from_observation(
+        observation, action, ready
+    )
     (
         updated["active_pivots"],
         updated["primary_pivot"],
         updated["next_pivot_strategy"],
         updated["why_current_pivot_failed"],
     ) = _update_pivot_state(updated, observation, action)
-    updated["next_step_instruction"] = _compose_instruction(observation, action, ready, ledger=updated)
-    updated["stop_state"] = "complete" if ready and action == "stop_completed" else "negative" if ready else "continue"
+    updated["next_step_instruction"] = _compose_instruction(
+        observation, action, ready, ledger=updated
+    )
+    updated["stop_state"] = (
+        "complete"
+        if ready and action == "stop_completed"
+        else "negative" if ready else "continue"
+    )
     # Persist the prior forward-stage target; the deterministic path cannot synthesize it.
-    updated["next_adjacent_evidence_path"] = _coerce_adjacency(ledger.get("next_adjacent_evidence_path"))
+    updated["next_adjacent_evidence_path"] = _coerce_adjacency(
+        ledger.get("next_adjacent_evidence_path")
+    )
     updated["forbidden_repeats"] = _coerce_string_list(
         ledger.get("forbidden_repeats") or _forbidden_repeats(observation)
     )
@@ -295,6 +381,8 @@ def _fallback_interpretation(
     )
     updated["remaining_gaps"] = _coerce_string_list(ledger.get("remaining_gaps"))
     updated["stop_condition"] = ledger.get("stop_condition") or _DEFAULT_STOP_CONDITION
-    updated["stop_reason"] = ledger.get("stop_reason") or (updated["evidence_summary"] if ready else "")
+    updated["stop_reason"] = ledger.get("stop_reason") or (
+        updated["evidence_summary"] if ready else ""
+    )
     updated["query_trials"] = _coerce_trials(ledger.get("query_trials"))
     return updated, ("ready_to_assess" if ready else "needs_more_work")

@@ -9,13 +9,16 @@ compromise context, only when absent from New Leads.
 Run from project root with:
     python -m pytest tests/unit/graph/test_pivot_guard.py
 """
+
 from __future__ import annotations
 
 import os
 import sys
 import unittest
 
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 sys.path.insert(0, project_root)
 
 from agent.runtime.graph.validation import _unpivoted_network_iocs

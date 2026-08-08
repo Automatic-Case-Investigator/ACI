@@ -4,6 +4,7 @@ HTTP is served by Django as usual; WebSocket connections (the live dashboard log
 are routed to Channels consumers. Keep `get_asgi_application()` first so Django is
 fully set up before importing anything that touches models/consumers.
 """
+
 import os
 
 from django.core.asgi import get_asgi_application
