@@ -17,6 +17,7 @@ from ..infra.logbus import emit, src_label, summarize_args, summarize_result, su
 from .board import _format_board_context
 from .interpretation import _default_ledger
 from .observation import build_observation
+from .coverage import _count_evidence_queries
 from .sanitize import _HARMONY_TOKEN_RE, _sanitize_history, _sanitize_message
 from .state import AgentState
 from .timeutil import _find_timestamp_range, _format_dt, _parse_dt
@@ -332,6 +333,10 @@ async def claim(state: AgentState, config) -> dict:
     ledger = _default_ledger(task) if task else None
     return {
         "current_task": task,
+        # THE COMPACTION SEAM. History is flat within a task and cleared here, at the
+        # task boundary — a new objective starts with a clean context. What needs to
+        # cross the boundary already does, via the findings board and the ledger's
+        # confirmed findings.
         "messages": [],
         "task_call_floor": state["tool_calls_made"],
         "task_ledger": ledger,
@@ -342,6 +347,160 @@ async def claim(state: AgentState, config) -> dict:
     }
 
 
+def _task_anchor(state: AgentState) -> str:
+    """The task objective and reasoning contract — sent ONCE, as the task's message[1].
+
+    Everything here is stable for the life of the task. Anything derived from the
+    ledger changes every cycle and belongs in `_cycle_steering`, which is never
+    persisted — so this message can never be re-read as a checklist to restart.
+    """
+    task = state.get("current_task") or {}
+    text = f"**Task:** {task.get('title', '')}\n\n{task.get('description') or ''}".strip()
+    text += (
+        "\n\nReasoning contract:\n"
+        "- Decide what evidence would actually answer this task before choosing tools.\n"
+        "- Separate context, aggregate signal, direct evidence, and conclusion.\n"
+        "- Prefer the next tool call that most directly tests the task objective.\n"
+        "- Treat case or aggregate-alert exemplars as illustrative unless raw evidence "
+        "upgrades them; prefer entity + time + behavior-family pivots over low-confidence "
+        "exact strings.\n"
+        "- Treat the interpretation note as advisory synthesis, not as a forced plan. "
+        "Re-plan when the broader objective or evidence suggests a better move.\n"
+        "- If a query returns a small scoped hit set, retrieve representative raw events "
+        "before broadening to another entity.\n"
+        "- If the current evidence only confirms one stage of activity, ask what happened "
+        "next on the same asset and timeline before repeating the same-stage query.\n"
+        "- Before choosing tools, compare current semantic evidence to the task objective. "
+        "If it already satisfies the objective, synthesize the finding and query further "
+        "only for explicitly unresolved subclaims.\n"
+        "- If you are relying on inference instead of direct evidence, say so.\n\n"
+        "Your own prior tool calls and their results are in this conversation — read them "
+        "rather than re-running them. When the objective is answered, write the report as "
+        "text using the mandatory format:\n\n## Findings\n## Hypotheses\n## New Leads"
+    )
+    return text
+
+
+async def _cycle_steering(state: AgentState, tools: list) -> str:
+    """This cycle's ledger-derived guidance plus live board/queue state.
+
+    Appended to the model call but NOT persisted, so instructions never accumulate
+    in the durable history and the model's context stays evidence.
+    """
+    ledger = state.get("task_ledger") or {}
+    parts: list[str] = []
+
+    if ledger.get("next_step_instruction"):
+        parts.append(
+            "Your REQUIRED next step (not merely advisory):\n"
+            f"{ledger['next_step_instruction']}"
+        )
+
+    forbidden = [
+        str(item).strip() for item in (ledger.get("forbidden_repeats") or [])
+        if str(item).strip()
+    ]
+    if forbidden:
+        parts.append(
+            "Do not repeat without first explaining why the ledger is wrong:\n"
+            + "\n".join(f"- {item}" for item in forbidden[:8])
+        )
+
+    if ledger.get("evidence_state") or ledger.get("stop_condition"):
+        parts.append(
+            "Current evidence path:\n"
+            f"- Evidence state: {ledger.get('evidence_state') or 'orientation'}\n"
+            f"- Stop condition: {ledger.get('stop_condition') or 'direct evidence or well-scoped confirmed negative'}"
+        )
+
+    if ledger.get("blocker") or ledger.get("hypothesis"):
+        lines = ["Current interpretation:"]
+        if ledger.get("blocker"):
+            lines.append(f"- Open blocker: {ledger.get('blocker')}")
+        if ledger.get("hypothesis"):
+            lines.append(f"- Working hypothesis: {ledger.get('hypothesis')}")
+        parts.append("\n".join(lines))
+
+    primary_pivot = ledger.get("primary_pivot") or {}
+    if isinstance(primary_pivot, dict) and primary_pivot.get("field") and primary_pivot.get("value"):
+        lines = [
+            "Current pivot state:",
+            f"- Primary pivot: {primary_pivot.get('field')}={primary_pivot.get('value')} "
+            f"({primary_pivot.get('source_level') or 'unknown'}, "
+            f"{primary_pivot.get('role') or 'unknown'}, "
+            f"{primary_pivot.get('confidence') or 'unknown'}, "
+            f"status={primary_pivot.get('status') or 'active'}, "
+            f"failures={primary_pivot.get('failure_count') or 0})",
+        ]
+        if primary_pivot.get("broader_alternative"):
+            lines.append(f"- Broader alternative: {primary_pivot.get('broader_alternative')}")
+        if primary_pivot.get("last_failure_reason"):
+            lines.append(f"- Last pivot failure: {primary_pivot.get('last_failure_reason')}")
+        if primary_pivot.get("role") == "exemplar" or primary_pivot.get("source_level") in ("case", "alert_aggregate"):
+            lines.append(
+                "- Do not require an exact match on this pivot unless raw evidence in this run upgrades it."
+            )
+        parts.append("\n".join(lines))
+
+    active_pivots = [item for item in (ledger.get("active_pivots") or []) if isinstance(item, dict)]
+    exhausted = [
+        item for item in active_pivots
+        if str(item.get("status") or "") == "exhausted" and item.get("field") and item.get("value")
+    ]
+    if exhausted:
+        parts.append("Exhausted pivots:\n" + "\n".join(
+            f"- {item.get('field')}={item.get('value')}" for item in exhausted[:6]
+        ))
+
+    adjacency = ledger.get("next_adjacent_evidence_path") or {}
+    if isinstance(adjacency, dict) and any(adjacency.values()):
+        lines = ["Next adjacent evidence path (the forward stage on the same asset/timeline):"]
+        for key in ("entity", "time_direction", "window_hint", "representation_hint"):
+            if adjacency.get(key):
+                lines.append(f"- {key}: {adjacency[key]}")
+        # Once the current stage is scoped, re-querying it rarely advances the objective.
+        # This is what moves the window past a confirmed scan cluster toward execution.
+        if (ledger.get("evidence_state") or "") in ("scoped_hits", "raw_events"):
+            lines.append(
+                "\nThe current stage is already scoped. Unless the last batch produced a NEW "
+                "payload-bearing clue, your next tool batch should TARGET the adjacent path "
+                "above rather than re-querying the same confirmed cluster."
+            )
+        parts.append("\n".join(lines))
+
+    confirmed_findings = [
+        item for item in (ledger.get("confirmed_findings") or [])
+        if isinstance(item, dict) and str(item.get("summary") or "").strip()
+    ]
+    if confirmed_findings:
+        parts.append(
+            "Confirmed findings already established from raw evidence (do not replace "
+            "these with '- None.' unless later raw evidence contradicts them):\n"
+            + "\n".join(f"- {item.get('summary')}" for item in confirmed_findings[:8])
+        )
+
+    remaining_gaps = [
+        str(item).strip() for item in (ledger.get("remaining_gaps") or []) if str(item).strip()
+    ]
+    if remaining_gaps:
+        parts.append("Remaining gaps:\n" + "\n".join(f"- {item}" for item in remaining_gaps[:8]))
+
+    board_context = ""
+    queue_context = await _queue_context_for_state(state, tools)
+    if state["agent_name"] == "investigation":
+        get_board_fn = _tmap(tools).get("get_board")
+        if get_board_fn:
+            board_context = _format_board_context(await _call(get_board_fn, {}))
+    live_context = (board_context + queue_context).strip()
+
+    if not parts and not live_context:
+        return ""
+    out = "\n\n".join(parts)
+    if live_context:
+        out += ("\n\n" if out else "") + "# CONTEXT\n\n" + live_context
+    return out
+
+
 async def think(state: AgentState, config) -> dict:
     """Ask the model to reason about the current task and decide on tool calls or a report."""
     model = config["configurable"]["model"]
@@ -350,194 +509,28 @@ async def think(state: AgentState, config) -> dict:
     src = src_label(state["agent_name"])
     _emit_node_entry(src, "think", state)
 
+    # ONE FLAT HISTORY PER TASK. Evidence accumulates across cycles and is cleared
+    # only at `claim` (the task boundary). The anchor below is written once and never
+    # replayed: re-sending the numbered startup checklist every cycle is what made
+    # small models restart orientation, and that — not the evidence — is what the old
+    # `messages: []` wipe was really protecting against. Instructions are transient
+    # (`_cycle_steering`), evidence is durable.
     messages = _sanitize_history(list(state["messages"]))
     if not messages:
-        task = state["current_task"]
-        task_text = f"**Task:** {task['title']}\n\n{task.get('description') or ''}".strip()
-        ledger = state.get("task_ledger") or {}
-        if ledger.get("next_step_instruction"):
-            # Post-interpretation continuation. Re-inject ONLY the task objective, NEVER the
-            # original numbered startup checklist. That checklist ("1. Load the case. 2. Load
-            # alerts. 3. Check patterns. ...") is turn-1 scaffolding; re-appending it here made
-            # small models replay orientation (get_case/list_case_alerts/search_patterns/
-            # list_baseline_entities/search_feedback) every cycle and never reach the SIEM step,
-            # because six concrete numbered imperatives out-pull one advisory note. The ledger
-            # already carries the case/alert/pattern/baseline facts forward, so the steps are
-            # redundant now. (The full description is still shown on a fresh claim below.)
-            objective = (ledger.get("objective") or task["title"] or "").strip()
-            # De-amnesia block. Clearing `messages` on continuation removes the model's
-            # episodic memory (its own prior tool calls + their results), so a weak model
-            # that emits no reasoning re-runs discovery (whoami/home/get_instructions/get_case)
-            # every cycle — it cannot SEE that orientation is done. The instruction alone,
-            # framed as "advisory", loses. So: (a) state plainly that orientation is COMPLETE
-            # and name the spent tools as wasted repeats, (b) render the last step's result so
-            # the model has concrete continuity, (c) frame the next step as REQUIRED, not advisory.
-            last_result = " ".join(str(ledger.get("evidence_summary") or "").split())[:600]
-            already = (
-                "\n\nWhat you have ALREADY completed on this task (repeating it adds nothing and "
-                "wastes the budget):\n"
-                "- The case record, linked alerts, known FP/TP patterns, baselines, and analyst "
-                "feedback are ALL already loaded, and your workspace is already inspected. Do NOT "
-                "call get_case, list_case_alerts, search_patterns, list_baseline_entities, "
-                "search_feedback, whoami, home, ls, or get_instructions again — you have their "
-                "results."
-            )
-            if last_result:
-                already += f"\n- Result of your last step: {last_result}"
-            task_text = (
-                "You are continuing a task already in progress. Orientation is COMPLETE.\n\n"
-                "Your REQUIRED next step (this is not optional and not merely advisory):\n"
-                f"{ledger.get('next_step_instruction')}"
-                f"{already}\n\n"
-                "Issue the evidence query described above now. Do not restart orientation. Write "
-                "the report instead of calling tools ONLY if the objective is already fully "
-                "answered by evidence you have actually gathered (loading the case/alerts is not "
-                "such evidence).\n\n"
-                f"Task objective:\n{objective}"
-            ).strip()
-        forbidden = [
-            str(item).strip() for item in (ledger.get("forbidden_repeats") or [])
-            if str(item).strip()
-        ]
-        if forbidden:
-            task_text += (
-                "\n\nDo not repeat without first explaining why the ledger is wrong:\n"
-                + "\n".join(f"- {item}" for item in forbidden[:8])
-            )
-        task_text += (
-            "\n\nReasoning contract:\n"
-            "- Decide what evidence would actually answer this task before choosing tools.\n"
-            "- Separate context, aggregate signal, direct evidence, and conclusion.\n"
-            "- Prefer the next tool call that most directly tests the task objective.\n"
-            "- Treat case or aggregate-alert exemplars as illustrative unless raw evidence upgrades them; "
-            "prefer entity + time + behavior-family pivots over low-confidence exact strings.\n"
-            "- Treat the interpretation note as advisory synthesis, not as a forced plan. Re-plan when the broader objective or evidence suggests a better move.\n"
-            "- If a query returns a small scoped hit set, retrieve representative raw events "
-            "before broadening to another entity.\n"
-            "- If the current evidence only confirms one stage of activity, ask what happened "
-            "next on the same asset and timeline before repeating the same-stage query.\n"
-            "- Before choosing tools, compare current semantic evidence to the task objective. "
-            "If it already satisfies the objective, synthesize the finding and query further "
-            "only for explicitly unresolved subclaims.\n"
-            "- If you are relying on inference instead of direct evidence, say so."
-        )
-        if ledger.get("evidence_state") or ledger.get("stop_condition"):
-            task_text += (
-                "\n\nCurrent evidence path:\n"
-                f"- Evidence state: {ledger.get('evidence_state') or 'orientation'}\n"
-                f"- Stop condition: {ledger.get('stop_condition') or 'direct evidence or well-scoped confirmed negative'}"
-            )
-        if ledger.get("blocker") or ledger.get("hypothesis"):
-            task_text += "\n\nCurrent interpretation:"
-            if ledger.get("blocker"):
-                task_text += f"\n- Open blocker: {ledger.get('blocker')}"
-            if ledger.get("hypothesis"):
-                task_text += f"\n- Working hypothesis: {ledger.get('hypothesis')}"
-        primary_pivot = ledger.get("primary_pivot") or {}
-        active_pivots = [
-            item for item in (ledger.get("active_pivots") or [])
-            if isinstance(item, dict)
-        ]
-        if isinstance(primary_pivot, dict) and primary_pivot.get("field") and primary_pivot.get("value"):
-            task_text += (
-                "\n\nCurrent pivot state:\n"
-                f"- Primary pivot: {primary_pivot.get('field')}={primary_pivot.get('value')} "
-                f"({primary_pivot.get('source_level') or 'unknown'}, "
-                f"{primary_pivot.get('role') or 'unknown'}, "
-                f"{primary_pivot.get('confidence') or 'unknown'}, "
-                f"status={primary_pivot.get('status') or 'active'}, "
-                f"failures={primary_pivot.get('failure_count') or 0})"
-            )
-            if primary_pivot.get("broader_alternative"):
-                task_text += f"\n- Broader alternative: {primary_pivot.get('broader_alternative')}"
-            if primary_pivot.get("last_failure_reason"):
-                task_text += f"\n- Last pivot failure: {primary_pivot.get('last_failure_reason')}"
-            if primary_pivot.get("role") == "exemplar" or primary_pivot.get("source_level") in ("case", "alert_aggregate"):
-                task_text += (
-                    "\n- Do not require an exact match on this pivot unless raw evidence in this run upgrades it."
-                )
-        exhausted = [
-            item for item in active_pivots
-            if str(item.get("status") or "") == "exhausted" and item.get("field") and item.get("value")
-        ]
-        if exhausted:
-            task_text += "\n\nExhausted pivots:\n" + "\n".join(
-                f"- {item.get('field')}={item.get('value')}" for item in exhausted[:6]
-            )
-        adjacency = ledger.get("next_adjacent_evidence_path") or {}
-        if isinstance(adjacency, dict) and any(adjacency.values()):
-            lines = ["\n\nNext adjacent evidence path (the forward stage on the same asset/timeline):"]
-            for key in ("entity", "time_direction", "window_hint", "representation_hint"):
-                if adjacency.get(key):
-                    lines.append(f"- {key}: {adjacency[key]}")
-            task_text += "\n".join(lines)
-            # Once the current stage is already scoped, re-querying it rarely advances the
-            # objective. Point the next batch at the forward stage instead — the mechanism that
-            # moves the search window past a confirmed scan/recon cluster toward payload/execution.
-            if (ledger.get("evidence_state") or "") in ("scoped_hits", "raw_events"):
-                task_text += (
-                    "\n\nThe current stage is already scoped. Unless the last batch produced a NEW "
-                    "payload-bearing clue, your next tool batch should TARGET the next adjacent "
-                    "evidence path above — move forward on the same asset and timeline into the next "
-                    "stage's representation — rather than re-querying the same confirmed cluster."
-                )
-        evidence_found = [
-            str(item).strip() for item in (ledger.get("evidence_found") or [])
-            if str(item).strip()
-        ]
-        if evidence_found:
-            task_text += "\n\nEvidence already assimilated:\n" + "\n".join(
-                f"- {item}" for item in evidence_found[:8]
-            )
-        confirmed_findings = [
-            item for item in (ledger.get("confirmed_findings") or [])
-            if isinstance(item, dict) and str(item.get("summary") or "").strip()
-        ]
-        if confirmed_findings:
-            task_text += (
-                "\n\nConfirmed findings already established from raw evidence "
-                "(do not replace these with '- None.' unless later raw evidence contradicts them):\n"
-                + "\n".join(f"- {item.get('summary')}" for item in confirmed_findings[:8])
-            )
-        remaining_gaps = [
-            str(item).strip() for item in (ledger.get("remaining_gaps") or [])
-            if str(item).strip()
-        ]
-        if remaining_gaps:
-            task_text += "\n\nRemaining gaps:\n" + "\n".join(
-                f"- {item}" for item in remaining_gaps[:8]
-            )
-
-        # Inject cross-task board and queue context for investigation tasks
-        board_context = ""
-        queue_context = await _queue_context_for_state(state, tools)
-        if state["agent_name"] == "investigation":
-            get_board_fn = _tmap(tools).get("get_board")
-            if get_board_fn:
-                raw = await _call(get_board_fn, {})
-                board_context = _format_board_context(raw)
-
-        # Role-separated HumanMessage: `# USER` (the task) + `# CONTEXT` (live board/queue
-        # state). The SystemMessage already carries `# SYSTEM`/`# DEVELOPER` (compose_system_prompt).
-        live_context = (board_context + queue_context).strip()
-        human = "# USER\n" + task_text
-        if live_context:
-            human += "\n\n# CONTEXT\n\n" + live_context
         messages = [
             SystemMessage(content=system_prompt),
-            HumanMessage(content=human),
+            HumanMessage(content="# USER\n" + _task_anchor(state)),
         ]
 
     # Per-task call cap: once this task has spent its tool budget, stop offering
     # tools so the model must synthesize what it has instead of burning the run's
     # remaining global budget on one task.
-    # Enforce on the deterministic per-task counter ALONE. It reaches the cap only after
-    # _MAX_TASK_TOOL_CALLS real tool calls on this task (the floor is snapshotted at claim),
-    # so no extra "has this task run tools?" guard is needed — and such a guard is actively
-    # harmful: the interpret→think continuation returns `messages: []` (rebuilding the prompt
-    # from the ledger), so keying the cap on a ToolMessage being present in history silently
-    # DEFEATED it after every continuation, letting a non-converging task run unbounded
-    # (diagnosed: session 8c1cd9ae spent 86 calls on one task, the cap never firing).
+    # Enforce on the deterministic per-task counter ALONE — never on "is there a
+    # ToolMessage in history?". The counter is snapshotted at claim, so it measures this
+    # task only and cannot be fooled by how the history is assembled. (A ToolMessage-
+    # presence guard silently defeated this cap back when the history was wiped each
+    # cycle: session 8c1cd9ae spent 86 calls on one task. The history is retained now,
+    # but the counter remains the correct thing to key on.)
     task_calls = state["tool_calls_made"] - state.get("task_call_floor", 0)
     task_capped = (
         state["agent_name"] == "investigation"
@@ -555,9 +548,11 @@ async def think(state: AgentState, config) -> dict:
         messages = await _compact_history(messages, bound, state["agent_name"])
         ctx_tokens = 0  # reset; will be updated from next response
 
-    # After tool results, remind the model to write its findings as text.
-    # Smaller models tend to return empty after executing tool calls; this
-    # nudge is not saved to state so it does not accumulate in history.
+    # Per-cycle guidance rides on the model call but is NOT persisted, so instructions
+    # never accumulate in the durable history. The old post-ToolMessage "write your
+    # report now" nudge is gone: it was unreachable while `messages` was wiped every
+    # cycle, and with a retained history it would fire on EVERY continuation and push
+    # the model to conclude after its first tool batch.
     call_messages = messages
     if task_capped:
         emit(src, "note",
@@ -588,52 +583,10 @@ async def think(state: AgentState, config) -> dict:
             f"{preserved_text}"
         ))
         call_messages = call_messages + [wrapup]
-    elif call_messages and isinstance(call_messages[-1], ToolMessage):
-        queue_context = await _queue_context_for_state(state, tools)
-        if state["agent_name"] == "triage":
-            vicinity_hours = int(state.get("default_vicinity_window_hours") or 24)
-            format_nudge = (
-                "Tool calls complete. Write your triage report now using the mandatory "
-                "structured format:\n\n"
-                "## Triage Summary\n"
-                "## Key Evidence\n"
-                "## Investigation Plan\n\n"
-                "All three sections are required. In ## Investigation Plan, every item "
-                "must include an explicit absolute time window. If an item does not have "
-                "a narrower evidence-derived range, derive it from the configured default "
-                f"vicinity window of ±{vicinity_hours} hours around the anchor timestamp. "
-                "Do not use ±24 hours unless this run's configured value is 24. If an "
-                f"item intentionally uses a narrower range, state why it is narrower than "
-                f"±{vicinity_hours} hours. "
-                "Do not paste raw JSON objects, entity dumps, or tool payloads as the report. "
-                "Explain what the evidence means in prose, then list concrete evidence as bullets. "
-                "End with the diagnostic verdict JSON block."
-            )
-        else:
-            format_nudge = (
-                "Tool calls complete. Write your response now using the mandatory "
-                "structured format:\n\n"
-                "## Findings\n"
-                "## Hypotheses\n"
-                "## New Leads\n\n"
-                "All three sections are required (use '- None.' if a section is empty). "
-                "Report only what THIS task confirmed — do not restate case context or "
-                "facts already on the board. Put each confirmed indicator under "
-                "## Findings as a bullet with its event ID. For each proposed lead use "
-                "this exact structure: title, pivots, evidence, priority — propose a lead "
-                "for every artifact you confirmed this task, covering both its relationships "
-                "(other entities it links to) and both kill-chain directions (root cause and "
-                "blast radius). The platform validates and queues approved leads; do not call "
-                "`create_task` for follow-up work. Only propose leads that are evidence-backed "
-                "and not already covered in the current queue. Separate facts from inferences, "
-                "and do not treat aggregate profiling alone as direct confirmation. Do not "
-                "discard semantic evidence because it arrived from a search result rather than "
-                "a get_event result. If the current ledger records a high-confidence semantic "
-                "claim, report it as a finding and separately mark only the unproven parts as "
-                "hypotheses."
-                f"{queue_context}"
-            )
-        call_messages = call_messages + [HumanMessage(content=format_nudge)]
+    else:
+        steering = await _cycle_steering(state, tools)
+        if steering:
+            call_messages = call_messages + [HumanMessage(content=steering)]
 
     response = await _invoke_bound_model(bound, call_messages, state["agent_name"])
     _sanitize_message(response)
@@ -656,6 +609,38 @@ async def think(state: AgentState, config) -> dict:
         if (retry_resp.content or "").strip() or getattr(retry_resp, "tool_calls", None):
             response = retry_resp
             new_ctx = _track_input_tokens(retry_resp, src, new_ctx)
+
+    # Evidence floor, `think` side. A reply with no tool calls IS a completion — it
+    # routes straight to `assess`, never through `interpret`, so the floor in
+    # `_route_interpret` cannot see it. Session 6b96293a lost three tasks this way:
+    # they oriented (list_tasks / ls / search_feedback), wrote a report from earlier
+    # tasks' evidence, and the board dropped every bullet as restated. Bounded to one
+    # retry in-node so a model that insists on concluding cannot loop here.
+    if (
+        state["agent_name"] == "investigation"
+        and not task_capped
+        and not getattr(response, "tool_calls", None)
+        and _count_evidence_queries(messages) == 0
+        and state.get("tool_calls_made", 0) < (state.get("max_tool_calls") or 0)
+    ):
+        emit(src, "note",
+             "evidence floor: concluding with no SIEM query this task — re-injecting")
+        floor_msgs = messages + [response, HumanMessage(content=(
+            "You are concluding this task without having run a single SIEM evidence query "
+            "of your own — you only oriented (case/board/queue/filesystem) or reused what "
+            "earlier tasks found. Reading prior findings is not investigating THIS task. "
+            "Query the SIEM now for evidence specific to this task's objective: profile the "
+            "window (`get_event_volume`), then `search`/`search_keyword`/`profile_field` on a "
+            "concrete artifact named in the objective. If the honest answer is a confirmed "
+            "negative, run the query that establishes it and cite the exact zero-result query."
+        ))]
+        retry = await _invoke_bound_model(bound, floor_msgs, state["agent_name"])
+        _sanitize_message(retry)
+        new_ctx = _track_input_tokens(retry, src, new_ctx)
+        if getattr(retry, "tool_calls", None):
+            response = retry
+        else:
+            emit(src, "note", "evidence floor: model declined to query — concluding anyway")
 
     text = (response.content or "").strip()
     if text:
@@ -914,7 +899,7 @@ async def _build_kill_chain(artifacts: list, raw: str, state: dict, tmap: dict, 
         return  # only attempt once we have a host to scope the kill chain to
     try:
         from ..analysis.correlation_leads import derive_window
-        from ..analysis.kill_chain import gap_lead_specs, summarize_kill_chain
+        from ..analysis.kill_chain import drop_covered_specs, gap_lead_specs, summarize_kill_chain
         from aci_board import store as board_store
 
         case_id, run_id, agent_name = state["case_id"], state["run_id"], state["agent_name"]
@@ -953,6 +938,19 @@ async def _build_kill_chain(artifacts: list, raw: str, state: dict, tmap: dict, 
                     window_hint=f"Window: ±{vicinity}h around the case/alert anchor timestamp.",
                     observed=observed,
                 )
+                # These go straight onto the queue, so they miss the lead validator
+                # that dedups every other lead source. Without this, a forward-trace
+                # lead duplicates a triage plan item AND outranks it (88 > 85/80/75),
+                # so the duplicate runs first and the plan item finds nothing left.
+                before = len(specs)
+                specs = drop_covered_specs(
+                    specs,
+                    tq_store.list_tasks(case_id, run_id, agent_name) or [],
+                )
+                if before != len(specs):
+                    emit(src, "note",
+                         f"kill-chain gap leads: {before - len(specs)} already covered by "
+                         "a queued task — skipped")
                 for s in specs:
                     tq_store.create_task(
                         case_id=case_id, run_id=run_id, agent_name=agent_name,

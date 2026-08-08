@@ -8,7 +8,7 @@ pipeline, with no model call involved in writing them:
 | Kind | Meaning | Population |
 |---|---|---|
 | `artifact` | A normalized entity observed in a retrieved native event, including a payload decoded from hex/base64/URL-encoding. | Deterministic extraction (`agent/runtime/analysis/artifacts.py`) after every successful investigation tool result. |
-| `fact` | A confirmed, evidence-backed finding. | Structural parsing of `## Findings`, gated by the [per-task self-review](runtime/agent-graph.md#per-task-self-review)'s grounded/novel verdicts — only bullets the review confirms are new and event-cited become facts. |
+| `fact` | A confirmed, evidence-backed finding. | Structural parsing of `## Findings`, gated by the [per-task findings review](runtime/agent-graph.md#per-task-findings-review)'s grounded/novel verdicts — only bullets the review confirms are new and event-cited become facts. |
 | `hypothesis` | An explanation or lead requiring confirmation or refutation. | Structural parsing of `## Hypotheses`, triage handoff hypotheses, and generated leads. |
 | `correlation` | A confirmed entity's co-occurring neighborhood (other entities, fields, sample event IDs). | Deterministic, automatic — `_auto_correlate_entities` fires `correlate_entity` for newly confirmed high-value entities without a model call. |
 | `kill_chain` | The MITRE ATT&CK tactic/technique coverage observed so far, plus detected gaps. | Deterministic, automatic — `_build_kill_chain` (`agent/runtime/analysis/kill_chain.py`) fires `correlate_techniques` and can queue gap-coverage follow-up tasks. |
@@ -36,7 +36,7 @@ Board into model context:
 
 **Board-driven compromise detection.** The `interpret` must-disposition block,
 escalation (an immediate case comment when active compromise is confirmed), and
-the per-task self-review's `unreported_compromise_artifacts` signal all read
+the per-task findings review's `unreported_compromise_artifacts` signal all read
 compromise-relevant evidence directly off the board (`agent/runtime/graph/
 validation.py: _board_compromise_facts`) rather than relying on the agent's own
 narrative to mention it. Two deterministic triggers surface an entry: a narrative

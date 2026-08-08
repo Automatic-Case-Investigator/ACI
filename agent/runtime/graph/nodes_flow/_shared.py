@@ -4,6 +4,7 @@ from __future__ import annotations
 from ....models import AgentRun
 from ..parsing import _FACT_BULLET_RE, _FINDINGS_RE, _NEW_LEADS_HEADER_RE, _NEXT_HEADER_RE, _is_none_bullet, _normalize_fact_key, _strip_markers
 from ..publication import extract_section as _extract_publication_section
+from ..coverage import _count_evidence_queries  # re-exported for nodes_flow users
 from ..state import AgentState
 from asgiref.sync import sync_to_async
 

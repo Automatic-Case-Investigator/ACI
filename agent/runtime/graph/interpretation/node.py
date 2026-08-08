@@ -7,6 +7,7 @@ from ..state import AgentState
 from ..toolio import _call, _emit_node_entry, _tmap
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
+from ..coverage import _unqueried_post_peak_clusters, _unqueried_time_ranges
 from ._const import _DEFAULT_STOP_CONDITION, _NO_PROGRESS_BRAKE_CYCLES, _READY_EVIDENCE_KEEP, _STUCK_RETRIES
 from .ledger import _coerce_confirmed_findings, _coerce_string_list, _coerce_trials, _confirmed_findings_from_observation, _default_ledger, _merge_confirmed_findings, _merge_query_trials, _merge_string_lists, _parse_interpretation_text
 from .pivots import _coerce_adjacency, _coerce_pivot, _coerce_pivots, _update_pivot_state
@@ -215,10 +216,18 @@ async def interpret(state: AgentState, config) -> dict:
     if model is not None:
         try:
             tool_outputs = _batch_tool_outputs(state.get("messages") or [])
+            # Computed over the WHOLE task history, not just this batch — these only
+            # became meaningful once the history stopped being wiped every cycle.
+            _msgs = state.get("messages") or []
+            coverage = {
+                "unqueried_clusters": _unqueried_post_peak_clusters(_msgs),
+                "unqueried_time_ranges": _unqueried_time_ranges(_msgs),
+            }
             response = await model.ainvoke([
                 SystemMessage(content=_interpret_system_prompt()),
                 HumanMessage(content=_interpret_context(
-                    task, ledger, observation, extra_context, tool_outputs, compromise_facts
+                    task, ledger, observation, extra_context, tool_outputs,
+                    compromise_facts, coverage,
                 )),
             ])
             parsed = _parse_interpretation_text(getattr(response, "content", "") or "")
@@ -296,11 +305,13 @@ async def interpret(state: AgentState, config) -> dict:
         # Wrap-up path: keep the compacted, interpreted evidence for the report writer.
         result["messages"] = _compact_messages_after_interpret(state, updated_ledger, observation)
     else:
-        # Continuation path: clear the message history so `think` re-enters its
-        # ledger-driven rebuild and re-applies next_step_instruction + forbidden_repeats
-        # + "do not restart the checklist" on EVERY turn. Replaying the compacted history
-        # here re-injected the original task checklist as message[1], and smaller models
-        # restarted orientation from step 1 each cycle. The durable ledger carries all
-        # evidence forward, so nothing is lost by dropping the message history here.
-        result["messages"] = []
+        # Continuation path: keep the accumulated history so the model that picks the
+        # next tool call can SEE its own prior evidence. This used to return [] because
+        # replaying the history re-injected the task's numbered startup checklist as
+        # message[1], and small models restarted orientation every cycle. That conflated
+        # two things sharing one list: INSTRUCTIONS (harmful to replay) and EVIDENCE
+        # (essential to retain). `think` now separates them — the anchor is written once
+        # and ledger steering is transient — so the history can be kept without the
+        # checklist coming back with it.
+        result["messages"] = list(state.get("messages") or [])
     return result

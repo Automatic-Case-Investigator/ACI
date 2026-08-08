@@ -139,8 +139,6 @@ async def _run_agent_bound(
             ctx_tokens=0,
             verdict=None,
             pivot_tasks_created=0,
-            reflection_retries=0,
-            reflection_evidence_at_last_nudge=-1,
             last_confirmed_findings=[],
             completed_task_titles=[],
             task_ledger=None,

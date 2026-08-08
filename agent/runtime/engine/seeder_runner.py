@@ -17,7 +17,7 @@ and to verify the queue is complete via `list_tasks`.
 import json
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 
@@ -212,6 +212,56 @@ def _item_priority(item: str) -> int:
     return 65  # default — context/correlation
 
 
+# Phrases a plan item uses to justify a window narrower than the configured vicinity.
+# The triage contract requires the justification; without one the narrow range is an
+# unexplained guess and gets widened back.
+_NARROW_JUSTIFICATION_RE = re.compile(
+    r"\b(narrow|narrower|tight|tighter|restrict\w*|because|justif\w*|deliberat\w*|"
+    r"intentional\w*|only the|confined to|limited to)\b",
+    re.I,
+)
+
+
+def _widen_unjustified_window(item: str, vicinity_hours: int) -> str:
+    """Widen a plan item's time window to ±vicinity when it narrowed without saying why.
+
+    The triage contract already states that a narrower-than-vicinity range must carry a
+    stated reason. Nothing checked it, and an unexplained narrow box becomes the
+    investigation's evidence horizon: the agent passes the item's `end` straight into
+    `get_event_volume`, so the profile cannot even see the tail past it — which is how a
+    30-minute window around a probe hides the payload that landed 30 minutes later.
+
+    Only the item's stated window is rewritten; its pivots and criterion are untouched.
+    """
+    if vicinity_hours <= 0:
+        return item
+    stamps = [d for m in _ISO_TS_RE.finditer(item) if (d := _parse_iso_dt(m.group(0)))]
+    if len(stamps) < 2:
+        return item
+    start, end = min(stamps), max(stamps)
+    span_hours = (end - start).total_seconds() / 3600.0
+    if span_hours >= vicinity_hours:  # already at least a one-sided vicinity span
+        return item
+    if _NARROW_JUSTIFICATION_RE.search(item):
+        return item
+
+    anchor = start + (end - start) / 2
+    widened = (
+        anchor - timedelta(hours=vicinity_hours),
+        anchor + timedelta(hours=vicinity_hours),
+    )
+    def _iso(d):
+        return d.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    return item.rstrip() + (
+        f"\n\nWindow correction: this item stated a {span_hours:.2f}h window with no reason "
+        f"given for narrowing below the configured ±{vicinity_hours}h vicinity. Search "
+        f"`{_iso(widened[0])}` to `{_iso(widened[1])}` instead, and treat the original "
+        "range as the anchor to profile outward from — what a probe or exploit attempt "
+        "ENABLED lands after it, outside the burst itself."
+    )
+
+
 def _augment_temporal_method(item: str, vicinity_hours: int) -> str:
     """Add temporal-profiling guidance to noisy investigation tasks."""
     text = item.lower()
@@ -275,7 +325,8 @@ async def run_seeder(
     for item in plan_items:
         title = _item_title(item)
         priority = _item_priority(item)
-        description = _augment_temporal_method(item, vicinity_hours)
+        description = _widen_unjustified_window(item, vicinity_hours)
+        description = _augment_temporal_method(description, vicinity_hours)
         result = await _call(create_fn, {
             "title": title,
             "description": description,

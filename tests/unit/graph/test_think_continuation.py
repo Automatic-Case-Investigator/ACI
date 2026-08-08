@@ -1,19 +1,28 @@
-"""Regression tests for the `think` continuation rebuild.
+"""Regression tests for `think`'s anchor-once / steer-transiently prompt shape.
 
 Root cause of the checklist-replay loop (sessions 5429c6f2, 7a44aba5): on every
-post-interpretation turn `think` rebuilt its prompt from the ledger, but it also
-re-appended the ORIGINAL seed task description verbatim. That description is a
-numbered orientation checklist ("1. Load the case. 2. Load alerts. ..."), so small
-models replayed orientation each cycle and never reached the SIEM step — six concrete
+post-interpretation turn `think` rebuilt its prompt from the ledger AND re-appended
+the ORIGINAL seed task description verbatim. That description is a numbered
+orientation checklist ("1. Load the case. 2. Load alerts. ..."), so small models
+replayed orientation each cycle and never reached the SIEM step — six concrete
 numbered imperatives out-pull one advisory interpretation note.
 
-The fix: on continuation (ledger has `next_step_instruction`), inject ONLY the task
-objective, never the numbered checklist. A fresh claim still shows the full description.
+The original fix wiped the message history each cycle, which also destroyed the
+model's view of its own retrieved evidence. The current design separates the two
+things that were sharing one list:
+
+  - the ANCHOR (task objective + reasoning contract) is written once as message[1]
+    and never re-appended, so the checklist cannot come back;
+  - the STEERING (ledger-derived guidance) rides on the model call but is never
+    persisted, so instructions do not accumulate;
+  - EVIDENCE accumulates across cycles and is cleared only at `claim`.
+
+These pin all three.
 """
 import asyncio
 import unittest
 
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from agent.runtime.graph import nodes_loop
 
@@ -47,8 +56,8 @@ class _StubModel:
 
 def _state(*, ledger, messages=None):
     return {
-        "agent_name": "triage",
-        "messages": messages or [],
+        "agent_name": "investigation",
+        "messages": messages if messages is not None else [],
         "current_task": {
             "title": "Triage case ~449101824",
             "description": _CHECKLIST_DESCRIPTION,
@@ -64,7 +73,18 @@ def _state(*, ledger, messages=None):
     }
 
 
-class ThinkContinuationTest(unittest.TestCase):
+def _retained_history(anchor_text: str) -> list:
+    """A task mid-flight: anchor, one tool call, and its raw result."""
+    return [
+        SystemMessage(content="SYS"),
+        HumanMessage(content="# USER\n" + anchor_text),
+        AIMessage(content="", tool_calls=[{"name": "search", "args": {}, "id": "c1"}]),
+        ToolMessage(content='{"total": 3, "events": [{"_id": "evt-1"}]}',
+                    tool_call_id="c1", name="search"),
+    ]
+
+
+class ThinkPromptShapeTest(unittest.TestCase):
     def setUp(self):
         self._captured = []
 
@@ -78,60 +98,70 @@ class ThinkContinuationTest(unittest.TestCase):
     def tearDown(self):
         nodes_loop._invoke_bound_model = self._orig
 
-    def _human_text(self):
-        msgs = self._captured[-1]
-        human = [m for m in msgs if isinstance(m, HumanMessage)]
-        return human[-1].content
+    def _sent(self):
+        return self._captured[-1]
+
+    def _last_human(self):
+        return [m for m in self._sent() if isinstance(m, HumanMessage)][-1].content
+
+    def _all_text(self):
+        return "\n".join(str(getattr(m, "content", "")) for m in self._sent())
 
     def _config(self):
         return {"configurable": {"model": _StubModel(), "tools": [], "system_prompt": "SYS"}}
 
-    def test_continuation_strips_numbered_checklist(self):
-        # Post-interpretation: ledger carries an instruction. The rebuilt prompt must
-        # carry the objective and the note but MUST NOT re-inject the numbered checklist.
-        ledger = {
-            "objective": "Triage and investigate case ~449101824",
-            "next_step_instruction": "Orientation is complete — issue your first SIEM query now.",
-            "evidence_state": "orientation",
-            "evidence_summary": "case + 1 alert loaded; rule 31151 on 172.17.130.196",
-        }
-        _run(nodes_loop.think(_state(ledger=ledger), self._config()))
-        text = self._human_text()
-        self.assertIn("Orientation is COMPLETE", text)
-        # The de-amnesia block names the spent tools and renders the last result.
-        self.assertIn("Do NOT", text)
-        self.assertIn("case + 1 alert loaded", text)
-        self.assertIn("issue your first SIEM query", text)
-        self.assertIn("Triage and investigate case ~449101824", text)
-        # The next step is framed as required, not advisory.
-        self.assertIn("REQUIRED next step", text)
-        self.assertNotIn("advisory, not binding", text)
-        # The numbered orientation steps must be gone.
-        self.assertNotIn("1. Load the case record.", text)
-        self.assertNotIn("2. Load the linked alert summary.", text)
-        self.assertNotIn("3. Check known FP/TP patterns", text)
+    # ── the anchor ──────────────────────────────────────────────────────────────
 
-    def test_fresh_claim_keeps_full_checklist(self):
-        # A fresh claim (no next_step_instruction yet) still shows the full description,
-        # so the turn-1 startup sequence is intact.
-        ledger = {
-            "objective": "Triage and investigate case ~449101824",
-            "next_step_instruction": "",
-        }
-        _run(nodes_loop.think(_state(ledger=ledger), self._config()))
-        text = self._human_text()
+    def test_fresh_claim_carries_the_full_task_description(self):
+        # Turn 1 still shows the whole startup sequence — it is only the REPLAY of it
+        # that was harmful.
+        _run(nodes_loop.think(_state(ledger={"next_step_instruction": ""}), self._config()))
+        text = self._all_text()
         self.assertIn("1. Load the case record.", text)
         self.assertIn("6. Load other alerts", text)
 
-    def test_continuation_without_objective_falls_back_to_title(self):
+    def test_the_anchor_is_not_re_appended_on_continuation(self):
+        # THE anti-replay guarantee: with history retained, `think` does not rebuild the
+        # anchor, so the numbered checklist appears exactly once no matter how many
+        # cycles the task runs.
+        anchor = nodes_loop._task_anchor(_state(ledger={}))
+        history = _retained_history(anchor)
+        ledger = {"next_step_instruction": "Issue your first SIEM query now."}
+        _run(nodes_loop.think(_state(ledger=ledger, messages=history), self._config()))
+        self.assertEqual(self._all_text().count("1. Load the case record."), 1)
+
+    # ── the steering ────────────────────────────────────────────────────────────
+
+    def test_the_instruction_rides_on_the_call_as_the_last_message(self):
         ledger = {
-            "objective": "",
-            "next_step_instruction": "Issue your first SIEM query now.",
+            "next_step_instruction": "Orientation is complete — issue your first SIEM query now.",
+            "evidence_state": "orientation",
         }
-        _run(nodes_loop.think(_state(ledger=ledger), self._config()))
-        text = self._human_text()
-        self.assertIn("Triage case ~449101824", text)
-        self.assertNotIn("1. Load the case record.", text)
+        _run(nodes_loop.think(_state(ledger=ledger, messages=_retained_history("A")),
+                              self._config()))
+        steering = self._last_human()
+        self.assertIn("REQUIRED next step", steering)
+        self.assertIn("issue your first SIEM query", steering)
+
+    def test_steering_is_not_persisted(self):
+        ledger = {"next_step_instruction": "Query the SIEM now."}
+        history = _retained_history("A")
+        out = _run(nodes_loop.think(_state(ledger=ledger, messages=history), self._config()))
+        # History grows by the model's reply only — the steering never lands in state,
+        # so instructions cannot accumulate over a long task.
+        self.assertEqual(len(out["messages"]), len(history) + 1)
+        persisted = "\n".join(str(getattr(m, "content", "")) for m in out["messages"])
+        self.assertNotIn("REQUIRED next step", persisted)
+
+    # ── the evidence ────────────────────────────────────────────────────────────
+
+    def test_retained_evidence_reaches_the_model(self):
+        # The property the whole flattening exists for: the model choosing the next
+        # tool call can see what earlier cycles retrieved.
+        ledger = {"next_step_instruction": "Keep going."}
+        _run(nodes_loop.think(_state(ledger=ledger, messages=_retained_history("A")),
+                              self._config()))
+        self.assertIn("evt-1", self._all_text())
 
 
 if __name__ == "__main__":

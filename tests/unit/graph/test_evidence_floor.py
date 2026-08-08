@@ -1,12 +1,15 @@
-"""Unit tests for the deterministic evidence-floor signal (nodes_flow).
+"""The deterministic evidence floor that vetoes a hollow completion.
 
-The investigation gating node re-injects a "query the SIEM" correction whenever a
-task concluded with zero evidence queries. That backstop is only as good as the
-`_count_evidence_queries` signal it reads: if an orientation tool were ever
-miscounted as evidence, the floor would silently stop firing. This reproduces the
-live failure on session e235b354 — tasks that called only `get_case` / `get_board`
-/ `search_patterns` / `ls` and were wrongly allowed to conclude — and pins the
-orientation-vs-evidence boundary so it cannot regress.
+A task that retrieved nothing has not investigated anything, so its vote to conclude
+is not credible. The floor is a routing predicate in `_route_interpret` — it can only
+VETO a completion decision, never initiate one. It used to be a retry loop inside the
+`assess` node, which made `assess` a second completion judge alongside `interpret`.
+
+The floor is only as good as the `_count_evidence_queries` signal it reads: if an
+orientation tool were ever miscounted as evidence, it would silently stop firing. This
+reproduces the live failure on session e235b354 — tasks that called only `get_case` /
+`get_board` / `search_patterns` / `ls` and were wrongly allowed to conclude — and pins
+the orientation-vs-evidence boundary so it cannot regress.
 """
 from __future__ import annotations
 
@@ -15,6 +18,7 @@ import sys
 import unittest
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aci.settings")
+os.environ.setdefault("SECRET_KEY", "test")
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, project_root)
 import django  # noqa: E402
@@ -23,11 +27,8 @@ django.setup()
 
 from langchain_core.messages import ToolMessage  # noqa: E402
 
-from agent.runtime.graph.nodes_flow import (  # noqa: E402
-    _MAX_INVESTIGATION_RETRIES,
-    _count_evidence_queries,
-    _progress_gated_decision,
-)
+from agent.runtime.graph.builder import _route_interpret  # noqa: E402
+from agent.runtime.graph.nodes_flow import _count_evidence_queries  # noqa: E402
 
 
 def _tool(name: str, content: str = "{}") -> ToolMessage:
@@ -64,54 +65,48 @@ class CountEvidenceQueriesTest(unittest.TestCase):
         self.assertEqual(_count_evidence_queries(msgs), 2)
 
 
-class ProgressGatedDecisionTest(unittest.TestCase):
-    """Investigation keep-working is progress-gated, not flat-capped: continue while the
-    task converges and budget remains, stop when it stalls or budget runs out."""
+class RouteInterpretEvidenceFloorTest(unittest.TestCase):
+    """`interpret` owns the completion decision; the floor can only veto it."""
 
-    def _decide(self, **over):
+    def _state(self, **over):
         base = dict(
-            reflection_retries=1, evidence_queries=3, last_nudge_ev=1,
-            tool_calls_made=40, max_tool_calls=100, steps=20, max_steps=60,
+            agent_name="investigation",
+            status="ready_to_assess",
+            messages=[_tool("search", '{"total": 3}')],
+            steps=5, max_steps=40,
+            tool_calls_made=10, max_tool_calls=60,
         )
         base.update(over)
-        return _progress_gated_decision(**base)
+        return base
 
-    def test_continues_while_making_progress_and_budget_left(self):
-        # 3 evidence queries now vs 1 at the last nudge → new evidence → keep going.
-        keep, reason = self._decide(evidence_queries=3, last_nudge_ev=1)
-        self.assertTrue(keep)
-        self.assertEqual(reason, "")
+    def test_a_grounded_completion_is_accepted(self):
+        self.assertEqual(_route_interpret(self._state()), "assess")
 
-    def test_deep_cycle_still_continues_if_progressing(self):
-        # Cycle 5 — well past the old flat cap of 2 — still continues when converging.
-        keep, _ = self._decide(reflection_retries=5, evidence_queries=6, last_nudge_ev=4)
-        self.assertTrue(keep)
+    def test_a_zero_evidence_completion_is_sent_back(self):
+        state = self._state(messages=[_tool("get_case"), _tool("get_board")])
+        self.assertEqual(_route_interpret(state), "think")
 
-    def test_stalls_when_no_new_evidence_since_last_nudge(self):
-        keep, reason = self._decide(reflection_retries=2, evidence_queries=3, last_nudge_ev=3)
-        self.assertFalse(keep)
-        self.assertIn("no new evidence", reason)
+    def test_an_errored_query_does_not_satisfy_the_floor(self):
+        state = self._state(messages=[_tool("search", '{"error": "boom"}')])
+        self.assertEqual(_route_interpret(state), "think")
 
-    def test_first_cycle_is_never_a_stall(self):
-        # retry 0: no prior nudge to compare against → progress assumed.
-        keep, _ = self._decide(reflection_retries=0, evidence_queries=0, last_nudge_ev=-1)
-        self.assertTrue(keep)
+    def test_the_floor_never_initiates_completion(self):
+        # Evidence present but interpret has NOT voted to conclude — stay in the loop.
+        self.assertEqual(_route_interpret(self._state(status="needs_more_work")), "think")
 
-    def test_stops_when_global_call_budget_exhausted(self):
-        keep, reason = self._decide(tool_calls_made=100, max_tool_calls=100)
-        self.assertFalse(keep)
-        self.assertIn("budget exhausted", reason)
+    def test_budget_exhaustion_still_wins_over_the_floor(self):
+        # A run out of budget must finish, not loop back for evidence it cannot gather.
+        state = self._state(messages=[_tool("get_case")], tool_calls_made=60)
+        self.assertEqual(_route_interpret(state), "finish")
 
-    def test_stops_when_global_step_budget_exhausted(self):
-        keep, reason = self._decide(steps=60, max_steps=60)
-        self.assertFalse(keep)
-        self.assertIn("budget exhausted", reason)
+    def test_cancellation_wins_over_the_floor(self):
+        state = self._state(status="cancelled", messages=[_tool("get_case")])
+        self.assertEqual(_route_interpret(state), "finish")
 
-    def test_safety_backstop_caps_runaway_loops(self):
-        keep, reason = self._decide(reflection_retries=_MAX_INVESTIGATION_RETRIES,
-                                    evidence_queries=99, last_nudge_ev=1)
-        self.assertFalse(keep)
-        self.assertIn("safety cap", reason)
+    def test_the_floor_is_investigation_only(self):
+        # Triage never reaches this router, and other agents keep the plain contract.
+        state = self._state(agent_name="seeder", messages=[_tool("get_case")])
+        self.assertEqual(_route_interpret(state), "assess")
 
 
 if __name__ == "__main__":

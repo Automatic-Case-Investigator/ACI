@@ -103,6 +103,52 @@ def pivots_for_tactic(tactic: str) -> str:
     return TACTIC_PIVOTS.get(tactic, "")
 
 
+# Words a queued task uses for a tactic when it does not name the tactic outright.
+# Kept deliberately small: a false "already covered" silently drops a real gap, so
+# only unambiguous synonyms belong here.
+_TACTIC_SYNONYMS = {
+    "Command and Control": ("command and control", "c2", "callback", "beacon"),
+    "Exfiltration": ("exfiltration", "exfil", "data transfer out"),
+    "Initial Access": ("initial access", "entry vector", "access vector"),
+    "Privilege Escalation": ("privilege escalation", "privesc", "sudo", "elevation"),
+    "Credential Access": ("credential access", "credential dump", "password"),
+    "Lateral Movement": ("lateral movement", "lateral spread", "pivot to another host"),
+    "Defense Evasion": ("defense evasion", "log clear", "anti-forensic"),
+    "Reconnaissance": ("reconnaissance", "recon", "scan"),
+}
+
+
+def _tactic_terms(tactic: str) -> tuple[str, ...]:
+    return _TACTIC_SYNONYMS.get(tactic, ()) + (tactic.lower(),)
+
+
+def drop_covered_specs(specs: list[dict], existing_tasks: list[dict]) -> list[dict]:
+    """Drop gap leads whose tactic an existing task already covers.
+
+    Gap leads are created directly on the queue, bypassing the model-based lead
+    validator that dedups every other lead source. In a live run this queued four
+    forward-trace tasks at priority 88 that duplicated the triage plan's own items —
+    and because 88 outranked the plan, the duplicates ran first and consumed the
+    budget, leaving the plan's items to complete with no evidence left to find.
+
+    Deterministic and deliberately conservative: a tactic counts as covered only when
+    a task's title or description names it (or an unambiguous synonym). Dropping a
+    genuine gap is worse than queueing a near-duplicate, so anything uncertain stays.
+    """
+    if not specs or not existing_tasks:
+        return specs
+    haystack = " \n ".join(
+        f"{t.get('title', '')} {t.get('description', '')}".lower() for t in existing_tasks
+    )
+    kept = []
+    for spec in specs:
+        terms = _tactic_terms(str(spec.get("tactic") or ""))
+        if any(term in haystack for term in terms if term):
+            continue
+        kept.append(spec)
+    return kept
+
+
 def gap_lead_specs(
     gaps: list[str], host: str, window_hint: str = "", observed: list[str] | None = None
 ) -> list[dict]:

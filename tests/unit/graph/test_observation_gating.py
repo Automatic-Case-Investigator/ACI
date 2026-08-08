@@ -25,6 +25,15 @@ def _run(coro):
     return asyncio.run(coro)
 
 
+def _history():
+    """A task mid-flight: one tool call and its raw result."""
+    return [
+        AIMessage(content="", tool_calls=[{"name": "search", "args": {}, "id": "c1"}]),
+        ToolMessage(content='{"total": 3, "events": [{"_id": "evt-1"}]}',
+                    tool_call_id="c1", name="search"),
+    ]
+
+
 class ObservationRoutingTest(unittest.TestCase):
     def test_use_tools_routes_to_interpret(self):
         self.assertEqual(
@@ -61,11 +70,10 @@ class ObservationRoutingTest(unittest.TestCase):
             "max_tool_calls": 10,
         }), "think")
 
-    def test_per_task_cap_routes_to_assess_even_with_cleared_messages(self):
-        # The interpret->think continuation returns messages=[]; the per-task cap must
-        # still fire on the deterministic counter, or a task loops unbounded (session
-        # 8c1cd9ae ran 86 calls on one task because a ToolMessage-presence guard defeated
-        # the cap after every continuation).
+    def test_per_task_cap_fires_on_the_counter_not_on_history(self):
+        # The cap must key on the deterministic per-task counter, never on whether a
+        # ToolMessage is present: history assembly is not a budget signal. Session
+        # 8c1cd9ae ran 86 calls on one task when a presence guard was used instead.
         state = {
             "agent_name": "investigation",
             "messages": [],  # cleared by the continuation rebuild
@@ -377,7 +385,7 @@ class _StubModel(BaseChatModel):
 
 
 class InterpretContractTest(unittest.TestCase):
-    def _state(self, observation: dict, retries: int = 0):
+    def _state(self, observation: dict, retries: int = 0, messages=None):
         return {
             "run_id": "run-1",
             "case_id": "~1",
@@ -386,7 +394,7 @@ class InterpretContractTest(unittest.TestCase):
             "handoff": None,
             "current_task": {"title": "Check callback", "description": "Investigate callback"},
             "last_completed_task": None,
-            "messages": [],
+            "messages": [] if messages is None else messages,
             "steps": 1,
             "tool_calls_made": 1,
             "max_steps": 10,
@@ -399,8 +407,6 @@ class InterpretContractTest(unittest.TestCase):
             "pivot_tasks_created": 0,
             "task_call_floor": 0,
             "escalation_posted": False,
-            "reflection_retries": 0,
-            "reflection_evidence_at_last_nudge": -1,
             "last_findings_verification": None,
             "last_confirmed_findings": [],
             "completed_task_titles": [],
@@ -436,8 +442,9 @@ class InterpretContractTest(unittest.TestCase):
             "recommended_moves": ["narrow the query before trusting the sample"],
             "advanced_objective": False,
         }
+        history = _history()
         result = _run(interpret(
-            self._state(obs),
+            self._state(obs, messages=history),
             {"configurable": {"model": _StubModel({
                 "what_showed": "search returned a truncated sample",
                 "advanced_objective": False,
@@ -450,13 +457,13 @@ class InterpretContractTest(unittest.TestCase):
         ))
         self.assertEqual(result["status"], "needs_more_work")
         self.assertEqual(result["task_ledger"]["next_action"], "refine_query")
-        # Continuation contract: interpret clears the message history so `think`
-        # rebuilds the next prompt from the ledger (next_step_instruction +
-        # forbidden_repeats) instead of replaying the original task checklist.
-        self.assertEqual(result["messages"], [])
+        # Continuation contract: interpret hands the accumulated history forward so the
+        # model choosing the next tool call can see the evidence it already retrieved.
+        # (It used to return [], which is what made cross-cycle synthesis impossible.)
+        self.assertEqual(result["messages"], history)
 
-    def test_continuation_clears_messages_but_completion_keeps_summary(self):
-        """needs_more_work -> empty messages (force ledger rebuild in `think`);
+    def test_continuation_retains_evidence_and_completion_keeps_summary(self):
+        """needs_more_work -> history retained for the next cycle;
         ready_to_assess -> non-empty compacted summary for the report writer."""
         cont_obs = {
             "tools": ["get_case", "list_case_alerts", "list_baseline_entities"],
@@ -466,8 +473,9 @@ class InterpretContractTest(unittest.TestCase):
             "advanced_objective": False,
             "evidence_queries": 0,
         }
+        history = _history()
         cont = _run(interpret(
-            self._state(cont_obs),
+            self._state(cont_obs, messages=history),
             {"configurable": {"model": _StubModel({
                 "what_showed": "orientation metadata only",
                 "advanced_objective": False,
@@ -480,7 +488,7 @@ class InterpretContractTest(unittest.TestCase):
             }), "tools": []}},
         ))
         self.assertEqual(cont["status"], "needs_more_work")
-        self.assertEqual(cont["messages"], [])
+        self.assertEqual(cont["messages"], history)
         self.assertTrue(cont["task_ledger"].get("next_step_instruction"))
 
         done_obs = {

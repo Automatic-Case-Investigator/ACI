@@ -14,7 +14,7 @@ Completion is queue-driven. A model response does not finish a run by itself; it
 only completes the current task. The graph returns to `claim` until the queue is
 empty, cancellation is requested, or step/tool-call budgets are exhausted.
 
-The task lifecycle beyond claiming — the completion contract, per-task self-review,
+The task lifecycle beyond claiming — the completion contract, per-task findings review,
 and the seeder agent that populates the queue — is covered under
 [Runtime & Agent Graph](agent-graph.md#task-completion-contract).
 

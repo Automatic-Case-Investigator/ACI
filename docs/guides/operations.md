@@ -13,7 +13,7 @@ PYTHONPATH=. python -m pytest tests/unit/graph/test_graph_stub.py -v
 PYTHONPATH=. python -m pytest tests/unit/analysis/test_verdict_parsing.py -v
 ```
 
-Tests live under `tests/unit/` (graph logic, per-task self-review, Findings Board +
+Tests live under `tests/unit/` (graph logic, per-task findings review, Findings Board +
 board-driven compromise detection, seeder dedup, Wazuh query-shape guards, provider
 contracts, prompt composition, verdict parsing, alert metadata, feedback loop, TI
 enrichment, orchestrator lifecycle) and `tests/django/` (settings and resume/session

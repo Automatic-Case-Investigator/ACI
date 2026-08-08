@@ -172,7 +172,7 @@ ACI/
 ├── agent/runtime/                # (expanded)
 │   ├── engine/                   # run_agent, dispatch_run, MCP client, model client, streaming, seeder_runner
 │   ├── graph/                    # LangGraph build: builder, nodes_loop, interpretation/ (interpret node),
-│   │                              # nodes_flow/ (assess/pivot/completion), observation, reflection (self-review),
+│   │                              # nodes_flow/ (assess/pivot/completion), observation, reflection (findings review),
 │   │                              # leads/lead_model, board, validation, synthesis, publication, parsing, timeutil, state
 │   ├── analysis/                 # Deterministic enrichment: artifacts (incl. decode layer), correlation_leads,
 │   │                              # kill_chain, query_memo, pattern_matcher, alert_metadata, intent

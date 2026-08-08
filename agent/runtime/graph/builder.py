@@ -5,6 +5,7 @@ from __future__ import annotations
 from langgraph.graph import END, StateGraph
 
 from .nodes_flow import assess, finish, pivot, publish_finish, reassess_verdict, verdict_contract
+from .coverage import _count_evidence_queries
 from .interpretation import interpret
 from .nodes_loop import _MAX_TASK_TOOL_CALLS, claim, seed, think, use_tools
 from .state import AgentState
@@ -43,14 +44,31 @@ def _route_triage_think(state: AgentState) -> str:
 
 
 def _route_interpret(state: AgentState) -> str:
-    """Either continue task reasoning or finalize the current task."""
+    """The single completion decision: continue task reasoning, or finalize the task.
+
+    `interpret` is the only node that decides a task is done. `assess` used to hold a
+    second vote (`review_task_model().keep_working`) that could overturn this one —
+    two model calls answering one question — and it no longer does.
+    """
     over_budget = (
         state["steps"] >= state["max_steps"]
         or state["tool_calls_made"] >= state["max_tool_calls"]
     )
     if state.get("status") == "cancelled" or over_budget:
         return "finish"
-    return "assess" if state.get("status") == "ready_to_assess" else "think"
+    if state.get("status") != "ready_to_assess":
+        return "think"
+    # Evidence floor: a task that retrieved nothing has not investigated anything, and
+    # its vote to conclude is not credible. Observed concluding "rule-out" tasks on
+    # cumulative board context with zero queries of their own. A deterministic predicate
+    # here rather than a retry loop in another node — it vetoes a completion decision,
+    # it never initiates one.
+    if (
+        state.get("agent_name") == "investigation"
+        and _count_evidence_queries(state.get("messages") or []) == 0
+    ):
+        return "think"
+    return "assess"
 
 
 def _route_think(state: AgentState) -> str:
@@ -61,8 +79,8 @@ def _route_think(state: AgentState) -> str:
     # Per-task call cap: a capped investigation task must close (→ assess), never loop
     # back into use_tools — `think` already stripped its tools, but this also blocks a
     # pathological hallucinated tool call from bypassing the cap via use_tools' full map.
-    # Keyed on the deterministic counter alone: the interpret→think continuation clears
-    # `messages` to [], so a ToolMessage-presence guard here silently defeats the cap.
+    # Keyed on the deterministic per-task counter, never on ToolMessage presence: the
+    # counter measures this task alone and cannot be fooled by how history is assembled.
     task_calls = state["tool_calls_made"] - state.get("task_call_floor", 0)
     if (
         state["agent_name"] == "investigation"
@@ -73,16 +91,16 @@ def _route_think(state: AgentState) -> str:
 
 
 def _route_assess(state: AgentState) -> str:
-    """Let guard rails retry when budget remains; otherwise continue queue processing or finish."""
+    """Continue queue processing, or stop if the run is out of budget.
+
+    No `needs_more_work` branch: `assess` produces the task's report and findings but
+    no longer votes on whether the task is done, so it can never send one back.
+    """
     over_budget = (
         state["steps"] >= state["max_steps"]
         or state["tool_calls_made"] >= state["max_tool_calls"]
     )
-    if state.get("status") == "needs_more_work":
-        return "finish" if over_budget else "think"
-    if over_budget:
-        return "finish"
-    return "pivot"
+    return "finish" if over_budget else "pivot"
 
 
 def build_graph():
@@ -127,8 +145,7 @@ def build_graph():
         {"use_tools": "use_tools", "assess": "assess", "finish": "finish"},
     )
     g.add_conditional_edges(
-        "assess", _route_assess,
-        {"think": "think", "pivot": "pivot", "finish": "finish"},
+        "assess", _route_assess, {"pivot": "pivot", "finish": "finish"},
     )
     g.add_edge("pivot", "claim")
     g.add_edge("finish", "verdict_contract")

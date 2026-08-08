@@ -234,9 +234,37 @@ def _interpret_system_prompt() -> str:
         "objective is a capable confirmed negative. Choose 'continue' ONLY when a specific "
         "criterion is still unanswered AND you named a concrete query that would answer it>\n"
     )
+def _coverage_block(coverage: dict | None) -> str:
+    """Windows this task PROFILED but never QUERIED.
+
+    Deterministic, measured from the task's own history. The agent maps a window with
+    `get_event_volume`, then tends to drill only the loudest slice — but what a probe or
+    exploit ENABLED lands in the quiet tail, not the spike. Surfacing the unqueried spans
+    where the completion decision is made is the whole reason these are computed: a task
+    cannot honestly vote "done" while holding a profile it never followed. (They were
+    previously computed for a reviewer whose vote no longer gates completion, so nothing
+    acted on them.)
+    """
+    coverage = coverage or {}
+    clusters = coverage.get("unqueried_clusters") or []
+    ranges = coverage.get("unqueried_time_ranges") or []
+    if not clusters and not ranges:
+        return ""
+    lines = [
+        "Coverage gaps — you PROFILED these windows and never QUERIED them. If any is "
+        "relevant to this objective you are NOT done; name it in your next step:",
+    ]
+    if ranges:
+        lines.append("- Unqueried spans: " + ", ".join(str(r) for r in ranges[:6]))
+    if clusters:
+        lines.append("- Unqueried post-peak activity at: " + ", ".join(str(c) for c in clusters[:6]))
+    return "\n".join(lines) + "\n\n"
+
+
 def _interpret_context(
     task: dict | None, ledger: dict, observation: dict, extra_context: str,
     tool_outputs: str = "", compromise_facts: list[str] | None = None,
+    coverage: dict | None = None,
 ) -> str:
     """The VOLATILE HumanMessage for the interpret model: `# USER` (the current task) and
     `# CONTEXT` (durable state as prose, then evidence most-durable-first, then this batch's
@@ -250,6 +278,7 @@ def _interpret_context(
         f"{_notable_events_block(observation)}"
         f"{_trials_block(ledger)}"
         f"{_prompt_steering(ledger, observation)}"
+        f"{_coverage_block(coverage)}"
         f"{_signals_this_batch(observation)}"
         "Full tool outputs this batch (the complete results the agent received — analyze "
         "these directly, this is the ground truth of what was retrieved):\n"
@@ -259,6 +288,7 @@ def _interpret_context(
 def _prompt(
     task: dict | None, ledger: dict, observation: dict, extra_context: str,
     tool_outputs: str = "", compromise_facts: list[str] | None = None,
+    coverage: dict | None = None,
 ) -> str:
     """The interpret prompt as a single combined string (SYSTEM+DEVELOPER then USER+CONTEXT).
     `interpret()` sends these as two separate messages; this combined form is kept for
@@ -266,7 +296,8 @@ def _prompt(
     return (
         _interpret_system_prompt()
         + "\n\n"
-        + _interpret_context(task, ledger, observation, extra_context, tool_outputs, compromise_facts)
+        + _interpret_context(task, ledger, observation, extra_context, tool_outputs,
+                            compromise_facts, coverage)
     )
 def _prompt_steering(ledger: dict, observation: dict) -> str:
     """Adaptive steering injected above the ledger dump: on a stuck direction, mark the

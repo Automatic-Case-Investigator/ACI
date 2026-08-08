@@ -91,16 +91,18 @@ Key behavior:
   URL-encoded payloads) from event-shaped JSON, auto-correlates confirmed
   entities, builds the kill-chain view, and can trigger TI enrichment.
 - `assess` completes the current task with a non-empty summary. For
-  `investigation`, a single **per-task self-review** (`graph/reflection.py`)
+  `investigation`, a single **per-task findings review** (`graph/reflection.py`)
   replaces the older fixed cascade of separate guard nodes — one model call
   judges the task holistically (using deterministic signals: evidence-query
   count, broad-result hit count, unpivoted IOCs, unqueried volume-profile
   clusters, unreported board compromise artifacts) and either approves
-  completion or re-injects one consolidated correction (`needs_more_work`).
+  classifies each `## Findings` bullet for board gating. Its keep-working vote is
+  ignored: completion is decided by `interpret` alone, with a deterministic
+  evidence floor in `_route_interpret` able to veto a hollow completion.
   Fail-open and bounded by a retry budget plus a convergence guard so a task
   cannot loop forever on orientation-only turns.
 - `pivot` updates the Findings Board from `## Findings` (gated by the
-  self-review's grounding/novelty verdicts) and `## Hypotheses`, validates
+  findings review's grounding/novelty verdicts) and `## Hypotheses`, validates
   `## New Leads`, queues approved follow-up tasks, and posts an immediate
   escalation comment when active compromise is confirmed — reading
   confirmed compromise indicators directly off the board, not only the

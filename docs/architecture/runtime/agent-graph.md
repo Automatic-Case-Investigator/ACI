@@ -67,7 +67,7 @@ can be imported directly from the package root:
 | `state` | The `AgentState` typed dict threaded through every node. |
 | `nodes_loop` | The per-task tool loop nodes: `seed`, `claim`, `think`, `use_tools`, plus post-tool enrichment (correlation, kill-chain, TI). |
 | `interpretation/` | The `interpret` node, split into `ledger` (durable per-task memory), `pivots` (candidate scoring/selection), `decisions` (next-action logic), `prompt` (model-call rendering), and `node` (the node + glue). |
-| `nodes_flow/` | The post-task nodes, split into `assess` (self-review + synthesis), `pivot` (board + lead follow-ups), and `completion` (`finish`, verdict contract, reassessment, publication), over a shared helper module. |
+| `nodes_flow/` | The post-task nodes, split into `assess` (report synthesis + findings review), `pivot` (board + lead follow-ups), and `completion` (`finish`, verdict contract, reassessment, publication), over a shared helper module. |
 | `observation` | Deterministic normalization of a tool-result batch into observation state (signals, snapshots, pivot candidates). |
 | `toolio` | Tool execution plumbing, result capping, and task-queue calls. |
 | `validation` | Report/board validation, escalation facts, and board compromise-indicator surfacing. |
@@ -81,11 +81,11 @@ The active top-level graph stages are:
 |---|---|
 | `seed` | Ensure the agent has initial queue work. Triage creates one triage task. Investigation calls the `seeder` agent for a normal triage handoff, or creates a resume/fallback task directly, only when its queue has no pending work (see [Seeder Agent](#seeder-agent)). |
 | `claim` | Stop if cancellation was requested; otherwise atomically claim the highest-priority pending task from `aci-taskqueue`. |
-| `think` | Build or continue the model conversation for the current task, compact context when the prompt approaches 80% of the model provider's configured context length (Settings → Model provider), and call the model with allowed MCP tools. There is no separate pre-tool "intent" stage in this graph — that streamed public-reasoning mechanism is orchestrator-only (see [Orchestrator And Session Publication](../orchestrator.md#orchestrator-and-session-publication)). |
+| `think` | Continue the current task's conversation. The **task anchor** (objective + reasoning contract) is written once as `message[1]` and never replayed; **ledger steering** is appended to the model call but never persisted; **evidence** accumulates across cycles. Compacts context when the prompt approaches 80% of the model provider's configured context length (Settings → Model provider). There is no separate pre-tool "intent" stage in this graph — that streamed public-reasoning mechanism is orchestrator-only (see [Orchestrator And Session Publication](../orchestrator.md#orchestrator-and-session-publication)). |
 | `use_tools` | Execute model-requested tools, cap oversized tool results before feeding them back to the model, expand AVFS `~` paths, deterministically extract artifacts (including decoded hex/base64/URL-encoded payloads) from event-shaped JSON, auto-correlate confirmed entities, build the kill-chain view, and trigger TI enrichment. |
-| `interpret` | Mandatory post-tool reasoning checkpoint (`agent/runtime/graph/interpretation/`). Runs after every tool batch: normalizes the batch into an observation, updates the durable per-task ledger (confirmed findings, hypothesis, query-trial memory, pivots), surfaces board compromise indicators the model must disposition, and decides continue-vs-assess against the task's success criteria. Routes back to `think` to continue the task or forward to `assess` when the objective is answered. |
-| `assess` | Complete the claimed task with a summary. For `investigation`, runs the [per-task self-review](#per-task-self-review) (`agent/runtime/graph/reflection.py`) before allowing completion — a single model-driven review that can route back to `think` with one consolidated `needs_more_work` correction instead of a fixed cascade of separate guards. |
-| `pivot` | Investigation-only evidence-to-follow-up phase: pushes confirmed `## Findings` into the Findings Board (gated by the self-review's grounding/novelty verdicts), checks confirmed compromise artifacts on the board for an unposted escalation, validates `## New Leads` (model-assisted, deduplicated against the existing queue), and queues approved follow-up tasks. |
+| `interpret` | Mandatory post-tool reasoning checkpoint (`agent/runtime/graph/interpretation/`). Runs after every tool batch: normalizes the batch into an observation, updates the durable per-task ledger (confirmed findings, hypothesis, query-trial memory, pivots), surfaces board compromise indicators the model must disposition, and decides continue-vs-assess against the task's success criteria. Routes back to `think` to continue the task or forward to `assess` when the objective is answered. **This is the only node that decides a task is done** — `_route_interpret` additionally vetoes a completion vote from a task that ran zero evidence queries, since a task that retrieved nothing has not investigated anything. |
+| `assess` | **Produces** the claimed task's output; it does not judge whether the task is done. Synthesises or repairs the three-section report, runs the [per-task findings review](#per-task-findings-review) (`agent/runtime/graph/reflection.py`) to classify each `## Findings` bullet for the pivot node's board gating, merges preserved findings, and completes the task. Always routes forward to `pivot`. |
+| `pivot` | Investigation-only evidence-to-follow-up phase: pushes confirmed `## Findings` into the Findings Board (gated by the findings review's grounding/novelty verdicts), checks confirmed compromise artifacts on the board for an unposted escalation, validates `## New Leads` (model-assisted, deduplicated against the existing queue), and queues approved follow-up tasks. |
 | `finish` | Finalize the run and compute `completed` vs `incomplete_budget`, or preserve `cancelled`. |
 | `verdict_contract` | Generates or repairs the canonical fenced-JSON diagnosis verdict block from the final report. |
 | `reassess_verdict` | **Investigation only.** Compares triage and investigation verdicts and resolves conflicts with a focused model call only when needed. |
@@ -119,12 +119,12 @@ flowchart TD
     Enrich --> Interpret["interpret: update ledger,\ndecide next action"]
     Interpret --> InterpretRoute{"objective answered?"}
     InterpretRoute -- no, continue --> Think
-    InterpretRoute -- yes --> Assess["assess: per-task self-review"]
+    InterpretRoute -- yes --> Floor{"any evidence query\nthis task?"}
+    Floor -- no --> Think
+    Floor -- yes --> Assess["assess: report + findings"]
 
     ToolCalls -- no --> Assess
-    Assess --> NeedsWork{"needs_more_work?"}
-    NeedsWork -- yes, budget remains --> Think
-    NeedsWork -- no --> Pivot["pivot\n(investigation only)"]
+    Assess --> Pivot["pivot\n(investigation only)"]
     Pivot --> Budget{"budget exhausted?"}
     Budget -- no --> Claim
     Budget -- yes --> Finish
@@ -155,9 +155,9 @@ Investigation finalization reads these task summaries into the structured run
 result, so the orchestrator can distinguish completed work, incomplete work, and
 tasks that completed without a substantive conclusion.
 
-### Per-Task Self-Review
+### Per-Task Findings Review
 
-Task quality for `investigation` is enforced by a single **per-task self-review**
+Findings quality for `investigation` is classified by a single **per-task findings review**
 (`agent/runtime/graph/reflection.py: review_task_model`) rather than a set of
 narrow, independently hand-coded checks: one model call judges the task
 holistically and returns a `TaskReview` (`conclude` or `keep_working`, plus
@@ -180,15 +180,18 @@ code rather than guessed by the model:
   on the Findings Board (e.g. a decoded reverse-shell command) that are not
   yet reflected in this task's `## Findings`.
 
-`assess` re-injects the review's feedback as one consolidated correction and
-sets `status="needs_more_work"`, which `_route_assess` (`graph/builder.py`)
-routes back to `think` if budget remains. `reflection_retries` bounds the
-loop (default 2 retries); a **convergence guard**
-(`reflection_evidence_at_last_nudge`) suppresses a further nudge if the prior
-correction produced no new evidence query, so a task cannot churn forever on
-orientation-only turns. The review is fail-open: if the model is unavailable
-or the call fails, the task falls back to the deterministic non-empty-summary
-check and completes rather than stalling the run.
+The review's `keep_working` vote is **deliberately ignored**. Completion is
+`interpret`'s decision alone — the review used to be able to overturn it and
+route back to `think`, which meant two model calls answering one question. What
+survives is its per-finding classification, which `pivot` consumes for board
+gating (`last_findings_verification`). The review is fail-open: if the model is
+unavailable or the call fails, the task falls back to the deterministic
+non-empty-summary check and completes rather than stalling the run.
+
+The one deterministic backstop that remains is the **evidence floor**, now a
+routing predicate in `_route_interpret` rather than a retry loop in `assess`: a
+task whose completion vote arrives with zero evidence queries is sent back to
+`think`. It can only veto a completion decision, never initiate one.
 
 ### Seeder Agent
 
