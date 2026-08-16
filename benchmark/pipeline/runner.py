@@ -800,7 +800,25 @@ async def _run_trials_async(
         )
         for spec in specs
     ]
-    return await asyncio.gather(*tasks)
+    # `return_exceptions=True` is load-bearing: a trial that exceeds
+    # `poll_timeout_secs` raises out of `_wait_for_session`, and a bare gather
+    # propagates that immediately — killing every sibling task and the whole run.
+    # A benchmark exists to measure a stochastic agent across N trials, so one slow
+    # trial must fail as a trial, not as the run. (Observed 2026-08-16: recon trial 9
+    # timed out at 3600s and took the other 19 trials with it.)
+    settled = await asyncio.gather(*tasks, return_exceptions=True)
+    results: list[_TrialResult] = []
+    for spec, outcome in zip(specs, settled):
+        if isinstance(outcome, BaseException):
+            _log(
+                f"FAILED scenario={spec.scenario} entry_point={spec.entry_point_id} "
+                f"trial={spec.trial}/{spec.trials}: "
+                f"{type(outcome).__name__}: {outcome}",
+                log,
+            )
+            continue
+        results.append(outcome)
+    return results
 
 
 def run_many(
