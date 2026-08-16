@@ -159,22 +159,36 @@ guardrail machinery.**
 ```
 ACI/
 ├── aci/                          # Django project config (settings, urls, asgi/wsgi)
-├── agent/                        # Django app: agent runtime, dashboard, models
+├── agent/                        # Django app: agent runtime, web layer, models
 │   ├── agents/                   # Agent registry + definitions: triage, investigation, seeder
 │   ├── prompts/                  # Layered system prompts (platform, triage, investigation, seeder, playbook, orchestrator)
 │   ├── runtime/                  # Harness layer — see breakdown below
 │   ├── ti/                       # Threat-intelligence enrichment (cache, providers e.g. VirusTotal)
 │   ├── workspace/                # AVFS writer, citation helpers, workspace indexer
-│   ├── dashboard/                # WebSocket consumer, run views/actions, settings views, runner lifecycle
+│   ├── web/                      # All HTTP/WebSocket delivery — see breakdown below
 │   ├── models/                   # Django models: AgentRun, AgentEvent, config, learning (patterns/baselines/feedback)
-│   ├── views/                    # REST API views: runs, webhooks, public endpoints
 │   ├── management/commands/      # run_workflow, compute_baselines
-│   └── templatetags/
+│   └── templatetags/             # Must stay at the app root: Django only finds
+│                                 # template tags in <installed_app>/templatetags/
+├── agent/web/                    # (expanded)
+│   ├── urls.py                   # EVERY route, in one file: `dashboard_urlpatterns`
+│   │                             # (namespaced "dashboard") + `api_urlpatterns`
+│   ├── views/                    # Views grouped by product area, pages and JSON API together
+│   │   ├── _shared.py            #   PublicAPIView — the no-auth base for local-console endpoints
+│   │   ├── dashboard/            #   Shell: index/chat session pages + verdict stats feed
+│   │   ├── runs/                 #   Run pages, POST actions, REST API, active-runs feed
+│   │   ├── settings/             #   Settings pages (rows, agents, baselines, integrations)
+│   │   └── webhooks/             #   Inbound SIEM/SOAR webhooks that dispatch runs
+│   └── realtime/                 # WebSocket consumer, event-bus hook, ASGI routing
 ├── agent/runtime/                # (expanded)
 │   ├── engine/                   # run_agent, dispatch_run, MCP client, model client, streaming, seeder_runner
-│   ├── graph/                    # LangGraph runtime: builder resolver + agent_graphs/ (triage/investigation/seeder),
-│   │                              # nodes_loop, interpretation/ (interpret node), nodes_flow/ (assess/pivot/completion), observation, reflection (findings review),
+│   ├── graph/                    # LangGraph runtime: builder resolver + agent_graphs/ — ONE FILE PER AGENT
+│   │                              # (triage/investigation/seeder); nodes_loop/ (_const, context, enrichment, nodes —
+│   │                              # nodes holds seed/claim/think/use_tools AND triage_think), interpretation/ (interpret
+│   │                              # node), nodes_flow/ (assess/pivot/completion), observation/ (trials, events, digest,
+│   │                              # pivots, signals, build), coverage, reflection (findings review), findings_model,
 │   │                              # leads/lead_model, board, validation, synthesis, publication, parsing, timeutil, state
+│   ├── runner/                   # Session/run lifecycle: start/stop/restart, specialist result publication
 │   ├── analysis/                 # Deterministic enrichment: artifacts (incl. decode layer), correlation_leads,
 │   │                              # kill_chain, query_memo, pattern_matcher, alert_metadata, intent
 │   ├── orchestrator/             # Conversational orchestrator: driver, session, messages, prompts, tools,

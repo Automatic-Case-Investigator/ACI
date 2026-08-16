@@ -79,7 +79,25 @@ When designing a fix or feature, apply this order and stop at the first that fit
   run-context / provider guidance stay conceptually separate).
 - **File placement.** Entry points live higher in the tree; specialized helpers, transforms,
   and validators live deeper. Large modules are split into concern-scoped sub-packages
-  (e.g. `graph/interpretation/`, `graph/nodes_flow/`).
+  (e.g. `graph/interpretation/`, `graph/nodes_flow/`, `graph/nodes_loop/`,
+  `graph/observation/`).
+- **One graph file per agent.** Each agent's routers and topology live in their own module
+  under `graph/agent_graphs/` (`investigation.py`, `seeder.py`, `triage.py`); a new agent
+  means a new file. They are never merged into a shared builder, collapsed onto a
+  parameterized factory, or folded behind flags, even where two are near-identical. A
+  reader must be able to open one file and see that agent's entire graph.
+- **The web layer.** `agent/web/` owns all HTTP and WebSocket delivery. Views are grouped
+  by product area under `web/views/` (`dashboard/`, `runs/`, `settings/`, `webhooks/`), and
+  each area holds every view for its domain regardless of response type — a server-rendered
+  page and the JSON endpoint beside it share the same logic. Every route lives in the single
+  `web/urls.py`, which exports `dashboard_urlpatterns` (namespaced `dashboard:`) and
+  `api_urlpatterns`. One exception to the grouping, and it is forced:
+  `agent/templatetags/` stays at the app root, because Django only discovers template tags
+  in `<installed_app>/templatetags/` and the installed app is `agent`.
+- **Prefer absolute `agent.…` imports in deeply nested modules.** A relative import that
+  reaches the app root is depth-fragile: move the file one level and the dot count is wrong,
+  which `pytest` collection will not catch because URLConf and view modules are imported
+  lazily. It surfaces only when a request arrives.
 - **The graph re-export contract.** Sub-packages under `agent/runtime/graph/` (and
   `runtime/orchestrator/`) re-export every public and private name through their `__init__.py`
   via a dynamic `globals()` loop, so `from agent.runtime.graph import X` and `graph._helper`

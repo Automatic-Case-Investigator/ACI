@@ -58,7 +58,7 @@ sending an event type nobody registered a binding for).
 
 ## Webhook Ingress
 
-Two REST endpoints (`agent/views/webhooks.py`) ingest events, both requiring no
+Two REST endpoints (`agent/web/views/webhooks/api.py`) ingest events, both requiring no
 authentication (`PublicAPIView`) since the secret check happens per-trigger:
 
 - **`POST /api/agent/webhooks/<trigger_id>/`** (`ConfiguredWebhookView`) — the general

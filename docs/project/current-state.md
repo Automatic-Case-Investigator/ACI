@@ -255,7 +255,7 @@ shared path:
 
 - orchestrator-triggered completion updates `OrchestratorSession` directly;
 - direct resume and restart use
-  `agent.dashboard.runner.session_state.publish_specialist_result_to_session`;
+  `agent.runtime.runner.session_state.publish_specialist_result_to_session`;
 - shared mutation/publication helpers live in
   `agent.runtime.orchestrator.specialist_sync`.
 

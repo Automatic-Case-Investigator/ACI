@@ -64,7 +64,7 @@ Specialist completion is normalized through one publication path:
 - orchestrator-triggered specialist completion updates the shared
   `OrchestratorSession`;
 - direct resume and restart paths republish through
-  `agent.dashboard.runner.session_state.publish_specialist_result_to_session`;
+  `agent.runtime.runner.session_state.publish_specialist_result_to_session`;
 - shared session mutation logic lives in
   `agent.runtime.orchestrator.specialist_sync`.
 

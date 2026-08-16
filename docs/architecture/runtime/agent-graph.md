@@ -66,11 +66,25 @@ agent type instead of a single shared `GRAPH` singleton.
 | `agent_graphs/triage.py` | Triage topology (`seed -> triage_think <-> use_tools -> finish -> verdict_contract -> reassess_verdict -> publish_finish`). |
 | `agent_graphs/investigation.py` | Investigation topology (`seed -> claim -> think/use_tools/interpret/assess -> pivot -> claim`, then completion tail). |
 | `agent_graphs/seeder.py` | Seeder topology equivalent to the prior non-triage routed path (`seed -> claim -> think/use_tools/interpret/assess -> pivot -> claim`, then completion tail). |
+
+**One graph file per agent.** Each agent's routers and topology live in their own module
+under `agent_graphs/`, and a new agent means a new file. They are never merged into a
+shared builder or collapsed onto a parameterized factory, even where two are near-identical
+— `investigation.py` and `seeder.py` differ today only in whether `_route_interpret`
+applies the evidence floor and whether `_route_think` applies the per-task call cap. The
+point is that one file shows one agent's entire graph.
 | `state` | The `AgentState` typed dict threaded through every node. |
-| `nodes_loop` | Shared queue/tool-loop nodes (`seed`, `claim`, `think`, `use_tools`) plus post-tool enrichment (correlation, kill-chain, TI). |
+| `nodes_loop/` | Every loop node plus post-tool enrichment. `nodes` holds `seed`, `claim`, `think`, `use_tools` **and** triage's `triage_think`; `context` derives queue context and task/tool time windows; `enrichment` runs memoization, correlation, kill-chain, and TI; `_const` holds the tunables. |
 | `interpretation/` | Investigation-only `interpret` implementation and ledger/pivot decision helpers. |
 | `nodes_flow/` | Shared completion pipeline nodes (`finish`, `verdict_contract`, `reassess_verdict`, `publish_finish`) and investigation-specific `assess`/`pivot`. |
-| `observation`, `toolio`, `validation`, `synthesis`, `reflection`, `findings_model`, `lead_model`, `parsing`, `sanitize`, `timeutil`, `board`, `leads` | Shared helper layers used across graphs and runtime/orchestrator imports. |
+| `observation/` | Builds the observation `interpret` reasons over: `trials` (query-trial memory), `events` (extraction from tool JSON), `digest` (snapshots/orientation facts), `pivots` (candidate derivation + scoring), `signals` (recommended moves, error recovery), `build` (assembly). |
+| `coverage`, `toolio`, `validation`, `synthesis`, `reflection`, `findings_model`, `lead_model`, `parsing`, `sanitize`, `timeutil`, `board`, `publication`, `leads` | Shared helper layers used across graphs and runtime/orchestrator imports. `coverage` sits below both `nodes_loop` and `nodes_flow` because both need it and `nodes_flow` imports `nodes_loop`. |
+
+Each sub-package re-exports every public and private name through its `__init__.py`, so
+`from agent.runtime.graph.nodes_loop import X` keeps resolving after a split. Note the
+re-export forwards names on **read, not write** — a test that rebinds
+`nodes_loop.some_helper` must target the owning submodule (`nodes_loop.nodes.some_helper`),
+or the patch will not take effect.
 
 Active node responsibilities:
 
