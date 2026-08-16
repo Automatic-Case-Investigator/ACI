@@ -13,8 +13,8 @@ def _memoize_query_and_schema(
     """Record a once-per-run board memo for over-broad query shapes and discovered
     schema fields (Phase 1 #13/#18), so later tasks don't re-pay the same broad-query
     tax or re-derive field names. Dedup keys make each shape/schema recorded once."""
-    from ..analysis.query_memo import broad_query_memo, extract_schema_fields
-    from .board import _record_board_entry
+    from ...analysis.query_memo import broad_query_memo, extract_schema_fields
+    from ..board import _record_board_entry
 
     memo = broad_query_memo(tool_name, args, raw)
     if memo:
@@ -67,7 +67,7 @@ async def _auto_correlate_entities(
     try:
         from collections import deque
 
-        from ..analysis.correlation_leads import (
+        from ...analysis.correlation_leads import (
             MAX_CORRELATIONS,
             MAX_HOP_DEPTH,
             corr_dedup_key,
@@ -181,8 +181,8 @@ async def _build_kill_chain(
     if not hosts:
         return  # only attempt once we have a host to scope the kill chain to
     try:
-        from ..analysis.correlation_leads import derive_window
-        from ..analysis.kill_chain import (
+        from ...analysis.correlation_leads import derive_window
+        from ...analysis.kill_chain import (
             drop_covered_specs,
             gap_lead_specs,
             summarize_kill_chain,
