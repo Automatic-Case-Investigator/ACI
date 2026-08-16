@@ -153,7 +153,7 @@ class ReviewTaskModelTest(unittest.TestCase):
                 "evidence_queries": 3,
                 "hit_count": 12,
                 "hit_ceiling": False,
-                "unpivoted_iocs": [],
+                "unpivoted_artifacts": [],
             },
         )
         base.update(over)
@@ -214,7 +214,7 @@ class ReviewTaskModelTest(unittest.TestCase):
                         "evidence_queries": 0,
                         "hit_count": None,
                         "hit_ceiling": False,
-                        "unpivoted_iocs": [],
+                        "unpivoted_artifacts": [],
                     },
                 ),
             )
@@ -259,7 +259,7 @@ class ReviewTaskModelTest(unittest.TestCase):
                         "evidence_queries": 2,
                         "hit_count": 10000,
                         "hit_ceiling": True,
-                        "unpivoted_iocs": [],
+                        "unpivoted_artifacts": [],
                     }
                 ),
             )
@@ -289,7 +289,7 @@ class ReviewTaskModelTest(unittest.TestCase):
                         "evidence_queries": 4,
                         "hit_count": 8,
                         "hit_ceiling": False,
-                        "unpivoted_iocs": ["10.0.2.5"],
+                        "unpivoted_artifacts": ["10.0.2.5"],
                     }
                 ),
             )

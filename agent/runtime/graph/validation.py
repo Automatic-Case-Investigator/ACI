@@ -152,41 +152,99 @@ def _board_compromise_facts(state: AgentState) -> list[str]:
     )
 
 
-def _unpivoted_network_iocs(report: str) -> list[str]:
-    """Return attacker/C2 network IPs confirmed in ## Findings that have no pivot in
-    ## New Leads.
+# Pivotable artifact kinds, ordered by how often the kind carries a chain onward
+# rather than merely labelling it. Ordering is a deterministic display preference —
+# whether any given artifact is worth pivoting on is the model's call, not this list's.
+_PIVOTABLE_KINDS = (
+    "cwd",
+    "command",
+    "file",
+    "domain",
+    "sha256",
+    "sha1",
+    "md5",
+    "process",
+    "user",
+    "ip",
+    "host",
+)
+_MAX_UNPIVOTED = 8
+# The line on which a task declares what it investigates. Task descriptions also
+# quote supporting evidence, so matching an artifact against the whole description
+# would count "this task mentions the value as context" as "this task investigates
+# it" — the exact citing-vs-pivoting confusion this signal exists to catch.
+_TASK_PIVOT_LINE_RE = re.compile(r"^\s*[-*]?\s*pivots?\s*:(.*)$", re.IGNORECASE | re.M)
 
-    Scope is deliberately tight to stay high-precision: only IPs that appear in a
-    ## Findings bullet which also carries an active-compromise / C2 / reverse-shell
-    indicator (so routine/benign host IPs do not trigger), and only when the literal
-    is absent from the ## New Leads section entirely. This is the deterministic floor
-    behind the §4 artifact-pivot rule — a confirmed attacker IP must spawn at least
-    one follow-up lead; depth of coverage is the model's job per the prompt checklist.
+
+def _task_pivot_ground(tasks: list[dict]) -> str:
+    """Ground the queue already covers: each task's title plus its declared pivots."""
+    parts: list[str] = []
+    for task in tasks or []:
+        parts.append(str(task.get("title") or ""))
+        parts.extend(_TASK_PIVOT_LINE_RE.findall(str(task.get("description") or "")))
+    return "\n".join(p for p in parts if p)
+
+
+def _unpivoted_artifacts(
+    state: AgentState, report: str, covered: str = ""
+) -> list[str]:
+    """Confirmed artifacts the task CITED in its ## Findings but pivoted on in no lead.
+
+    The deterministic floor behind the §4 artifact-pivot rule: "a confirmed artifact
+    whose relationships were never examined is an incomplete pivot." §4 states that
+    invariant; nothing computed it, which left the model to track set membership
+    across cycles — bookkeeping it does badly and code does exactly.
+
+    Artifacts come from the board, where the extractor already typed them from
+    structured event fields, rather than from re-mining the prose. That is what
+    generalises this: it previously mined IP literals out of findings bullets gated on
+    an active-compromise regex, so it could only ever fire for reverse-shell/C2
+    language about an IP. A root command whose working directory was a web upload
+    path — cited in findings, pivoted on by nothing — matched neither half of that
+    gate and passed silently (session b9615cf7).
+
+    Precision comes from the two halves of §4.2's own definition of coverage. An
+    artifact is reported only if the agent CITED it in its own ## Findings — keeping
+    the signal about what this task established rather than re-flagging the whole
+    run's board every task — and only if it is answered by nothing: no ## New Leads
+    entry, and no task already queued or completed (`covered`). Without that second
+    half the signal saturates: every sudo artifact reappears on every task, the
+    reviewer learns the list is noise, and a guard that always fires stops being read.
+
+    Being listed is not an accusation. The reviewer asks the agent to account for
+    each one, and "expected, because X" is a complete answer.
     """
     text = report or ""
     f_match = _FINDINGS_RE.search(text)
     if not f_match:
         return []
-    findings = _section_body(text, f_match)
-
+    findings_lower = _section_body(text, f_match).lower()
     nl_match = _NEW_LEADS_HEADER_RE.search(text)
     leads_lower = _section_body(text, nl_match).lower() if nl_match else ""
+    covered_lower = (covered or "").lower()
+
+    by_kind: dict[str, list[str]] = {}
+    seen: set[str] = set()
+    for entry in _board_entries_for_validation(state):
+        if entry.get("kind") != "artifact":
+            continue
+        content = (entry.get("content") or "").strip()
+        kind, _, value = content.partition(": ")
+        value = value.strip()
+        if not value or kind not in _PIVOTABLE_KINDS:
+            continue
+        key = value.lower()
+        if key in seen or key not in findings_lower:
+            continue
+        if key in leads_lower or (covered_lower and key in covered_lower):
+            continue
+        seen.add(key)
+        by_kind.setdefault(kind, []).append(f"{kind}: {value}")
 
     out: list[str] = []
-    seen: set[str] = set()
-    for bullet in _FACT_BULLET_RE.finditer(findings):
-        content = bullet.group(1)
-        if _NEGATED_EVIDENCE_RE.search(content):
-            continue
-        if not _ACTIVE_COMPROMISE_INDICATORS_RE.search(content):
-            continue
-        for ip in _IP_LITERAL_RE.findall(_ascii_dashes(content)):
-            key = ip.lower()
-            if key in seen or key in leads_lower:
-                continue
-            seen.add(key)
-            out.append(ip)
-    return out
+    for kind in _PIVOTABLE_KINDS:
+        out.extend(by_kind.get(kind, []))
+    return out[:_MAX_UNPIVOTED]
 
 
 def _artifact_literals_in(text: str) -> set[str]:

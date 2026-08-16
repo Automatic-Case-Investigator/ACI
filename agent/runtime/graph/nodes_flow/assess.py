@@ -22,10 +22,15 @@ from ..toolio import (
     _call,
     _emit_node_entry,
     _is_error_tool_result,
+    _list_tasks,
     _tmap,
     _track_input_tokens,
 )
-from ..validation import _board_compromise_facts, _unpivoted_network_iocs
+from ..validation import (
+    _board_compromise_facts,
+    _task_pivot_ground,
+    _unpivoted_artifacts,
+)
 from datetime import datetime, timedelta
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 import json
@@ -232,6 +237,14 @@ async def assess(state: AgentState, config) -> dict:
         evidence_queries = _count_evidence_queries(state["messages"])
         hit_count = _last_search_hit_count(state["messages"])
         digest, board_facts = build_evidence_digest(state, state["messages"])
+        # Ground the queue already covers: §4.2 counts an artifact answered if a task
+        # already asks about it, not only if this report opened a lead. Without this
+        # the unpivoted signal re-lists every sudo artifact on every task, and a
+        # signal that always fires stops being read.
+        _queued = await _list_tasks(
+            tools, state["case_id"], state["run_id"], state["agent_name"]
+        )
+        _queued_ground = _task_pivot_ground(_queued)
         # Board compromise artifacts the agent has NOT surfaced in its ## Findings — the
         # decoded evidence is on its board but its report doesn't reflect it.
         _fa_lower = final_answer.lower()
@@ -258,7 +271,9 @@ async def assess(state: AgentState, config) -> dict:
                 "hit_count": hit_count,
                 "hit_ceiling": hit_count is not None
                 and hit_count >= BROAD_HIT_THRESHOLD,
-                "unpivoted_iocs": _unpivoted_network_iocs(final_answer),
+                "unpivoted_artifacts": _unpivoted_artifacts(
+                    state, final_answer, covered=_queued_ground
+                ),
                 "unqueried_clusters": _unqueried_post_peak_clusters(state["messages"]),
                 "unqueried_time_ranges": _unqueried_time_ranges(state["messages"]),
                 "unreported_compromise_artifacts": unreported,

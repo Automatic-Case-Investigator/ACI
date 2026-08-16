@@ -15,7 +15,7 @@ The review returns BOTH:
      node's board gating is preserved unchanged; and
   2. an overall `conclude | keep_working` decision plus one targeted feedback string.
 
-Deterministic signals (last search hit count, evidence-query count, unpivoted network
+Deterministic signals (last search hit count, evidence-query count, unpivoted
 IOCs, missing report sections) are computed by the caller and passed in as grounding —
 code does the deterministic measuring, the model does the semantic judgment.
 
@@ -169,11 +169,12 @@ def _build_review_prompt(
                 else ""
             )
         )
-    unpivoted = signals.get("unpivoted_iocs") or []
+    unpivoted = signals.get("unpivoted_artifacts") or []
     if unpivoted:
         signal_lines.append(
-            "- Confirmed network IOC(s) with no New Leads pivot: "
+            "- Confirmed artifact(s) cited in your findings with no New Leads pivot: "
             + ", ".join(unpivoted)
+            + " — for each, either open a lead or say why it needs none."
         )
     clusters = signals.get("unqueried_clusters") or []
     if clusters:
