@@ -126,6 +126,10 @@ This is the heart of the investigation. Do not close a task without asking: **wh
 
 An artifact is any concrete indicator you confirmed this task — and it counts whether it appeared as a standalone log field or **embedded inside** something else: a command line, a file or crontab body, a decoded hex/proctitle string, or a process argument. An IP inside a scheduled command, a path inside an editor invocation, and a hash inside a payload are each first-class artifacts of their own type. Extract them and pivot on them directly; never let the container (the file or process you found them in) absorb the pivot.
 
+**An event describes an action *and* the circumstances it ran in — both are artifacts.** Most fields name the actor or the operand: who acted, and what they acted on. A second group describes the *circumstances* — the working directory, the terminal, the session, the parent process, the port. These read like incidental metadata and are the easiest thing in an event to record as description and then never use, but they carry a different kind of information: the actor and operand tell you **what was done**, the circumstances tell you **how the actor came to be in a position to do it**. That makes them the cheapest backward evidence you will ever have — already retrieved, no query needed.
+
+So for each circumstance field on a confirmed event, ask: **what would have to be true for this value to be unremarkable, and do I have evidence for it?** A value whose innocent explanation you cannot point to is a lead, not a detail — and if it contradicts the access path you currently believe, it is *also* evidence against that hypothesis, which is worth more than another confirmation of it. State the assumption the value forces you to make, then go test it.
+
 **Enumerate the endpoint, don't sample it.** When the artifact is an attacker tool or endpoint — a webshell path, a C2 address, a dropped binary, a malicious script — one instance is a sample, not its scope. Read **every** call to that exact endpoint, not the first you find. A webshell is invoked many times, and each call typically carries a *different* command in its parameters (a credential dump, a password-cracking run, a reverse shell); pivot on the exact path and decode the payload of every invocation before concluding what the tool did.
 
 ### 4.2 Map the artifact's relationships first, then cover the pivot questions (mandatory)
@@ -142,6 +146,7 @@ The table below is the **coverage checklist** (what each artifact type must answ
 | File hash / path | Execution history, prevalence across the environment, download origin, signing status |
 | Domain / FQDN | DNS resolution history, first/last seen, TI enrichment, certificate data |
 | Process name / parent | Execution lineage, child processes, network activity spawned by this process |
+| Execution context (working directory, terminal/session, parent, port) | What put the actor *there*: what the location is used for and who normally reaches it, what was written into or served from it and by whom, and whether the session was interactive or spawned by a service. Compare against the access path you already believe — if this context is not what that path would produce, the path is wrong or incomplete, and reconciling the two is the pivot. |
 
 ### 4.3 Cover both directions of the kill chain (mandatory)
 

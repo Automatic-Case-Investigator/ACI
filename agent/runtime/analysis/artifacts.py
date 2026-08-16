@@ -49,6 +49,16 @@ _KEY_TYPES = {
     "process.executable": "file",
     "file.path": "file",
     "target.file.path": "file",
+    # Where the action was performed FROM, as opposed to what it acted ON. An
+    # operand (`file`) says what was touched; a working directory says where the
+    # actor was standing, which is a property of how they arrived rather than of
+    # what they did. Kept as its own kind so that distinction survives onto the
+    # board — collapsing it into `file` loses exactly the information that makes
+    # it worth pivoting on.
+    "pwd": "cwd",
+    "cwd": "cwd",
+    "audit.cwd": "cwd",
+    "process.working_directory": "cwd",
 }
 # Keys whose VALUE is a shell/audit command line. The command itself is recorded
 # as a `command` artifact, and file paths / IPs embedded in it are mined out as
