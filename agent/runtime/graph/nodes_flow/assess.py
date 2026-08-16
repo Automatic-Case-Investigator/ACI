@@ -245,6 +245,18 @@ async def assess(state: AgentState, config) -> dict:
             tools, state["case_id"], state["run_id"], state["agent_name"]
         )
         _queued_ground = _task_pivot_ground(_queued)
+        _unpivoted = _unpivoted_artifacts(state, final_answer, covered=_queued_ground)
+        if _unpivoted:
+            # Emit it: the reviewer's signals otherwise exist only inside a model
+            # prompt, so after a run there is no way to tell whether a signal fired.
+            # That makes any before/after comparison unattributable — the reason this
+            # one could not be validated from session 05d7d523's logs.
+            emit(
+                src,
+                "note",
+                f"unpivoted artifact(s): {len(_unpivoted)}",
+                detail="\n".join(_unpivoted),
+            )
         # Board compromise artifacts the agent has NOT surfaced in its ## Findings — the
         # decoded evidence is on its board but its report doesn't reflect it.
         _fa_lower = final_answer.lower()
@@ -271,9 +283,7 @@ async def assess(state: AgentState, config) -> dict:
                 "hit_count": hit_count,
                 "hit_ceiling": hit_count is not None
                 and hit_count >= BROAD_HIT_THRESHOLD,
-                "unpivoted_artifacts": _unpivoted_artifacts(
-                    state, final_answer, covered=_queued_ground
-                ),
+                "unpivoted_artifacts": _unpivoted,
                 "unqueried_clusters": _unqueried_post_peak_clusters(state["messages"]),
                 "unqueried_time_ranges": _unqueried_time_ranges(state["messages"]),
                 "unreported_compromise_artifacts": unreported,
