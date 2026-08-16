@@ -140,9 +140,29 @@ class PromptLayerLoadingTests(unittest.TestCase):
                 "available_tools": [],
             },
         )
-        self.assertIn("pivot from that anchor", prompt)
+        # §3.1 was rewritten around a query-selection step and the wording moved;
+        # the guidance itself is intact and now also corrects the failure it was
+        # meant to prevent — walking ancestry sideways off the anchor's own pid.
+        self.assertIn("Pivot from the anchor event", prompt)
         self.assertIn("process.parent.name", prompt)
         self.assertIn("data.audit.session", prompt)
+        self.assertIn("data.audit.ppid", prompt)
+        self.assertIn("walk the process ancestry", prompt.lower())
+
+    def test_investigation_prompt_leads_with_query_selection_not_mechanics(self):
+        """The prompt used to open §3.1 with 18.8k chars of query mechanics. The
+        failures were never bad queries — they were good queries against the wrong
+        representation, which mechanics cannot fix. Selection comes first now."""
+        prompt = compose_system_prompt(
+            get_agent("investigation").prompt_layers,
+            {"case_id": "~1", "run_id": "r", "agent_name": "investigation"},
+        )
+        self.assertIn("Choosing what to query", prompt)
+        self.assertIn("Which representation records the answer?", prompt)
+        # The actor-context facts the extractor now supplies must be named where
+        # the agent is told to reason about them.
+        for probe in ("ran_as", "login_session", "cwd"):
+            self.assertIn(probe, prompt)
 
 
 if __name__ == "__main__":

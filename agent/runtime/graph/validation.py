@@ -157,6 +157,7 @@ def _board_compromise_facts(state: AgentState) -> list[str]:
 # whether any given artifact is worth pivoting on is the model's call, not this list's.
 _PIVOTABLE_KINDS = (
     "cwd",
+    "ran_as",
     "command",
     "file",
     "domain",

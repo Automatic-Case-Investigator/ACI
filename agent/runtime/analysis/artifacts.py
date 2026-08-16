@@ -59,7 +59,20 @@ _KEY_TYPES = {
     "cwd": "cwd",
     "audit.cwd": "cwd",
     "process.working_directory": "cwd",
+    # WHO acted, as opposed to which account was acted on. `auid` is the audit
+    # login uid: stamped at login and inherited immutably by every descendant, so an
+    # unset `auid` means no login exists anywhere in this process's ancestry — the
+    # chain was started by a daemon. That is a property of the audit subsystem, not
+    # an inference, which is why it is decoded here and its consequences are left to
+    # the model. `uid` is the account the process actually ran as, which for a
+    # service is the service's own account rather than any human's.
+    "auid": "login_session",
+    "audit.auid": "login_session",
+    "uid": "ran_as",
+    "audit.uid": "ran_as",
 }
+# (uint32)-1 — the audit subsystem's "unset" sentinel for auid/ses.
+_AUDIT_UNSET = frozenset({"4294967295", "-1"})
 # Keys whose VALUE is a shell/audit command line. The command itself is recorded
 # as a `command` artifact, and file paths / IPs embedded in it are mined out as
 # `file` / `ip` artifacts (these often never appear as structured fields).
@@ -261,6 +274,15 @@ def _normalize(kind: str, value) -> str | None:
     if kind == "domain":
         candidate = text.rstrip(".").lower()
         return candidate if _DOMAIN_RE.fullmatch(candidate) else None
+    if kind in ("login_session", "ran_as"):
+        digits = text.lstrip("-")
+        if not digits.isdigit():
+            return None
+        if kind == "login_session":
+            # Render the sentinel as what it means. `login_session: 4294967295` is
+            # unreadable; "no login" is the same fact, decoded.
+            return "none — no login in this process ancestry" if text in _AUDIT_UNSET else f"uid={text}"
+        return None if text in _AUDIT_UNSET else f"uid={text}"
     if kind == "user":
         # Audit events render users as `name(uid=0)` / `root(euid=0)`. Strip the
         # parenthetical id suffix so the audit form collapses onto the plain account

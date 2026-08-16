@@ -85,6 +85,71 @@ class ExecutionContextArtifactTest(unittest.TestCase):
         self.assertIn("/bin/cat /etc/shadow", found.get("command", []))
         self.assertEqual(sorted(found.get("user", [])), ["phopkins", "root"])
 
+    def test_actor_identity_is_extracted_from_audit_records(self):
+        """`uid`/`auid` decide which representation can hold the origin.
+
+        Session 37427944 quoted `pid=28816 uid=33 auid=4294967295` into its own
+        findings, inferred nothing, then searched `pid=28816 AND exe=/bin/su`, got
+        zero, and called the lineage exhausted. Neither field was ever an artifact,
+        so "who acted" was only ever a substring inside full_log.
+        """
+        payload = {
+            "events": [
+                {
+                    "_id": "12AU-ljyOpqe9HRT83ek",
+                    "_source": {
+                        "agent": {"name": "wazuh-client"},
+                        "data": {
+                            "audit": {
+                                "type": "USER_AUTH",
+                                "pid": "28816",
+                                "uid": "33",
+                                "auid": "4294967295",
+                                "ses": "4294967295",
+                                "exe": "/bin/su",
+                                "acct": "phopkins",
+                            }
+                        },
+                        "rule": {"id": "80700", "groups": ["audit"]},
+                    },
+                }
+            ]
+        }
+        found = _by_kind(payload)
+        self.assertEqual(found.get("ran_as"), ["uid=33"])
+        self.assertEqual(len(found.get("login_session", [])), 1)
+        self.assertIn("none", found["login_session"][0])
+
+    def test_a_real_login_uid_is_kept_not_reported_as_absent(self):
+        payload = {
+            "events": [
+                {
+                    "_id": "e1",
+                    "_source": {
+                        "data": {"audit": {"uid": "1000", "auid": "1000"}},
+                        "rule": {"id": "1"},
+                    },
+                }
+            ]
+        }
+        found = _by_kind(payload)
+        self.assertEqual(found.get("login_session"), ["uid=1000"])
+        self.assertEqual(found.get("ran_as"), ["uid=1000"])
+
+    def test_unset_ran_as_is_dropped_rather_than_boarded_as_a_sentinel(self):
+        payload = {
+            "events": [
+                {
+                    "_id": "e1",
+                    "_source": {
+                        "data": {"audit": {"uid": "4294967295"}},
+                        "rule": {"id": "1"},
+                    },
+                }
+            ]
+        }
+        self.assertNotIn("ran_as", _by_kind(payload))
+
     def test_alternate_field_spellings_resolve(self):
         for field, value in (
             ("cwd", "/tmp"),
