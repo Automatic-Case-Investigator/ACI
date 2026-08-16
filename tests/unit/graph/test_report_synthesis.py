@@ -137,6 +137,20 @@ class ReportPromptStructureTest(unittest.TestCase):
     def test_absent_board_evidence_renders_as_none_not_a_crash(self):
         self.assertIn("- (none)", self._prompt(board_evidence=None))
 
+    def test_initial_access_separates_vector_from_origin(self):
+        """Session 05d7d523 established the vector — a payload-bearing request with a
+        decoded reverse shell — and then emitted "Initial access vector not
+        established" in the same section, because one canned sentence was keyed on a
+        different fact (a missing source IP) than the one it asserted."""
+        p = self._prompt()
+        self.assertIn("VECTOR", p)
+        self.assertIn("ORIGIN", p)
+        # Each gap has its own marker, so neither can be raised for the other's absence.
+        self.assertIn("Initial access vector not established", p)
+        self.assertIn("Initial access origin not attributed", p)
+        # ...and the general rule that makes it stick.
+        self.assertIn("Never emit a marker for something", p)
+
     def test_prompt_lists_the_six_bare_altitude_headers(self):
         p = self._prompt()
         for header in (
