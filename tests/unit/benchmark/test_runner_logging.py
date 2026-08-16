@@ -318,10 +318,10 @@ class RunnerLoggingTest(unittest.TestCase):
         messages = []
         agent_models = types.ModuleType("agent.models")
         agent_models.AgentRun = _AgentRun
-        dashboard_runner = types.ModuleType("agent.dashboard.runner")
+        dashboard_runner = types.ModuleType("agent.runtime.runner")
         dashboard_runner.start_session = lambda *_args, **_kwargs: "session-1"
         dashboard_runner.is_processing = lambda *_args, **_kwargs: False
-        dashboard_events = types.ModuleType("agent.dashboard.events")
+        dashboard_events = types.ModuleType("agent.web.realtime.events")
         dashboard_events.install = lambda: None
         with tempfile.TemporaryDirectory() as tmp, patch.object(
             runner, "_django_setup"
@@ -329,8 +329,8 @@ class RunnerLoggingTest(unittest.TestCase):
             sys.modules,
             {
                 "agent.models": agent_models,
-                "agent.dashboard.runner": dashboard_runner,
-                "agent.dashboard.events": dashboard_events,
+                "agent.runtime.runner": dashboard_runner,
+                "agent.web.realtime.events": dashboard_events,
             },
         ), patch(
             "benchmark.scoring.ScenarioSpec.from_yaml", return_value=_Spec()
@@ -393,10 +393,10 @@ class RunnerLoggingTest(unittest.TestCase):
 
         agent_models = types.ModuleType("agent.models")
         agent_models.AgentRun = _AgentRun
-        dashboard_runner = types.ModuleType("agent.dashboard.runner")
+        dashboard_runner = types.ModuleType("agent.runtime.runner")
         dashboard_runner.start_session = fake_start_session
         dashboard_runner.is_processing = lambda *_args, **_kwargs: False
-        dashboard_events = types.ModuleType("agent.dashboard.events")
+        dashboard_events = types.ModuleType("agent.web.realtime.events")
         dashboard_events.install = lambda: None
         with tempfile.TemporaryDirectory() as tmp, patch.object(
             runner, "_django_setup"
@@ -404,8 +404,8 @@ class RunnerLoggingTest(unittest.TestCase):
             sys.modules,
             {
                 "agent.models": agent_models,
-                "agent.dashboard.runner": dashboard_runner,
-                "agent.dashboard.events": dashboard_events,
+                "agent.runtime.runner": dashboard_runner,
+                "agent.web.realtime.events": dashboard_events,
             },
         ), patch(
             "benchmark.scoring.ScenarioSpec.from_yaml", return_value=_Spec()

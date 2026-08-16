@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from django.test import TestCase
 
-from agent.dashboard.runner.session_state import publish_specialist_result_to_session
+from agent.runtime.runner.session_state import publish_specialist_result_to_session
 from agent.models import AgentRun
 
 
@@ -25,7 +25,7 @@ class ResumeVisibilityTests(TestCase):
             metadata={"session_id": str(session.id)},
         )
 
-        with patch("agent.dashboard.runner.session_state.logbus.emit") as emit:
+        with patch("agent.runtime.runner.session_state.logbus.emit") as emit:
             publish_specialist_result_to_session(
                 str(session.id), str(child.id), reason="resume"
             )

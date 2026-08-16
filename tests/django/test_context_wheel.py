@@ -9,8 +9,8 @@ from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
 from django.db import connection
 
-from agent.dashboard import runner
-from agent.dashboard.run_actions import delete_run
+from agent.runtime import runner
+from agent.web.views.runs.actions import delete_run
 from agent.models import AgentRun
 from agent.runtime.graph.toolio import _COMPACT_THRESHOLD
 from agent.runtime.infra import logbus

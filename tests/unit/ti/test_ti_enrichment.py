@@ -520,7 +520,7 @@ class TestCacheManagement(unittest.TestCase):
 
     def test_ti_cache_stats_view_returns_json(self):
         from django.test import RequestFactory
-        from agent.dashboard.settings_views import settings_ti_cache_stats
+        from agent.web.views.settings import settings_ti_cache_stats
 
         rf = RequestFactory()
         request = rf.get("/dashboard/settings/ti/cache/stats")
@@ -532,7 +532,7 @@ class TestCacheManagement(unittest.TestCase):
 
     def test_ti_cache_clear_view_empties_cache(self):
         from django.test import RequestFactory
-        from agent.dashboard.settings_views import settings_ti_cache_clear
+        from agent.web.views.settings import settings_ti_cache_clear
         from agent.ti.enricher import get_ti_cache
 
         cache = get_ti_cache()
@@ -542,7 +542,7 @@ class TestCacheManagement(unittest.TestCase):
         rf = RequestFactory()
         request = rf.post("/dashboard/settings/ti/cache/clear")
         # Patch messages framework (not set up in test context).
-        with patch("agent.dashboard.settings_views.messages"):
+        with patch("agent.web.views.settings.messages"):
             try:
                 settings_ti_cache_clear(request)
             except Exception:

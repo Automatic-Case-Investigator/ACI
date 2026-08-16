@@ -125,7 +125,7 @@ class ConfiguredWebhookTests(TestCase):
 
     def test_enabled_trigger_dispatches_registered_event(self):
         self._trigger(secret="s3cr3t")
-        with patch("agent.views.webhooks._start_trigger_dispatch") as dispatch:
+        with patch("agent.web.views.webhooks.api._start_trigger_dispatch") as dispatch:
             response = self.client.post(
                 reverse(
                     "configured_webhook", kwargs={"trigger_id": "thehive-case-webhook"}
@@ -149,7 +149,7 @@ class ConfiguredWebhookTests(TestCase):
 
     def test_disabled_trigger_does_not_dispatch(self):
         self._trigger(enabled=False)
-        with patch("agent.views.webhooks._start_trigger_dispatch") as dispatch:
+        with patch("agent.web.views.webhooks.api._start_trigger_dispatch") as dispatch:
             response = self.client.post(
                 reverse(
                     "configured_webhook", kwargs={"trigger_id": "thehive-case-webhook"}
@@ -163,7 +163,7 @@ class ConfiguredWebhookTests(TestCase):
 
     def test_secret_configured_requires_matching_secret(self):
         self._trigger(secret="expected")
-        with patch("agent.views.webhooks._start_trigger_dispatch") as dispatch:
+        with patch("agent.web.views.webhooks.api._start_trigger_dispatch") as dispatch:
             response = self.client.post(
                 reverse(
                     "configured_webhook", kwargs={"trigger_id": "thehive-case-webhook"}
@@ -177,7 +177,7 @@ class ConfiguredWebhookTests(TestCase):
 
     def test_blank_secret_allows_request(self):
         self._trigger(secret="")
-        with patch("agent.views.webhooks._start_trigger_dispatch") as dispatch:
+        with patch("agent.web.views.webhooks.api._start_trigger_dispatch") as dispatch:
             response = self.client.post(
                 reverse(
                     "configured_webhook", kwargs={"trigger_id": "thehive-case-webhook"}
@@ -198,7 +198,7 @@ class ConfiguredWebhookTests(TestCase):
 
     def test_unregistered_event_is_ignored(self):
         self._trigger(event_type="missing_event")
-        with patch("agent.views.webhooks._start_trigger_dispatch") as dispatch:
+        with patch("agent.web.views.webhooks.api._start_trigger_dispatch") as dispatch:
             response = self.client.post(
                 reverse(
                     "configured_webhook", kwargs={"trigger_id": "thehive-case-webhook"}
@@ -212,7 +212,7 @@ class ConfiguredWebhookTests(TestCase):
 
     def test_thehive_compatibility_endpoint_uses_matching_trigger(self):
         self._trigger(id="compat-thehive", event_type="new_case")
-        with patch("agent.views.webhooks._start_trigger_dispatch") as dispatch:
+        with patch("agent.web.views.webhooks.api._start_trigger_dispatch") as dispatch:
             response = self.client.post(
                 reverse("thehive_webhook"),
                 data={
@@ -234,7 +234,7 @@ class ConfiguredWebhookTests(TestCase):
             enabled=True,
             dedupe_window=60,
         )
-        with patch("agent.views.webhooks._start_trigger_dispatch") as dispatch:
+        with patch("agent.web.views.webhooks.api._start_trigger_dispatch") as dispatch:
             response = self.client.post(
                 reverse(
                     "configured_webhook", kwargs={"trigger_id": "wazuh-alert-webhook"}
@@ -248,7 +248,7 @@ class ConfiguredWebhookTests(TestCase):
 
     def test_legacy_aci_prefixed_provider_key_still_dispatches(self):
         self._trigger(provider_key="aci-thehive")
-        with patch("agent.views.webhooks._start_trigger_dispatch") as dispatch:
+        with patch("agent.web.views.webhooks.api._start_trigger_dispatch") as dispatch:
             response = self.client.post(
                 reverse(
                     "configured_webhook", kwargs={"trigger_id": "thehive-case-webhook"}
@@ -261,7 +261,7 @@ class ConfiguredWebhookTests(TestCase):
 
     def test_unsupported_provider_runtime_is_ignored(self):
         self._trigger(provider_key="aci-board")
-        with patch("agent.views.webhooks._start_trigger_dispatch") as dispatch:
+        with patch("agent.web.views.webhooks.api._start_trigger_dispatch") as dispatch:
             response = self.client.post(
                 reverse(
                     "configured_webhook", kwargs={"trigger_id": "thehive-case-webhook"}

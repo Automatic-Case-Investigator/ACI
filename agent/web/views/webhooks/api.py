@@ -10,14 +10,14 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from ..agents.registry import get_agent
-from ..models import AgentEvent, AgentRun, FeedbackEntry, WorkflowTriggerConfig
-from ..runtime.infra.avfs import reports_dir
-from ..runtime.engine.run import run_agent_sync
+from agent.agents.registry import get_agent
+from agent.models import AgentEvent, AgentRun, FeedbackEntry, WorkflowTriggerConfig
+from agent.runtime.infra.avfs import reports_dir
+from agent.runtime.engine.run import run_agent_sync
 
 log = logging.getLogger(__name__)
 
-from .public import PublicAPIView
+from .._shared import PublicAPIView
 
 
 def _request_secret(request) -> str:
@@ -46,7 +46,7 @@ def _start_trigger_dispatch(
 ):
     import asyncio
 
-    from ..runtime.triggers.base import Trigger, dispatch_trigger
+    from agent.runtime.triggers.base import Trigger, dispatch_trigger
 
     trigger = Trigger(
         event_type=trigger_config.event_type, case_id=str(case_id), payload=body
@@ -71,8 +71,8 @@ def _start_trigger_dispatch(
 
 
 def _handle_configured_webhook(request, trigger_config: WorkflowTriggerConfig):
-    from ..runtime.config.overrides import resolve_workflow
-    from ..runtime.triggers.registry import get_binding
+    from agent.runtime.config.overrides import resolve_workflow
+    from agent.runtime.triggers.registry import get_binding
 
     if not trigger_config.enabled:
         return Response({"ignored": True, "reason": "trigger disabled"})
@@ -80,7 +80,7 @@ def _handle_configured_webhook(request, trigger_config: WorkflowTriggerConfig):
         return Response(
             {"error": "invalid webhook secret"}, status=status.HTTP_403_FORBIDDEN
         )
-    from ..runtime.config.runtime_config import workflows_enabled
+    from agent.runtime.config.runtime_config import workflows_enabled
 
     if not workflows_enabled():
         return Response(
@@ -105,7 +105,7 @@ def _handle_configured_webhook(request, trigger_config: WorkflowTriggerConfig):
     if not enabled:
         return Response({"ignored": True, "reason": "workflow binding disabled"})
 
-    from ..runtime.triggers.providers import parse_trigger_payload
+    from agent.runtime.triggers.providers import parse_trigger_payload
 
     body = _payload_dict(request)
     case_id, ignored_reason = parse_trigger_payload(
@@ -146,7 +146,7 @@ class TheHiveWebhookView(PublicAPIView):
     """
 
     def post(self, request):
-        from ..runtime.triggers.base import EVENT_NEW_ALERT, EVENT_NEW_CASE
+        from agent.runtime.triggers.base import EVENT_NEW_ALERT, EVENT_NEW_CASE
 
         body = _payload_dict(request)
         object_type = str(

@@ -19,7 +19,7 @@ from agent.models import AgentEvent, AgentRun, FeedbackEntry
 from agent.runtime.infra import logbus
 
 # Non-terminal statuses — a run in any of these is still "in progress". Mirrors
-# `agent.views.ActiveRunsView.ACTIVE_STATES`; redefined here so the dashboard path
+# `agent.web.views.runs.active.ActiveRunsView.ACTIVE_STATES`; redefined here so the dashboard path
 # doesn't import the DRF view layer.
 ACTIVE_STATES = (
     AgentRun.STATUS_CREATED,
@@ -74,7 +74,7 @@ def is_inferring(run: AgentRun) -> bool:
     inferring exactly while their graph executes (status RUNNING).
     """
     if is_orchestrator_session(run):
-        from .runner import is_processing
+        from agent.runtime.runner import is_processing
 
         return is_processing(str(run.id))
     return run.status == AgentRun.STATUS_RUNNING
@@ -99,7 +99,7 @@ def stop_run(run: AgentRun) -> None:
     """
     if is_orchestrator_session(run):
         # Local import: runner.py imports this module transitively via views.
-        from .runner import stop_session
+        from agent.runtime.runner import stop_session
 
         stop_session(str(run.id))
 

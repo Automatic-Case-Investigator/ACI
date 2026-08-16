@@ -717,7 +717,7 @@ async def _run_trial(
     log: Callable[[str], None] | None,
 ) -> _TrialResult:
     from agent.models import AgentRun
-    from agent.dashboard.runner import is_processing, start_session
+    from agent.runtime.runner import is_processing, start_session
 
     async with semaphore:
         started = time.monotonic()
@@ -814,7 +814,7 @@ def run_many(
     concurrency: int = 4,
 ) -> dict[str, list[str]]:
     _django_setup()
-    from agent.dashboard.events import install as install_dashboard_events
+    from agent.web.realtime.events import install as install_dashboard_events
 
     install_dashboard_events()
     specs = _prepare_trial_specs(

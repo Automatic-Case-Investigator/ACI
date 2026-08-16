@@ -2,7 +2,7 @@
 
 A single table of every top-level run — live interactive sessions and automatic
 workflow runs — with stop/delete actions (per-row and bulk). Server-rendered in the
-same style as `settings_views.py`: row-builder helpers plus `@require_POST` handlers
+same style as `views/settings/`: row-builder helpers plus `@require_POST` handlers
 that mutate, drop a `messages` entry, and redirect back to the current segment.
 
 Child specialist runs of a live session (those with `metadata.session_id`) are hidden
@@ -24,7 +24,7 @@ from django.views.decorators.http import require_POST
 from agent.models import AgentEvent, AgentRun
 from agent.runtime.response_policy.workflow import read_decision
 
-from .run_actions import (
+from .actions import (
     ACTIVE_STATES,
     delete_run,
     display_status,
@@ -33,7 +33,7 @@ from .run_actions import (
     is_orchestrator_session,
     stop_run,
 )
-from .runner import (
+from agent.runtime.runner import (
     can_restart_from_prior_run,
     restart_from_prior_run,
     start_investigation_from_triage,

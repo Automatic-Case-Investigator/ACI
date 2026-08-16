@@ -17,8 +17,8 @@ from django.views.decorators.http import require_POST
 
 from agent.models import AgentEvent, AgentRun
 
-from .consumers import _snapshot
-from .run_actions import (
+from ...realtime.consumers import _snapshot
+from ..runs.actions import (
     ACTIVE_STATES,
     delete_run,
     humanize_age,
@@ -26,8 +26,8 @@ from .run_actions import (
     is_orchestrator_session,
     is_orphaned_interactive_child,
 )
-from .runner import start_session, send_message
-from .runs_views import review_rows
+from agent.runtime.runner import start_session, send_message
+from ..runs.pages import review_rows
 
 _SESSIONS_PER_PAGE = 8
 _ACTIVE_PER_PAGE = 8

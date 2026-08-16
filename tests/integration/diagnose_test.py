@@ -11,7 +11,7 @@ project_root = os.path.dirname(
 sys.path.insert(0, project_root)
 django.setup()
 from agent.models import AgentEvent
-from agent.dashboard.runner import send_message, is_processing
+from agent.runtime.runner import send_message, is_processing
 
 BASE = "http://localhost:8000"
 

@@ -25,7 +25,7 @@ import django
 django.setup()
 
 from agent.models import AgentEvent
-from agent.dashboard.runner import is_processing
+from agent.runtime.runner import is_processing
 
 BASE = "http://localhost:8000"
 

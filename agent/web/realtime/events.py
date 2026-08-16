@@ -27,7 +27,7 @@ from agent.runtime.infra.logbus import LogEvent, next_seq
 _queue: "queue.Queue[LogEvent]" = queue.Queue()
 _installed = False
 _lock = threading.Lock()
-_log = logging.getLogger("agent.dashboard")
+_log = logging.getLogger("agent.web")
 
 # Per-session streaming buffer.  The runner appends here; consumers drain it.
 _stream_buffers: dict[str, list] = {}

@@ -37,7 +37,7 @@ from agent.runtime.orchestrator.session import OrchestratorSession  # noqa: E402
 from agent.runtime.orchestrator.specialist_sync import (
     apply_specialist_run_to_session,
 )  # noqa: E402
-from agent.dashboard.runner.lifecycle import (
+from agent.runtime.runner.lifecycle import (
     start_investigation_from_triage,
 )  # noqa: E402
 
@@ -180,7 +180,7 @@ class TriageHandoffValidityTest(unittest.TestCase):
             result="## Triage Summary\nComplete report",
         )
         with patch(
-            "agent.dashboard.runner.lifecycle.start_session", return_value="sess-1"
+            "agent.runtime.runner.lifecycle.start_session", return_value="sess-1"
         ) as start:
             session_id = start_investigation_from_triage(source_run)
         self.assertEqual(session_id, "sess-1")

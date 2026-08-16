@@ -77,7 +77,7 @@ def _resolve_investigation(session_id: str):
 
 def _resolve_restartable_specialist(session_id: str):
     from agent.models import AgentRun
-    from agent.dashboard import runner
+    from agent.runtime import runner
 
     try:
         runs = AgentRun.objects.filter(metadata__session_id=session_id).order_by(
@@ -95,7 +95,7 @@ def _resolve_restartable_specialist(session_id: str):
 
 def _snapshot(session_id: str) -> dict:
     from agent.models import AgentRun
-    from agent.dashboard import runner
+    from agent.runtime import runner
     from django.urls import reverse
 
     orch = AgentRun.objects.filter(id=session_id).first()
@@ -285,13 +285,13 @@ class RunConsumer(AsyncWebsocketConsumer):
         if msg.get("action") == "ask":
             question = (msg.get("question") or "").strip()
             if question:
-                from agent.dashboard import runner
+                from agent.runtime import runner
 
                 await database_sync_to_async(runner.send_message)(
                     self.session_id, question
                 )
         elif msg.get("action") == "stop":
-            from agent.dashboard import runner
+            from agent.runtime import runner
 
             await database_sync_to_async(runner.stop_processing)(self.session_id)
         elif msg.get("action") in {"add", "del", "edit", "move"}:
@@ -315,7 +315,7 @@ class RunConsumer(AsyncWebsocketConsumer):
             pass
 
     async def _push_stream_chunks(self):
-        from agent.dashboard.events import drain_stream_chunks
+        from agent.web.realtime.events import drain_stream_chunks
 
         chunks = drain_stream_chunks(self.session_id)
         for chunk in chunks:

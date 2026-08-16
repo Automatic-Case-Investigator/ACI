@@ -50,7 +50,7 @@ class AgentConfig(AppConfig):
         # baseline scheduler thread. Both are guarded against the autoreload child
         # and management commands that don't serve requests.
         if os.environ.get("RUN_MAIN") == "true" or not settings.DEBUG:
-            from agent.dashboard.events import install
+            from agent.web.realtime.events import install
 
             install()
 

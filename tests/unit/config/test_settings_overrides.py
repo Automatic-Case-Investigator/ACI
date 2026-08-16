@@ -27,7 +27,7 @@ from django.contrib.messages.storage.fallback import FallbackStorage
 from django.contrib.sessions.backends.db import SessionStore
 
 from agent.agents.registry import get_agent
-from agent.dashboard import settings_views as sv
+from agent.web.views import settings as sv
 from agent.models import (
     AgentConfig,
     WorkflowConfig,

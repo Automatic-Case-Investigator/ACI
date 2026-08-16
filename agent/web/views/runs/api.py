@@ -10,15 +10,15 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from ..agents.registry import get_agent
-from ..models import AgentEvent, AgentRun, FeedbackEntry, WorkflowTriggerConfig
-from ..runtime.infra.avfs import reports_dir
-from ..runtime.infra import logbus
-from ..runtime.engine.run import run_agent_sync
+from agent.agents.registry import get_agent
+from agent.models import AgentEvent, AgentRun, FeedbackEntry, WorkflowTriggerConfig
+from agent.runtime.infra.avfs import reports_dir
+from agent.runtime.infra import logbus
+from agent.runtime.engine.run import run_agent_sync
 
 log = logging.getLogger(__name__)
 
-from .public import PublicAPIView
+from .._shared import PublicAPIView
 
 
 class AgentRunView(APIView):
@@ -173,7 +173,7 @@ class AgentRunResumeView(APIView):
             try:
                 run_agent_sync(str(run.id), run.agent_name, run.case_id, run.question)
                 if session_id:
-                    from ..dashboard.runner import publish_specialist_result_to_session
+                    from agent.runtime.runner import publish_specialist_result_to_session
 
                     publish_specialist_result_to_session(
                         session_id, str(run.id), reason="resume"
@@ -197,7 +197,7 @@ class AgentRunRestartView(APIView):
         except AgentRun.DoesNotExist:
             return Response({"error": "Not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        from ..dashboard.runner import (
+        from agent.runtime.runner import (
             can_restart_from_prior_run,
             restart_from_prior_run,
         )
@@ -240,7 +240,7 @@ class AgentRunFeedbackView(PublicAPIView):
     """
 
     def post(self, request, run_id):
-        from ..runtime.learning.feedback import record_feedback
+        from agent.runtime.learning.feedback import record_feedback
 
         try:
             run = AgentRun.objects.get(id=run_id)
@@ -336,7 +336,7 @@ class CaseQueueTasksView(APIView):
 
 class CaseWorkspaceView(APIView):
     def get(self, request, case_id):
-        from ..runtime.infra.avfs import (
+        from agent.runtime.infra.avfs import (
             case_dir,
             evidence_dir,
             findings_dir,

@@ -26,7 +26,7 @@ django.setup()
 from django.test import TestCase as DjangoTestCase
 
 from agent.models import ResponsePolicy
-from agent.dashboard.settings_views.rows import _response_policy_rows
+from agent.web.views.settings.rows import _response_policy_rows
 from agent.runtime.analysis.verdict import VERDICT_ORDER
 from agent.runtime.response_policy import policy
 
