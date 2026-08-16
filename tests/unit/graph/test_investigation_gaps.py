@@ -73,11 +73,11 @@ class ThinkEvidenceFloorTest(unittest.TestCase):
             self._sent.append(messages)
             return self._replies.pop(0)
 
-        self._orig = nodes_loop._invoke_bound_model
-        nodes_loop._invoke_bound_model = _capture
+        self._orig = nodes_loop.nodes._invoke_bound_model
+        nodes_loop.nodes._invoke_bound_model = _capture
 
     def tearDown(self):
-        nodes_loop._invoke_bound_model = self._orig
+        nodes_loop.nodes._invoke_bound_model = self._orig
 
     def _state(self, **over):
         base = dict(

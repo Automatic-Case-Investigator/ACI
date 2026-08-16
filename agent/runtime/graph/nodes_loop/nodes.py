@@ -1,265 +1,53 @@
 from __future__ import annotations
 
-"""Graph nodes that drive task seeding, claiming, reasoning, and tool execution."""
+"""The per-task loop nodes: seed -> claim -> think -> use_tools."""
 
+from ..state import AgentState
+from ....agents.base import Handoff
+from langchain_core.messages import HumanMessage
+from langchain_core.messages import SystemMessage
+from langchain_core.messages import ToolMessage
+from ..sanitize import _HARMONY_TOKEN_RE
+from ..toolio import _call
+from ..toolio import _cancel_requested
+from ..toolio import _cap_tool_result
+from ..toolio import _compact_history
+from ..coverage import _count_evidence_queries
+from ..interpretation import _default_ledger
+from ..toolio import _emit_node_entry
+from ..toolio import _ensure_parent_dir
+from ..toolio import _ensure_workspace_dirs
+from ..toolio import _expand_tilde_args
+from ..board import _format_board_context
+from ..toolio import _has_pending_tasks
+from ..toolio import _invoke_bound_model
+from ..toolio import _is_error_tool_result
+from ..toolio import _model_tools_for_agent
+from ..toolio import _parse_claimed_task
+from ..toolio import _reclaim_stale_tasks
+from ..sanitize import _sanitize_history
+from ..sanitize import _sanitize_message
+from ..toolio import _should_compact
+from ..toolio import _tmap
+from ..toolio import _track_input_tokens
+from ..observation import build_observation
+from ...infra.logbus import emit
 import json
-import re
-from datetime import datetime, timedelta
+from ...analysis.artifacts import record_artifacts
+from ...engine.seeder_runner import run_seeder
+from ...infra.logbus import src_label
+from ...infra.logbus import summarize_args
+from ...infra.logbus import summarize_result
+from ..coverage import _EVIDENCE_TOOLS
+from ..parsing import _missing_triage_sections
+from ...analysis.intent import generate_public_intent
+from ...infra.logbus import summarize_think
+from ...infra.logbus import summarize_think
+from ....workspace.avfs_writer import update_memory_indexes
 
-from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
-
-from ...agents.base import Handoff
-from ...workspace.avfs_writer import update_memory_indexes
-from ..analysis.artifacts import record_artifacts
-from ..engine.seeder_runner import run_seeder
-from ..infra.logbus import (
-    emit,
-    src_label,
-    summarize_args,
-    summarize_result,
-    summarize_think,
-)
-
-from .board import _format_board_context
-from .interpretation import _default_ledger
-from .observation import build_observation
-from .coverage import _count_evidence_queries
-from .sanitize import _HARMONY_TOKEN_RE, _sanitize_history, _sanitize_message
-from .state import AgentState
-from .timeutil import _find_timestamp_range, _format_dt, _parse_dt
-from .toolio import (
-    _call,
-    _cancel_requested,
-    _cap_tool_result,
-    _compact_history,
-    _emit_node_entry,
-    _ensure_parent_dir,
-    _ensure_workspace_dirs,
-    _expand_tilde_args,
-    _has_pending_tasks,
-    _invoke_bound_model,
-    _is_error_tool_result,
-    _list_tasks,
-    _model_tools_for_agent,
-    _parse_claimed_task,
-    _reclaim_stale_tasks,
-    _should_compact,
-    _tmap,
-    _track_input_tokens,
-)
-
-_QUEUE_CONTEXT_MAX_TASKS = 12
-_QUEUE_CONTEXT_SNIPPET_CHARS = 120
-
-# Per-task tool-call cap. A single task is not allowed to consume the whole run's
-# budget: in a diagnosed live run one gap-check task spent 88 of ~100 calls, starving
-# every later (higher-value) task. When a task reaches this many tool calls, `think`
-# strips its tools and forces a wrap-up so the loop advances to the next task with
-# whatever was found. Tuned well below the typical run budget so several tasks get a
-# fair share, yet high enough that a legitimately deep task still completes.
-_MAX_TASK_TOOL_CALLS = 50
-_SIEM_TIME_WINDOW_TOOLS = frozenset(
-    {
-        "search",
-        "search_keyword",
-        "profile_field",
-        "get_event_volume",
-        "correlate_entity",
-        "correlate_techniques",
-    }
-)
-_CACHEABLE_READ_TOOLS = frozenset(
-    {
-        "get_case",
-        "get_alert",
-        "list_case_alerts",
-        "get_event",
-        "get_event_volume",
-        "profile_field",
-        "search",
-        "search_keyword",
-    }
-)
-_TASK_WINDOW_RE = re.compile(
-    r"Time window:\s*`?([0-9T:.\-+Z]+)`?\s+to\s+`?([0-9T:.\-+Z]+)`?",
-    re.IGNORECASE,
-)
-
-
-def _tool_cache_key(name: str, args: dict) -> str:
-    return json.dumps({"tool": name, "args": args}, sort_keys=True, default=str)
-
-
-# ── Queue context rendering + task/tool time-window derivation and guard ──
-def _format_queue_context(tasks: list[dict]) -> str:
-    if not tasks:
-        return "\n\n---\n**Current Task Queue:**\n- No queued tasks found.\n---"
-    lines = ["\n\n---", "**Current Task Queue (check before proposing New Leads):**"]
-    for task in tasks[:_QUEUE_CONTEXT_MAX_TASKS]:
-        status = task.get("status") or "unknown"
-        priority = task.get("priority", "?")
-        title = (task.get("title") or "(untitled)").strip()
-        desc = " ".join((task.get("description") or "").split())
-        if len(desc) > _QUEUE_CONTEXT_SNIPPET_CHARS:
-            desc = desc[:_QUEUE_CONTEXT_SNIPPET_CHARS].rstrip() + "..."
-        suffix = f" — {desc}" if desc else ""
-        lines.append(f"- [{status} P{priority}] {title}{suffix}")
-    if len(tasks) > _QUEUE_CONTEXT_MAX_TASKS:
-        lines.append(
-            f"- ... {len(tasks) - _QUEUE_CONTEXT_MAX_TASKS} more task(s) omitted"
-        )
-    lines.append(
-        "Only propose New Leads that are evidence-backed, not already covered above, "
-        "and include title, pivots, evidence, and a queue-relative numeric priority."
-    )
-    lines.append("---")
-    return "\n".join(lines)
-
-
-async def _queue_context_for_state(state: AgentState, tools: list) -> str:
-    """Return a compact queue snapshot that helps investigation avoid duplicate leads."""
-    if state["agent_name"] != "investigation":
-        return ""
-    tasks = await _list_tasks(
-        tools, state["case_id"], state["run_id"], state["agent_name"]
-    )
-    return _format_queue_context(tasks)
-
-
-def _task_time_window(task: dict | None) -> tuple[datetime, datetime] | None:
-    text = (task or {}).get("description") or ""
-    match = _TASK_WINDOW_RE.search(text)
-    if not match:
-        return None
-    start, end = _parse_dt(match.group(1)), _parse_dt(match.group(2))
-    if start and end and end > start:
-        return start, end
-    return None
-
-
-def _tool_time_window(tool_name: str, args: dict) -> tuple[datetime, datetime] | None:
-    if tool_name == "get_event_volume":
-        start, end = args.get("start_time"), args.get("end_time")
-    elif tool_name in {"correlate_entity", "correlate_techniques"}:
-        start, end = args.get("start_time"), args.get("end_time")
-    else:
-        tr = args.get("time_range") if isinstance(args.get("time_range"), dict) else {}
-        start, end = tr.get("from"), tr.get("to")
-        if not (start and end):
-            start, end = _find_timestamp_range(args.get("query"))
-    start_dt, end_dt = _parse_dt(start), _parse_dt(end)
-    if start_dt and end_dt and end_dt > start_dt:
-        return start_dt, end_dt
-    return None
-
-
-def _incident_anchor_from_messages(messages: list) -> tuple[datetime, str] | None:
-    """Return the case/alert incident anchor seen in the current task history.
-
-    Precedence is intentionally event-time first. TheHive `createdAt`/`_createdAt`
-    never participate; those are case lifecycle/import timestamps.
-    """
-    candidates: list[tuple[int, datetime, str]] = []
-    for msg in messages:
-        if not isinstance(msg, ToolMessage):
-            continue
-        try:
-            data = json.loads(getattr(msg, "content", "") or "")
-        except (json.JSONDecodeError, TypeError, ValueError):
-            continue
-        name = getattr(msg, "name", "")
-        if name == "get_case" and isinstance(data, dict):
-            found_case_anchor = False
-            for key, priority in (
-                ("incident_time_iso", 0),
-                ("date_iso", 1),
-                ("date", 2),
-            ):
-                dt = _parse_dt(data.get(key))
-                if dt:
-                    candidates.append((priority, dt, f"case.{key}"))
-                    found_case_anchor = True
-                    break
-            if not found_case_anchor:
-                # Some imports only carry the raw Wazuh event in the markdown
-                # description. Pull @timestamp from that text before considering
-                # any lifecycle field.
-                desc = str(data.get("description") or "")
-                marker = re.search(
-                    r"@\s*timestamp\s*\|\s*([0-9T:.\-+Z]+)", desc, re.IGNORECASE
-                )
-                if marker:
-                    dt = _parse_dt(marker.group(1))
-                    if dt:
-                        candidates.append((3, dt, "case.description.@timestamp"))
-        elif name == "list_case_alerts" and isinstance(data, dict):
-            tr = data.get("time_range") or {}
-            for key, priority in (("first", 4), ("last", 5)):
-                dt = _parse_dt(tr.get(key))
-                if dt:
-                    candidates.append((priority, dt, f"alerts.time_range.{key}"))
-                    break
-            for alert in data.get("alerts") or []:
-                if isinstance(alert, dict):
-                    dt = _parse_dt(alert.get("date_iso"))
-                    if dt:
-                        candidates.append((6, dt, "alert.date_iso"))
-                        break
-    if not candidates:
-        return None
-    _, dt, source = sorted(candidates, key=lambda item: item[0])[0]
-    return dt, source
-
-
-def _time_window_guard(
-    tool_name: str, args: dict, state: AgentState, messages: list
-) -> str | None:
-    if tool_name not in _SIEM_TIME_WINDOW_TOOLS:
-        return None
-    requested = _tool_time_window(tool_name, args)
-    if requested is None:
-        return None
-    req_start, req_end = requested
-    # The agent may widen a task's declared window up to the configured vicinity window
-    # on either side. The task window is a STARTING hint (often a tight pinpoint for a
-    # "retrieve the exact event" task), NOT a hard cap: an investigation legitimately
-    # needs to look at surrounding context. The guard only exists to block a query on the
-    # wrong day/year or a TheHive createdAt timestamp, so bound it by the vicinity window,
-    # not the narrow task box. (Diagnosed: a 2-minute task window under a zero-tolerance
-    # guard trapped the agent in a ~60-call `invalid time range` loop with no escape.)
-    vicinity = timedelta(
-        hours=max(1, int(state.get("default_vicinity_window_hours") or 24))
-    )
-    task_window = _task_time_window(state.get("current_task"))
-    if task_window is not None:
-        task_start, task_end = task_window
-        allowed_start, allowed_end = task_start - vicinity, task_end + vicinity
-        if req_start < allowed_start or req_end > allowed_end:
-            vicinity_h = int(vicinity.total_seconds() // 3600)
-            return (
-                "Invalid SIEM time range: "
-                f"{_format_dt(req_start)} to {_format_dt(req_end)}. "
-                f"The claimed task specifies {_format_dt(task_start)} to {_format_dt(task_end)}. "
-                f"You may widen up to +/-{vicinity_h}h around it (the configured vicinity window, "
-                f"i.e. {_format_dt(allowed_start)} to {_format_dt(allowed_end)}), but this request "
-                "falls outside that bound. Do not use TheHive createdAt/_createdAt as event time."
-            )
-        return None
-    anchor = _incident_anchor_from_messages(messages)
-    if anchor is None:
-        return None
-    anchor_dt, source = anchor
-    tolerance = timedelta(
-        days=max(2, int(state.get("default_vicinity_window_hours") or 24) // 24 + 2)
-    )
-    if req_end < anchor_dt - tolerance or req_start > anchor_dt + tolerance:
-        return (
-            "Invalid SIEM time range: "
-            f"{_format_dt(req_start)} to {_format_dt(req_end)}. "
-            f"This case's incident anchor is {_format_dt(anchor_dt)} from {source}. "
-            "Use the case `date` / alert timestamp, not TheHive createdAt/_createdAt."
-        )
-    return None
+from ._const import _CACHEABLE_READ_TOOLS, _MAX_TASK_TOOL_CALLS, _tool_cache_key
+from .context import _queue_context_for_state, _time_window_guard
+from .enrichment import _auto_correlate_entities, _build_kill_chain, _enrich_artifacts_async, _memoize_query_and_schema
 
 
 # ── Graph nodes: seed → claim → think → use_tools (the per-task tool loop) ──
@@ -279,9 +67,9 @@ async def seed(state: AgentState, config) -> dict:
     vicinity_hours = int(state.get("default_vicinity_window_hours") or 24)
 
     if agent_name == "triage":
-        # Triage runs the flat loop (`triage_flat.triage_think`), which anchors on the
+        # Triage runs the flat loop (`triage_think`, below), which anchors on the
         # analyst's question directly and never claims from the queue, so there is no
-        # task to seed. The objective text lives in `triage_flat.build_triage_objective`.
+        # task to seed. The objective text comes from `build_triage_objective`.
         pass
 
     else:
@@ -928,344 +716,286 @@ async def use_tools(state: AgentState, config) -> dict:
     }
 
 
-# ── Post-tool enrichment (use_tools helpers): memoize, correlate, kill-chain, TI ──
-def _memoize_query_and_schema(
-    tool_name: str, args: dict, raw: str, state: dict, src: str
-) -> None:
-    """Record a once-per-run board memo for over-broad query shapes and discovered
-    schema fields (Phase 1 #13/#18), so later tasks don't re-pay the same broad-query
-    tax or re-derive field names. Dedup keys make each shape/schema recorded once."""
-    from ..analysis.query_memo import broad_query_memo, extract_schema_fields
-    from .board import _record_board_entry
+# ── Triage's flat loop: triage_think replaces think/interpret for the triage agent ──
+# Triage has no task queue and no interpret node -- it anchors on the alert and
+# writes its report in one loop, so its think node lives here beside the others
+# rather than in a module of its own.
 
-    memo = broad_query_memo(tool_name, args, raw)
-    if memo:
-        dedup_key, content = memo
-        _record_board_entry(
-            state,
-            kind="query_memo",
-            content=content,
-            source="auto-memo",
-            confidence="high",
-            status="observed",
-            dedup_key=dedup_key,
-        )
-        emit(src, "note", f"query memo: recorded broad query shape ({dedup_key})")
+# Minimum distinct evidence-tool calls before a final answer is accepted. The
+# interpret node used to enforce depth by judgement; with it gone this is the
+# deterministic backstop against a report written from the alert record alone.
+_MIN_EVIDENCE_CALLS = 3
 
-    fields = extract_schema_fields(tool_name, raw)
-    if fields:
-        idx = args.get("index_pattern") or "default"
-        content = f"index `{idx}` fields ({len(fields)}): " + ", ".join(fields)
-        _record_board_entry(
-            state,
-            kind="schema_fields",
-            content=content[:1400],
-            source="auto-memo",
-            confidence="high",
-            status="observed",
-            dedup_key=f"schema:{idx}",
-        )
-        emit(src, "note", f"schema memo: recorded {len(fields)} field(s) for {idx}")
+# Bounded in-node corrections. A deficient final answer (too little evidence, or
+# a malformed report) is nudged rather than routed, so the graph stays a simple
+# two-state loop: this node either emits tool calls or a finished report.
+_MAX_CORRECTIONS = 2
 
 
-async def _auto_correlate_entities(
-    artifacts: list, raw: str, state: dict, tmap: dict, src: str
-) -> None:
-    """Correlate confirmed entities and assemble the connected incident graph on
-    the findings board — the graph does this instead of relying on the model to call
-    the tool (Fix 1; mirrors TI enrichment).
+def build_triage_objective(state: AgentState) -> str:
+    """The anchor message: the analyst's literal question plus how to answer it.
 
-    Multi-hop (Fix #2): seed entities come from the tool result; when correlating one
-    surfaces NEW high-value entities among its neighbors, those are correlated too —
-    a bounded breadth-first walk (depth-limited, deduped per run, capped) that builds
-    the linked attack graph rather than isolated 1-hop cards. The board injects the
-    result into the next think prompt, so the model reasons over the graph.
-
-    Emits a `metric` event per correlation for adoption/coverage telemetry (Fix 3).
+    Sent ONCE, as message[1], and never replayed — mirroring the orchestrator,
+    whose message[1] is the analyst's question. The methodology lives here rather
+    than in a per-cycle nudge so it cannot be re-read as a checklist to restart.
     """
-    corr_fn = tmap.get("correlate_entity")
-    if corr_fn is None:
-        return
-    try:
-        from collections import deque
+    vicinity_hours = int(state.get("default_vicinity_window_hours") or 24)
+    question = (state.get("question") or "").strip()
+    entity = (state.get("source_entity_id") or state.get("case_id") or "").strip()
 
-        from ..analysis.correlation_leads import (
-            MAX_CORRELATIONS,
-            MAX_HOP_DEPTH,
-            corr_dedup_key,
-            derive_window,
-            entities_from_neighbors,
-            field_for,
-            match_fields_for,
-            select_targets,
-            summarize_correlation,
-        )
-        from aci_board import store as board_store
-
-        case_id, run_id, agent_name = (
-            state["case_id"],
-            state["run_id"],
-            state["agent_name"],
-        )
-        board_store.init_db()
-        existing = [
-            e
-            for e in board_store.list_entries(case_id, run_id, agent_name)
-            if e.get("kind") == "correlation"
-        ]
-        covered = {(e.get("dedup_key") or "").lower() for e in existing}
-        seeds = select_targets(
-            artifacts,
-            covered=covered,
-            remaining_budget=MAX_CORRELATIONS - len(existing),
-        )
-        if not seeds:
-            return
-
-        vicinity = int(state.get("default_vicinity_window_hours") or 24)
-        start, end = derive_window(raw, vicinity)
-
-        # Breadth-first correlation walk. `visited` spans the run (board) + this walk
-        # so an entity is correlated at most once; `remaining` enforces the run cap.
-        visited = set(covered)
-        remaining = MAX_CORRELATIONS - len(existing)
-        queue: deque = deque((k, v, f, 0, None) for k, v, f in seeds)
-        while queue and remaining > 0:
-            kind, value, field, depth, via = queue.popleft()
-            key = corr_dedup_key(kind, value)
-            if key in visited:
-                continue
-            visited.add(key)
-
-            args = {
-                "field": field,
-                "value": value,
-                "match_fields": match_fields_for(kind),
-            }
-            if start and end:
-                args["start_time"], args["end_time"] = start, end
-            result_raw = await _call(corr_fn, args, _dbg=src)
-            content, neighbor_count, has_cross = summarize_correlation(
-                kind, value, result_raw, via=via
-            )
-            board_store.add_entry(
-                case_id=case_id,
-                run_id=run_id,
-                agent_name=agent_name,
-                kind="correlation",
-                content=content,
-                source="auto-correlation",
-                confidence="high",
-                status="observed",
-                dedup_key=key,
-            )
-            remaining -= 1
-            emit(
-                src,
-                "note",
-                f"auto-correlation[h{depth}]: {field}={value} → {neighbor_count} neighbor field(s)"
-                + (f" (via {via})" if via else "")
-                + (" +cross_role" if has_cross else ""),
-            )
-            emit(
-                src,
-                "metric",
-                f"correlation entity={kind}:{value} depth={depth} neighbors={neighbor_count} cross_role={int(has_cross)}",
-            )
-
-            # Expand: enqueue newly-discovered neighbor entities for the next hop.
-            if depth + 1 < MAX_HOP_DEPTH:
-                for nk, nv in entities_from_neighbors(result_raw):
-                    nkey = corr_dedup_key(nk, nv)
-                    if nkey not in visited:
-                        queue.append(
-                            (nk, nv, field_for(nk), depth + 1, f"{kind}:{value}")
-                        )
-    except Exception as exc:
-        emit(src, "warning", "auto-correlation failed", detail=str(exc))
-
-
-async def _build_kill_chain(
-    artifacts: list, raw: str, state: dict, tmap: dict, src: str
-) -> None:
-    """Build the MITRE ATT&CK kill-chain view for the case host and write it to the
-    board (Fix #3). Runs once per run: triggered when a host artifact appears (real
-    SIEM data is present) and no kill-chain entry exists yet. The board entry orders
-    observed techniques along the kill chain and names the core phases with no
-    evidence as gaps to investigate — the adversary-behavior view, graph-provided.
-    """
-    tech_fn = tmap.get("correlate_techniques")
-    if tech_fn is None:
-        return
-    hosts = [
-        a.value for a in artifacts if getattr(a, "kind", None) == "host" and a.value
-    ]
-    if not hosts:
-        return  # only attempt once we have a host to scope the kill chain to
-    try:
-        from ..analysis.correlation_leads import derive_window
-        from ..analysis.kill_chain import (
-            drop_covered_specs,
-            gap_lead_specs,
-            summarize_kill_chain,
-        )
-        from aci_board import store as board_store
-
-        case_id, run_id, agent_name = (
-            state["case_id"],
-            state["run_id"],
-            state["agent_name"],
-        )
-        board_store.init_db()
-        if any(
-            e.get("kind") == "kill_chain"
-            for e in board_store.list_entries(case_id, run_id, agent_name)
-        ):
-            return  # already built this run
-
-        vicinity = int(state.get("default_vicinity_window_hours") or 24)
-        start, end = derive_window(raw, vicinity)
-        args: dict = {"query": {"term": {"agent.name": hosts[0]}}}
-        if start and end:
-            args["start_time"], args["end_time"] = start, end
-        result_raw = await _call(tech_fn, args, _dbg=src)
-        content, observed, gaps = summarize_kill_chain(result_raw)
-        # Only persist once techniques exist, so an early (pre-evidence) call doesn't
-        # lock in an empty kill chain; a later host-bearing batch will populate it.
-        if observed:
-            board_store.add_entry(
-                case_id=case_id,
-                run_id=run_id,
-                agent_name=agent_name,
-                kind="kill_chain",
-                content=content,
-                source="auto-killchain",
-                confidence="high",
-                status="observed",
-                dedup_key="killchain",
-            )
-            emit(
-                src,
-                "note",
-                f"kill-chain: {len(observed)} tactic(s) observed; "
-                f"{len(gaps)} core gap(s)",
-            )
-            emit(
-                src,
-                "metric",
-                f"kill_chain tactics={len(observed)} gaps={len(gaps)} host={hosts[0]}",
-            )
-
-            # Fix #1: turn the gaps into concrete, prioritized, auto-queued leads
-            # instead of relying on the model to convert the board GAP into a lead.
-            if gaps:
-                from aci_taskqueue import store as tq_store
-
-                tq_store.init_db()
-                specs = gap_lead_specs(
-                    gaps,
-                    hosts[0],
-                    window_hint=f"Window: ±{vicinity}h around the case/alert anchor timestamp.",
-                    observed=observed,
-                )
-                # These go straight onto the queue, so they miss the lead validator
-                # that dedups every other lead source. Without this, a forward-trace
-                # lead duplicates a triage plan item AND outranks it (88 > 85/80/75),
-                # so the duplicate runs first and the plan item finds nothing left.
-                before = len(specs)
-                specs = drop_covered_specs(
-                    specs,
-                    tq_store.list_tasks(case_id, run_id, agent_name) or [],
-                )
-                if before != len(specs):
-                    emit(
-                        src,
-                        "note",
-                        f"kill-chain gap leads: {before - len(specs)} already covered by "
-                        "a queued task — skipped",
-                    )
-                for s in specs:
-                    tq_store.create_task(
-                        case_id=case_id,
-                        run_id=run_id,
-                        agent_name=agent_name,
-                        title=s["title"],
-                        description=s["description"],
-                        priority=s["priority"],
-                        origin="killchain_gap",
-                    )
-                if specs:
-                    emit(
-                        src,
-                        "note",
-                        f"kill-chain gap leads: {len(specs)} task(s) queued",
-                    )
-                    emit(src, "metric", f"killchain_gap_leads={len(specs)}")
-    except Exception as exc:
-        emit(src, "warning", "kill-chain build failed", detail=str(exc))
-
-
-async def _enrich_artifacts_async(artifacts: list, state: dict, src: str) -> None:
-    """Enrich extracted artifacts against configured TI providers.
-
-    Silently no-ops when no TI provider is configured (VT_API_KEY not set).
-    Errors are caught and emitted as warnings so enrichment failures never
-    interrupt the investigation graph.
-    """
-    try:
-        from agent.ti.enricher import create_ti_leads, get_enricher, write_ti_results
-    except Exception:
-        return
-
-    # get_enricher() reads ProviderConfig via the Django ORM, which raises
-    # SynchronousOnlyOperation on the event loop (and is silently swallowed,
-    # disabling TI). Build it on a worker thread so the ORM runs in sync context;
-    # once cached, later calls are cheap and ORM-free.
-    import asyncio
-
-    enricher = await asyncio.to_thread(get_enricher)
-    if enricher is None:
-        return
-
-    try:
-        results = await enricher.enrich_artifacts_async(
-            artifacts,
-            case_id=state["case_id"],
-            run_id=state["run_id"],
-            agent_name=state["agent_name"],
-        )
-    except Exception as exc:
-        emit(src, "warning", "TI enrichment failed", detail=str(exc))
-        return
-
-    if not results:
-        return
-
-    try:
-        flagged = write_ti_results(
-            results,
-            case_id=state["case_id"],
-            run_id=state["run_id"],
-            agent_name=state["agent_name"],
-        )
-    except Exception as exc:
-        emit(src, "warning", "TI board write failed", detail=str(exc))
-        return
-
-    verdicts = ", ".join(
-        f"{r.artifact_kind} {r.artifact_value}={r.verdict}" for r in results
+    return (
+        "# USER\n"
+        f"The analyst asked: {question}\n\n"
+        f"Entity under triage: {entity or '(resolve it from the question)'}\n\n"
+        "Answer THAT question, grounded in raw evidence you retrieved. Everything "
+        "below is how to get there — it is not a checklist to tick off.\n\n"
+        "Ground the entity first. Let the analyst's own wording (case / alert / "
+        "event) choose the first lookup — do not guess from the id's shape. If they "
+        "called it an alert, load the actual ALERT record and read its raw fields; "
+        "if that lookup fails, try the case lookup, then a SIEM search on the "
+        "identifier itself.\n\n"
+        "Then run the analyst loop on the concrete pivots (host, user, source IP, "
+        "rule family):\n"
+        "- PROFILE the discriminating fields (`profile_field`) to see what values "
+        "actually exist and what deviates from the baseline, before you filter on them.\n"
+        "- RETRIEVE AND READ the specific raw events behind the hits (`get_event` on "
+        "the ids a `search`/`search_keyword` returns) — open the actual event and "
+        "read its fields (command, path, status, user, decoded payload). A hit count "
+        "is not evidence, and neither is an aggregate: `correlate_entity` tells you "
+        "WHICH events matter, then you must go read them.\n"
+        "- CORRELATE the key entities (`correlate_entity`) to follow the chain the "
+        "alert sits in — the same user/host/IP across roles and adjacent time.\n\n"
+        "When a query names an artifact you have not read — an event id, a command, "
+        "a path, an encoded payload — reading it is the next step, not a follow-up "
+        "for someone else. The decisive evidence is usually DOWNSTREAM of the alert "
+        "that fired, not inside it.\n\n"
+        "Let historical context INFORM this loop, not replace it: known FP/TP "
+        "patterns, prior analyst feedback, and entity baselines shape your "
+        "disposition, but they are context, not evidence — never conclude from them "
+        "without reading the raw events.\n\n"
+        "Derive an absolute time window around the case `date` field or alert "
+        f"timestamp using the configured default vicinity window of ±{vicinity_hours} "
+        "hours unless the evidence already gives an explicit absolute range; start "
+        "tighter and widen toward that bound only if empty.\n\n"
+        "You are done when the analyst's question is ANSWERED from raw evidence — "
+        "not when a fixed number of steps has run, and not when you have merely "
+        "gathered context around the alert. Triage is bounded: once the question is "
+        "answered, or you have capably established the evidence is not there, stop "
+        "and write the report. Carry genuinely unresolved adjacent threads into the "
+        "investigation plan rather than chasing them here.\n\n"
+        + _report_format_instruction(vicinity_hours)
     )
-    emit(src, "note", f"TI enrichment: {len(results)} result(s) — {verdicts}")
 
-    if flagged:
-        try:
-            n = create_ti_leads(
-                flagged,
-                case_id=state["case_id"],
-                run_id=state["run_id"],
-                agent_name=state["agent_name"],
+
+def _report_format_instruction(vicinity_hours: int) -> str:
+    """The three-section handoff contract. Also reused as the correction nudge."""
+    return (
+        "When you are ready, write the full triage report as the TEXT of your reply, "
+        "using the mandatory structured format:\n\n"
+        "## Triage Summary\n"
+        "## Key Evidence\n"
+        "## Investigation Plan\n\n"
+        "All three sections are required. In ## Investigation Plan, every item must "
+        "include an explicit absolute time window. If an item does not have a "
+        "narrower evidence-derived range, derive it from the configured default "
+        f"vicinity window of ±{vicinity_hours} hours around the anchor timestamp. Do "
+        f"not use ±24 hours unless this run's configured value is {vicinity_hours}. "
+        "If an item intentionally uses a narrower range, state why. Do not paste raw "
+        "JSON objects, entity dumps, or tool payloads as the report — explain what "
+        "the evidence means in prose, then list concrete evidence as bullets. The "
+        "platform generates the structured verdict JSON after your report; do not "
+        "end your turn with tool calls only."
+    )
+
+
+def _evidence_call_count(messages: list) -> int:
+    """Evidence-tool calls made so far, counted from the flat history.
+
+    Deterministic and history-derived rather than a state counter, because the
+    history IS the durable record in a flat loop.
+    """
+    seen = 0
+    for msg in messages:
+        for call in getattr(msg, "tool_calls", None) or []:
+            if call.get("name") in _EVIDENCE_TOOLS:
+                seen += 1
+    return seen
+
+
+def _deficiency(text: str, messages: list) -> str:
+    """Why this final answer is not acceptable yet, or '' if it is.
+
+    Evidence depth is checked BEFORE report shape: a well-formatted report written
+    from no evidence is the failure that matters, and telling the model to fix its
+    headings first would let it re-submit the same ungrounded content.
+    """
+    evidence_calls = _evidence_call_count(messages)
+    if evidence_calls < _MIN_EVIDENCE_CALLS:
+        return (
+            f"You have made only {evidence_calls} evidence "
+            f"{'query' if evidence_calls == 1 else 'queries'} so far, which is not "
+            "enough to ground a triage disposition. Do not write the report yet. Go read the "
+            "raw events behind this alert — use `search`/`search_keyword` to locate "
+            "them and `get_event` to open the specific ids, and follow the chain "
+            "downstream of the alert. Make the tool calls now."
+        )
+    missing = _missing_triage_sections(text)
+    if missing:
+        return (
+            "Your report is missing or has an empty "
+            f"{', '.join(missing)} section. Rewrite the COMPLETE report from the "
+            "evidence already in this conversation, keeping every section non-empty."
+        )
+    return ""
+
+
+async def triage_think(state: AgentState, config) -> dict:
+    """One cycle of the flat triage loop: narrate intent, then act or conclude."""
+    tools = config["configurable"]["tools"]
+    model = config["configurable"]["model"]
+    system_prompt = config["configurable"].get("system_prompt", "")
+    src = src_label(state["agent_name"])
+    _emit_node_entry(src, "think", state)
+
+    messages = _sanitize_history(list(state.get("messages") or []))
+    if not messages:
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=build_triage_objective(state)),
+        ]
+
+    model_tools = _model_tools_for_agent(state["agent_name"], tools, None)
+    bound = model.bind_tools(model_tools)
+    ctx_tokens = state.get("ctx_tokens", 0)
+
+    if _should_compact(ctx_tokens):
+        emit(src, "note", f"context compaction triggered ({ctx_tokens:,} tokens)")
+        messages = await _compact_history(messages, bound, state["agent_name"])
+        ctx_tokens = 0
+
+    # Per-cycle public intent, generated from the FULL history — the orchestrator's
+    # planning step. Re-reading everything retrieved so far is what lets the model
+    # connect evidence across cycles instead of reacting to the latest batch.
+    intent = await generate_public_intent(
+        model,
+        messages,
+        source=src,
+        sequence=state["steps"] + 1,
+        task_title=(state.get("question") or "").strip(),
+        available_tools=[getattr(t, "name", "") for t in model_tools],
+    )
+    if intent.text:
+        messages = messages + [
+            HumanMessage(
+                content=(
+                    "[Public intent already shown to the analyst]\n"
+                    f"{intent.text}\n\n"
+                    "Perform that action now. Make the tool calls needed to answer the "
+                    "analyst's question, or write your triage report as text if the "
+                    "evidence you hold already answers it."
+                )
             )
-            if n:
-                emit(src, "note", f"TI enrichment: {n} investigation lead(s) created")
-        except Exception as exc:
-            emit(src, "warning", "TI lead creation failed", detail=str(exc))
+        ]
+
+    response = await _invoke_bound_model(bound, messages, state["agent_name"])
+    _sanitize_message(response)
+    ctx_tokens = _track_input_tokens(response, src, ctx_tokens)
+    messages = messages + [response]
+
+    # Tool calls: hand off to `use_tools`, which appends results to this same history.
+    if getattr(response, "tool_calls", None):
+        text = (response.content or "").strip()
+        if text:
+            emit(src, "think", summarize_think(text), detail=text)
+        return {
+            "messages": messages,
+            "steps": state["steps"] + 1,
+            "ctx_tokens": ctx_tokens,
+        }
+
+    # No tool calls: the model is concluding. Accept only a grounded, well-formed
+    # report; otherwise correct it in-node so routing stays a simple two-state loop.
+    text = (response.content or "").strip()
+    for _ in range(_MAX_CORRECTIONS):
+        budget_left = (
+            state["steps"] + 1 < state["max_steps"]
+            and state["tool_calls_made"] < state["max_tool_calls"]
+        )
+        problem = _deficiency(text, messages) if budget_left else ""
+        if not problem:
+            break
+        emit(src, "note", f"triage self-correction: {problem.split('.')[0][:110]}")
+        messages = messages + [HumanMessage(content=problem)]
+        response = await _invoke_bound_model(bound, messages, state["agent_name"])
+        _sanitize_message(response)
+        ctx_tokens = _track_input_tokens(response, src, ctx_tokens)
+        messages = messages + [response]
+        if getattr(response, "tool_calls", None):
+            # The correction sent it back for evidence — resume the normal loop.
+            return {
+                "messages": messages,
+                "steps": state["steps"] + 1,
+                "ctx_tokens": ctx_tokens,
+            }
+        text = (response.content or "").strip()
+
+    # Last resort — the shape guard `assess` used to own. Corrections are advisory
+    # (the model may ignore them); this is not. Without it a raw blob reaches the
+    # verdict contract as the handoff, which is what the ledger loop protected against.
+    missing = _missing_triage_sections(text)
+    if missing:
+        forced = await _force_report_shape(model, messages, state, src, missing)
+        # Only take the rewrite if it is actually better shaped — a still-broken
+        # model must not be allowed to replace one malformed answer with another.
+        if forced and len(_missing_triage_sections(forced)) < len(missing):
+            text = forced
+
+    if text:
+        emit(src, "think", summarize_think(text), detail=text)
+    return {
+        "messages": messages,
+        "steps": state["steps"] + 1,
+        "ctx_tokens": ctx_tokens,
+        "final_answer": text,
+    }
+
+
+async def _force_report_shape(
+    model,
+    messages: list,
+    state: AgentState,
+    src: str,
+    missing: list[str],
+) -> str:
+    """Tool-free synthesis of a durable three-section report from the conversation.
+
+    Keeps the wording the `assess` shape guard used, so the repair instruction the
+    model sees for a malformed triage handoff is unchanged by the move to the flat loop.
+    """
+    vicinity_hours = int(state.get("default_vicinity_window_hours") or 24)
+    emit(
+        src,
+        "note",
+        f"triage report malformed, missing {', '.join(missing)} — requesting text synthesis",
+    )
+    try:
+        text_only = model.bind_tools([])
+        prompt = HumanMessage(
+            content=(
+                "Your previous reply was not a valid triage handoff report. "
+                "Rewrite the triage handoff as a complete text report now. Do not make "
+                "any further tool calls, and do not paste raw JSON or entity dumps as the "
+                "report body — ground it only in the tool results already in this "
+                "conversation.\n\n" + _report_format_instruction(vicinity_hours)
+            )
+        )
+        resp = await _invoke_bound_model(
+            text_only,
+            _sanitize_history(messages + [prompt]),
+            state["agent_name"],
+        )
+        _sanitize_message(resp)
+        return (resp.content or "").strip()
+    except Exception as exc:  # noqa: BLE001 - never fail the run on the safety net
+        emit(src, "error", f"triage report synthesis failed: {exc}")
+        return ""

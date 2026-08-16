@@ -96,11 +96,11 @@ class ThinkPromptShapeTest(unittest.TestCase):
             self._captured.append(messages)
             return AIMessage(content="ok")
 
-        self._orig = nodes_loop._invoke_bound_model
-        nodes_loop._invoke_bound_model = _capture
+        self._orig = nodes_loop.nodes._invoke_bound_model
+        nodes_loop.nodes._invoke_bound_model = _capture
 
     def tearDown(self):
-        nodes_loop._invoke_bound_model = self._orig
+        nodes_loop.nodes._invoke_bound_model = self._orig
 
     def _sent(self):
         return self._captured[-1]

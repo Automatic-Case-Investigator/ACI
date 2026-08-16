@@ -3,9 +3,8 @@ from __future__ import annotations
 from langgraph.graph import END, StateGraph
 
 from ..nodes_flow import finish, publish_finish, reassess_verdict, verdict_contract
-from ..nodes_loop import seed, use_tools
+from ..nodes_loop import seed, triage_think, use_tools
 from ..state import AgentState
-from ..triage_flat import triage_think
 
 
 def _route_use_tools(state: AgentState) -> str:

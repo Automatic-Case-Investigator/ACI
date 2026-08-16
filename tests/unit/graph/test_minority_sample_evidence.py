@@ -13,8 +13,15 @@ project_root = os.path.dirname(
 )
 
 
-def _load_module(name: str, path: str):
-    spec = importlib.util.spec_from_file_location(name, path)
+def _load_module(name: str, path: str, *, pkg_dir: str | None = None):
+    """Load a module (or, with `pkg_dir`, a sub-package) straight off disk.
+
+    `pkg_dir` supplies a submodule search path so a package's internal relative
+    imports (`from .trials import ...`) resolve without importing the Django app.
+    """
+    spec = importlib.util.spec_from_file_location(
+        name, path, submodule_search_locations=[pkg_dir] if pkg_dir else None
+    )
     module = importlib.util.module_from_spec(spec)
     assert spec and spec.loader
     sys.modules[name] = module
@@ -48,9 +55,13 @@ def _load_observation_module():
     sys.modules.setdefault("agent.runtime.graph", graph_pkg)
     sys.modules.setdefault("agent.runtime.analysis", analysis_pkg)
     sys.modules.setdefault("agent.runtime.analysis.query_memo", query_memo)
+    observation_dir = os.path.join(
+        project_root, "agent", "runtime", "graph", "observation"
+    )
     return _load_module(
         "agent.runtime.graph.observation",
-        os.path.join(project_root, "agent", "runtime", "graph", "observation.py"),
+        os.path.join(observation_dir, "__init__.py"),
+        pkg_dir=observation_dir,
     )
 
 

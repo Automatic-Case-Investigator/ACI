@@ -59,7 +59,9 @@ class TestIntentOrdering(unittest.TestCase):
         }
         config = {"configurable": {"tools": [FakeTool()]}}
 
-        with patch("agent.runtime.graph.nodes_loop.emit", side_effect=capture):
+        # Patch the submodule that OWNS `use_tools`: the package __init__ only
+        # re-exports names, so patching there would not rebind what the node resolves.
+        with patch("agent.runtime.graph.nodes_loop.nodes.emit", side_effect=capture):
             asyncio.run(use_tools(state, config))
 
         self.assertNotIn("intent", events)

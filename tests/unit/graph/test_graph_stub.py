@@ -31,7 +31,7 @@ django.setup()
 from aci_taskqueue.store import init_db, list_tasks, create_task as sq_create
 from agent.runtime.graph import AgentState, get_graph
 from agent.runtime.graph import seed
-from agent.runtime.graph.triage_flat import build_triage_objective
+from agent.runtime.graph.nodes_loop import build_triage_objective
 from agent.runtime.analysis.verdict import parse_verdict
 from agent.runtime.engine.seeder_runner import _augment_temporal_method, _item_priority
 from langchain_core.messages import AIMessage

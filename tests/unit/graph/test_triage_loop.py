@@ -40,7 +40,7 @@ from agent.runtime.graph.agent_graphs.investigation import (
 )
 from agent.runtime.graph.agent_graphs.triage import _route_triage_think
 from agent.runtime.graph.state import AgentState
-from agent.runtime.graph.triage_flat import (
+from agent.runtime.graph.nodes_loop import (
     _MIN_EVIDENCE_CALLS,
     _deficiency,
     _evidence_call_count,

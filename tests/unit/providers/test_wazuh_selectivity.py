@@ -52,10 +52,17 @@ def _load_build_observation():
     sys.modules.setdefault("agent.runtime.analysis", analysis_pkg)
     sys.modules.setdefault("agent.runtime.analysis.query_memo", query_memo)
 
-    path = os.path.join(project_root, "agent", "runtime", "graph", "observation.py")
-    spec = spec_from_file_location("agent.runtime.graph.observation", path)
+    # `observation` is a sub-package; load its __init__ with a search path so the
+    # submodules' relative imports (`from .trials import ...`) resolve.
+    obs_dir = os.path.join(project_root, "agent", "runtime", "graph", "observation")
+    spec = spec_from_file_location(
+        "agent.runtime.graph.observation",
+        os.path.join(obs_dir, "__init__.py"),
+        submodule_search_locations=[obs_dir],
+    )
     module = module_from_spec(spec)
     assert spec and spec.loader
+    sys.modules["agent.runtime.graph.observation"] = module
     spec.loader.exec_module(module)
     return module.build_observation
 
