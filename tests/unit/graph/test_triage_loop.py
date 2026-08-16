@@ -31,11 +31,14 @@ django.setup()
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, ToolMessage
 
-from agent.runtime.graph.builder import (
-    _route_seed,
-    _route_triage_think,
-    _route_use_tools,
+from agent.runtime.graph.agent_graphs import (
+    build_investigation_graph,
+    build_triage_graph,
 )
+from agent.runtime.graph.agent_graphs.investigation import (
+    _route_use_tools as _route_investigation_use_tools,
+)
+from agent.runtime.graph.agent_graphs.triage import _route_triage_think
 from agent.runtime.graph.state import AgentState
 from agent.runtime.graph.triage_flat import (
     _MIN_EVIDENCE_CALLS,
@@ -234,14 +237,22 @@ class FlatHistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(getattr(out["messages"][-1], "tool_calls", None))
 
 
+def _edges_from(graph, source: str) -> list[str]:
+    """Targets reachable from `source` in a compiled graph's topology."""
+    return [e.target for e in graph.get_graph().edges if e.source == source]
+
+
 class RoutingTests(unittest.TestCase):
     def test_seed_sends_triage_to_the_flat_loop_and_others_to_the_queue(self):
-        self.assertEqual(_route_seed({"agent_name": "triage"}), "triage_think")
-        self.assertEqual(_route_seed({"agent_name": "investigation"}), "claim")
+        # This used to be a `_route_seed(state)` dispatch on agent_name. Each agent now
+        # owns its own graph module, so the same guarantee is static topology.
+        self.assertEqual(_edges_from(build_triage_graph(), "seed"), ["triage_think"])
+        self.assertEqual(_edges_from(build_investigation_graph(), "seed"), ["claim"])
 
     def test_investigation_still_routes_through_interpret(self):
         self.assertEqual(
-            _route_use_tools({"status": "", "agent_name": "investigation"}), "interpret"
+            _route_investigation_use_tools({"status": "", "agent_name": "investigation"}),
+            "interpret",
         )
 
     def test_budget_exhaustion_finishes(self):

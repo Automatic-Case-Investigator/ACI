@@ -31,7 +31,7 @@ from langchain_core.messages import AIMessage  # noqa: E402
 
 from agent.agents.base import Handoff  # noqa: E402
 from agent.runtime.graph import (
-    GRAPH,
+    get_graph,
 )  # noqa: E402,F401 (import graph before seeder_runner: avoids a circular import — see graph/nodes_loop.py)
 from agent.runtime.engine.seeder_runner import (  # noqa: E402
     _extract_plan_items,

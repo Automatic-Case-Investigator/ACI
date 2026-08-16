@@ -35,7 +35,10 @@ from langchain_core.messages import (
 )  # noqa: E402
 
 from agent.runtime.graph import nodes_loop  # noqa: E402
-from agent.runtime.graph.builder import _route_assess, _route_interpret  # noqa: E402
+from agent.runtime.graph.agent_graphs.investigation import (  # noqa: E402
+    _route_assess,
+    _route_interpret,
+)
 from agent.runtime.graph.interpretation import node as interpret_node  # noqa: E402
 
 

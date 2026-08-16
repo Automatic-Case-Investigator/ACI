@@ -15,11 +15,14 @@ import django  # noqa: E402
 
 django.setup()
 
-from agent.runtime.graph.builder import (
+from agent.runtime.graph.agent_graphs.investigation import (
     _route_interpret,
     _route_think,
     _route_use_tools,
 )  # noqa: E402
+from agent.runtime.graph.agent_graphs.triage import (  # noqa: E402
+    _route_use_tools as _route_triage_use_tools,
+)
 from agent.runtime.graph.interpretation import (
     _NO_PROGRESS_BRAKE_CYCLES,
     interpret,
@@ -62,17 +65,19 @@ class ObservationRoutingTest(unittest.TestCase):
         # Triage has no interpret node: its raw tool results go straight back to the
         # model that acts on them next, which is the point of the flat loop.
         self.assertEqual(
-            _route_use_tools({"status": "", "agent_name": "triage"}),
+            _route_triage_use_tools({"status": "", "agent_name": "triage"}),
             "triage_think",
         )
 
     def test_cancelled_use_tools_finishes(self):
         self.assertEqual(
-            _route_use_tools({"status": "cancelled", "agent_name": "triage"}),
+            _route_triage_use_tools({"status": "cancelled", "agent_name": "triage"}),
             "finish",
         )
 
     def test_ready_interpret_routes_to_assess(self):
+        # `_history()` supplies the one evidence query investigation's floor requires;
+        # the floor itself is pinned in test_evidence_floor.py.
         self.assertEqual(
             _route_interpret(
                 {
@@ -81,6 +86,7 @@ class ObservationRoutingTest(unittest.TestCase):
                     "max_steps": 10,
                     "tool_calls_made": 1,
                     "max_tool_calls": 10,
+                    "messages": _history(),
                 }
             ),
             "assess",

@@ -30,7 +30,12 @@ django.setup()
 
 from langchain_core.messages import ToolMessage  # noqa: E402
 
-from agent.runtime.graph.builder import _route_interpret  # noqa: E402
+from agent.runtime.graph.agent_graphs.investigation import (  # noqa: E402
+    _route_interpret,
+)
+from agent.runtime.graph.agent_graphs.seeder import (  # noqa: E402
+    _route_interpret as _route_seeder_interpret,
+)
 from agent.runtime.graph.nodes_flow import _count_evidence_queries  # noqa: E402
 
 
@@ -128,8 +133,11 @@ class RouteInterpretEvidenceFloorTest(unittest.TestCase):
 
     def test_the_floor_is_investigation_only(self):
         # Triage never reaches this router, and other agents keep the plain contract.
+        # Each agent now owns its own router module, so this asserts against the
+        # seeder's own `_route_interpret` rather than an agent_name branch inside a
+        # shared one.
         state = self._state(agent_name="seeder", messages=[_tool("get_case")])
-        self.assertEqual(_route_interpret(state), "assess")
+        self.assertEqual(_route_seeder_interpret(state), "assess")
 
 
 if __name__ == "__main__":
