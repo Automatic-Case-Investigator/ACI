@@ -16,7 +16,7 @@ from ..infra.avfs import (
     memory_dir,
     reset_agent_id as reset_avfs_agent_id,
 )
-from ..graph import GRAPH, AgentState
+from ..graph import AgentState, get_graph
 from ..providers.base import format_provider_capability_contracts
 from ..infra.logbus import (
     bind_debug_mode,
@@ -180,7 +180,8 @@ async def _run_agent_bound(
             ),
         }
 
-        final_state = await GRAPH.ainvoke(initial_state, config=config)
+        graph = get_graph(agent_name)
+        final_state = await graph.ainvoke(initial_state, config=config)
 
         run.status = final_state.get("status", AgentRun.STATUS_COMPLETED)
         run.result = final_state.get("final_answer", "")

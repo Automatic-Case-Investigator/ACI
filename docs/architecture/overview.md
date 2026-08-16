@@ -1,9 +1,10 @@
 # Architecture Overview
 
 ACI is a Django service that hosts the agent runtime, REST API, live
-dashboard event stream, and MCP integration layer. The runtime is centered on a
-shared queue-driven LangGraph graph for `triage` and `investigation`, plus a
-package-based conversational orchestrator that owns analyst session state,
+dashboard event stream, and MCP integration layer. The runtime is centered on
+agent-scoped LangGraph topologies resolved by agent name (`triage`,
+`investigation`, and internal `seeder`), plus a package-based conversational
+orchestrator that owns analyst session state,
 handoffs, and publication back into the dashboard/session record.
 
 ## System Diagram
@@ -171,8 +172,8 @@ ACI/
 │   └── templatetags/
 ├── agent/runtime/                # (expanded)
 │   ├── engine/                   # run_agent, dispatch_run, MCP client, model client, streaming, seeder_runner
-│   ├── graph/                    # LangGraph build: builder, nodes_loop, interpretation/ (interpret node),
-│   │                              # nodes_flow/ (assess/pivot/completion), observation, reflection (findings review),
+│   ├── graph/                    # LangGraph runtime: builder resolver + agent_graphs/ (triage/investigation/seeder),
+│   │                              # nodes_loop, interpretation/ (interpret node), nodes_flow/ (assess/pivot/completion), observation, reflection (findings review),
 │   │                              # leads/lead_model, board, validation, synthesis, publication, parsing, timeutil, state
 │   ├── analysis/                 # Deterministic enrichment: artifacts (incl. decode layer), correlation_leads,
 │   │                              # kill_chain, query_memo, pattern_matcher, alert_metadata, intent

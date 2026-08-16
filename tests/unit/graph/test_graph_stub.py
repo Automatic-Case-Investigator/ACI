@@ -29,7 +29,7 @@ import django
 django.setup()
 
 from aci_taskqueue.store import init_db, list_tasks, create_task as sq_create
-from agent.runtime.graph import GRAPH, AgentState
+from agent.runtime.graph import AgentState, get_graph
 from agent.runtime.graph import seed
 from agent.runtime.graph.triage_flat import build_triage_objective
 from agent.runtime.analysis.verdict import parse_verdict
@@ -579,7 +579,7 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
             }
         }
 
-        final = await GRAPH.ainvoke(state, config=config)
+        final = await get_graph("triage").ainvoke(state, config=config)
 
         inv_tasks = list_tasks(case_id, inv_run_id, "investigation")
         triage_tasks = list_tasks(case_id, triage_run_id, "triage")
@@ -604,7 +604,7 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
         tools.append(_DummyTool("search_keyword"))
         model = TriageNearbyEventsGuardModel()
 
-        final = await GRAPH.ainvoke(
+        final = await get_graph("triage").ainvoke(
             AgentState(
                 run_id=triage_run_id,
                 case_id=case_id,
@@ -647,7 +647,7 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
         case_id = "~triagecontract"
         model = TriageContractModel()
 
-        final = await GRAPH.ainvoke(
+        final = await get_graph("triage").ainvoke(
             AgentState(
                 run_id=triage_run_id,
                 case_id=case_id,
@@ -684,7 +684,7 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
         case_id = "~triagemalformed"
         model = MalformedTriageContractModel()
 
-        final = await GRAPH.ainvoke(
+        final = await get_graph("triage").ainvoke(
             AgentState(
                 run_id=triage_run_id,
                 case_id=case_id,
@@ -757,7 +757,7 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
             }
         }
 
-        final = await GRAPH.ainvoke(state, config=config)
+        final = await get_graph("investigation").ainvoke(state, config=config)
 
         inv_tasks = list_tasks(case_id, inv_run_id, "investigation")
         titles = {t["title"] for t in inv_tasks}
@@ -806,7 +806,7 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
             }
         }
 
-        await GRAPH.ainvoke(state, config=config)
+        await get_graph("investigation").ainvoke(state, config=config)
         titles = {t["title"] for t in list_tasks(case_id, inv_run_id, "investigation")}
         # Seeder creates tasks directly — no meta seed-task in the queue.
         self.assertNotIn("Populate investigation queue from triage handoff", titles)
@@ -854,7 +854,7 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
             }
         }
 
-        await GRAPH.ainvoke(state, config=config)
+        await get_graph("investigation").ainvoke(state, config=config)
         titles = {t["title"] for t in list_tasks(case_id, inv_run_id, "investigation")}
         # Seeder creates tasks directly — no meta seed-task in the queue.
         self.assertNotIn("Populate investigation queue from triage handoff", titles)
@@ -927,7 +927,7 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
             }
         }
 
-        final = await GRAPH.ainvoke(state, config=config)
+        final = await get_graph("investigation").ainvoke(state, config=config)
 
         all_tasks = _lt(case_id, inv_run_id, "investigation")
         # Should have exactly 1 task (the existing one), not 2
@@ -1027,7 +1027,7 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
             }
         }
 
-        await GRAPH.ainvoke(state, config=config)
+        await get_graph("investigation").ainvoke(state, config=config)
         tasks = list_tasks(case_id, inv_run_id, "investigation")
         titles = [t["title"] for t in tasks]
 
@@ -1084,7 +1084,7 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
             "```"
         )
 
-        final = await GRAPH.ainvoke(
+        final = await get_graph("investigation").ainvoke(
             AgentState(
                 run_id=run_id,
                 case_id=case_id,
@@ -1149,7 +1149,7 @@ class TestTriageHandoff(unittest.IsolatedAsyncioTestCase):
             priority=80,
         )
 
-        final = await GRAPH.ainvoke(
+        final = await get_graph("investigation").ainvoke(
             AgentState(
                 run_id=run_id,
                 case_id=case_id,

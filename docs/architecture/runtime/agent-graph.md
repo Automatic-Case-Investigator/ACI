@@ -13,7 +13,7 @@ workflow trigger. All specialist run paths converge on
 5. loads MCP prompt guidance and tool schemas;
 6. builds the OpenAI-compatible model client;
 7. composes the platform and agent prompt layers;
-8. invokes the compiled LangGraph graph with an `AgentState`.
+8. resolves the compiled LangGraph graph for `agent_name` via `get_graph(agent_name)` and invokes it with an `AgentState`.
 
 The graph returns a final state with `status` and `final_answer`, which is then
 persisted back to `AgentRun`.
@@ -44,7 +44,7 @@ Agents are registered in `agent/agents/registry.py` using `AgentDefinition`
 
 | Agent | Role | Tool Policy | Budget | Orchestrator-routable |
 |---|---|---|---|---|
-| `triage` | Reads SOAR case context, checks nearby SIEM evidence and memory, assesses severity/category, and returns a triage report with a prioritized investigation plan. | `aci-thehive`, `aci-wazuh`, `aci-taskqueue`, `aci-memory`, `avfs` | 12 steps, 18 tool calls | yes |
+| `triage` | Reads SOAR case context, checks nearby SIEM evidence and memory, assesses severity/category, and returns a triage report with a prioritized investigation plan. | `aci-thehive`, `aci-wazuh`, `aci-taskqueue`, `aci-memory`, `avfs` | 16 steps, 40 tool calls | yes |
 | `investigation` | Performs deeper SIEM-backed investigation, enriches artifacts, uses the findings board and memory, and produces a grounded final report. | `aci-thehive`, `aci-wazuh`, `aci-taskqueue`, `aci-board`, `aci-memory`, `avfs` | 40 steps, 60 tool calls | yes |
 | `seeder` | Internal-only. Parses a completed triage report and populates the investigation task queue (see [Seeder Agent](#seeder-agent)). Never appears in orchestrator routing. | `aci-taskqueue` | 20 steps, 25 tool calls | no |
 
@@ -56,83 +56,123 @@ node, not by the orchestrator.
 
 ## Agent Graph
 
-The graph is built from the package under `agent/runtime/graph/`. Implementation is
-split across narrower modules, each owning one concern; `agent.runtime.graph`'s
-`__init__.py` dynamically re-exports every module's public names, so any of them
-can be imported directly from the package root:
+Graph topology is now agent-scoped. Runtime resolves the graph by agent name
+(`agent/runtime/graph/builder.py:get_graph`) and invokes one compiled graph per
+agent type instead of a single shared `GRAPH` singleton.
 
 | Module | Owns |
 |---|---|
-| `builder` | Assembles the `StateGraph`: registers nodes and the conditional routing between them. |
+| `builder` | Per-agent graph resolver (`get_graph(agent_name)`) with cached compiled graphs. |
+| `agent_graphs/triage.py` | Triage topology (`seed -> triage_think <-> use_tools -> finish -> verdict_contract -> reassess_verdict -> publish_finish`). |
+| `agent_graphs/investigation.py` | Investigation topology (`seed -> claim -> think/use_tools/interpret/assess -> pivot -> claim`, then completion tail). |
+| `agent_graphs/seeder.py` | Seeder topology equivalent to the prior non-triage routed path (`seed -> claim -> think/use_tools/interpret/assess -> pivot -> claim`, then completion tail). |
 | `state` | The `AgentState` typed dict threaded through every node. |
-| `nodes_loop` | The per-task tool loop nodes: `seed`, `claim`, `think`, `use_tools`, plus post-tool enrichment (correlation, kill-chain, TI). |
-| `interpretation/` | The `interpret` node, split into `ledger` (durable per-task memory), `pivots` (candidate scoring/selection), `decisions` (next-action logic), `prompt` (model-call rendering), and `node` (the node + glue). |
-| `nodes_flow/` | The post-task nodes, split into `assess` (report synthesis + findings review), `pivot` (board + lead follow-ups), and `completion` (`finish`, verdict contract, reassessment, publication), over a shared helper module. |
-| `observation` | Deterministic normalization of a tool-result batch into observation state (signals, snapshots, pivot candidates). |
-| `toolio` | Tool execution plumbing, result capping, and task-queue calls. |
-| `validation` | Report/board validation, escalation facts, and board compromise-indicator surfacing. |
-| `synthesis` / `publication` | Investigation-summary building and durable final-output writing. |
-| `reflection` / `findings_model` / `lead_model` | Model-driven per-task review, findings verification, and lead validation. |
-| `parsing` / `sanitize` / `timeutil` / `board` / `leads` | Shared leaf helpers: markdown/regex parsing, history sanitization, time/pivot utilities, board context, lead queueing. |
+| `nodes_loop` | Shared queue/tool-loop nodes (`seed`, `claim`, `think`, `use_tools`) plus post-tool enrichment (correlation, kill-chain, TI). |
+| `interpretation/` | Investigation-only `interpret` implementation and ledger/pivot decision helpers. |
+| `nodes_flow/` | Shared completion pipeline nodes (`finish`, `verdict_contract`, `reassess_verdict`, `publish_finish`) and investigation-specific `assess`/`pivot`. |
+| `observation`, `toolio`, `validation`, `synthesis`, `reflection`, `findings_model`, `lead_model`, `parsing`, `sanitize`, `timeutil`, `board`, `leads` | Shared helper layers used across graphs and runtime/orchestrator imports. |
 
-The active top-level graph stages are:
+Active node responsibilities:
 
-| Node | Responsibility |
-|---|---|
-| `seed` | Ensure the agent has initial queue work. Triage creates one triage task. Investigation calls the `seeder` agent for a normal triage handoff, or creates a resume/fallback task directly, only when its queue has no pending work (see [Seeder Agent](#seeder-agent)). |
-| `claim` | Stop if cancellation was requested; otherwise atomically claim the highest-priority pending task from `aci-taskqueue`. |
-| `think` | Continue the current task's conversation. The **task anchor** (objective + reasoning contract) is written once as `message[1]` and never replayed; **ledger steering** is appended to the model call but never persisted; **evidence** accumulates across cycles. Compacts context when the prompt approaches 80% of the model provider's configured context length (Settings → Model provider). There is no separate pre-tool "intent" stage in this graph — that streamed public-reasoning mechanism is orchestrator-only (see [Orchestrator And Session Publication](../orchestrator.md#orchestrator-and-session-publication)). |
-| `use_tools` | Execute model-requested tools, cap oversized tool results before feeding them back to the model, expand AVFS `~` paths, deterministically extract artifacts (including decoded hex/base64/URL-encoded payloads) from event-shaped JSON, auto-correlate confirmed entities, build the kill-chain view, and trigger TI enrichment. |
-| `interpret` | Mandatory post-tool reasoning checkpoint (`agent/runtime/graph/interpretation/`). Runs after every tool batch: normalizes the batch into an observation, updates the durable per-task ledger (confirmed findings, hypothesis, query-trial memory, pivots), surfaces board compromise indicators the model must disposition, and decides continue-vs-assess against the task's success criteria. Routes back to `think` to continue the task or forward to `assess` when the objective is answered. **This is the only node that decides a task is done** — `_route_interpret` additionally vetoes a completion vote from a task that ran zero evidence queries, since a task that retrieved nothing has not investigated anything. |
-| `assess` | **Produces** the claimed task's output; it does not judge whether the task is done. Synthesises or repairs the three-section report, runs the [per-task findings review](#per-task-findings-review) (`agent/runtime/graph/reflection.py`) to classify each `## Findings` bullet for the pivot node's board gating, merges preserved findings, and completes the task. Always routes forward to `pivot`. |
-| `pivot` | Investigation-only evidence-to-follow-up phase: pushes confirmed `## Findings` into the Findings Board (gated by the findings review's grounding/novelty verdicts), checks confirmed compromise artifacts on the board for an unposted escalation, validates `## New Leads` (model-assisted, deduplicated against the existing queue), and queues approved follow-up tasks. |
-| `finish` | Finalize the run and compute `completed` vs `incomplete_budget`, or preserve `cancelled`. |
-| `verdict_contract` | Generates or repairs the canonical fenced-JSON diagnosis verdict block from the final report. |
-| `reassess_verdict` | **Investigation only.** Compares triage and investigation verdicts and resolves conflicts with a focused model call only when needed. |
-| `publish_finish` | Writes durable final outputs such as `final.md` and posts the report to the SOAR case. |
+| Node | Used By | Responsibility |
+|---|---|---|
+| `seed` | triage, investigation, seeder | Initialize run context. Triage does not enqueue a queue task; it enters flat-loop reasoning directly. Investigation and seeder follow non-triage queue seeding behavior. |
+| `claim` | investigation, seeder | Honor cancellation at boundary and claim highest-priority pending task from `aci-taskqueue`. |
+| `triage_think` | triage | Flat-loop triage reasoning node; accumulates conversation, emits tool calls, and produces triage report text when complete. |
+| `think` | investigation, seeder | Task-scoped reasoning loop using persistent per-task message history and transient steering. |
+| `use_tools` | triage, investigation, seeder | Execute tool calls, cap oversized outputs, expand AVFS paths, extract artifacts, correlate entities, build kill-chain, trigger TI enrichment. |
+| `interpret` | investigation, seeder | Mandatory post-tool checkpoint; updates ledger and decides continue-vs-assess. Evidence-floor veto is investigation-only. |
+| `assess` | investigation, seeder | Produces/repairs task output, runs findings review, merges preserved findings, completes the claimed task. |
+| `pivot` | investigation, seeder | Pushes validated findings to board, evaluates escalation cues, validates/queues new leads, returns to `claim` (seeder pivot behavior is effectively no-op for investigation-only actions). |
+| `finish` | triage, investigation, seeder | Finalize run status (`completed`, `incomplete_budget`, or preserve `cancelled`). |
+| `verdict_contract` | triage, investigation, seeder | Generates/repairs canonical fenced-JSON verdict from final report text. |
+| `reassess_verdict` | triage, investigation, seeder | Performs verdict consistency reassessment before publish. |
+| `publish_finish` | triage, investigation, seeder | Writes durable final outputs and persists terminal report artifacts. |
+
+### Triage Graph
 
 ```mermaid
 flowchart TD
-    Start(["AgentRun created or resumed"]) --> Run["run_agent loads AgentDefinition"]
-    Run --> MCP["Build MCP client from tool_policy"]
-    MCP --> Prompt["Compose layered system prompt"]
-    Prompt --> Seed["seed"]
+  Start(["AgentRun created or resumed"]) --> Run["run_agent loads AgentDefinition"]
+  Run --> MCP["Build MCP client and model"]
+  MCP --> Prompt["Compose layered system prompt"]
+  Prompt --> Resolve["get_graph(triage)"]
 
-    Seed --> Claim["claim"]
-    Claim --> Cancelled{"cancel requested?"}
-    Cancelled -- yes --> Finish["finish"]
-    Cancelled -- no --> HasTask{"claimed task?"}
+  Resolve --> Seed["seed"]
+  Seed --> Think["triage_think"]
+  Think --> Calls{"tool calls?"}
+  Calls -- yes --> Tools["use_tools"]
+  Tools --> Think
+  Calls -- no --> Finish["finish"]
 
-    HasTask -- no --> Finish
-    HasTask -- yes --> Think["think"]
+  Finish --> Contract["verdict_contract"]
+  Contract --> Reassess["reassess_verdict"]
+  Reassess --> Publish["publish_finish"]
+  Publish --> End(["persist AgentRun result"])
+```
 
-    Think --> Compact{"context >= 80% limit?"}
-    Compact -- yes --> Summarize["compact old non-evidence context"]
-    Compact -- no --> Model["call model with allowed tools"]
-    Summarize --> Model
+### Investigation Graph
 
-    Model --> ToolCalls{"tool calls?"}
-    ToolCalls -- yes --> UseTools["use_tools"]
-    UseTools --> Call["emit call event"]
-    Call --> Execute["execute MCP tool"]
-    Execute --> Enrich["extract artifacts, auto-correlate,\nbuild kill-chain, TI enrich"]
-    Enrich --> Interpret["interpret: update ledger,\ndecide next action"]
-    Interpret --> InterpretRoute{"objective answered?"}
-    InterpretRoute -- no, continue --> Think
-    InterpretRoute -- yes --> Floor{"any evidence query\nthis task?"}
-    Floor -- no --> Think
-    Floor -- yes --> Assess["assess: report + findings"]
+```mermaid
+flowchart TD
+  Start(["AgentRun created or resumed"]) --> Run["run_agent loads AgentDefinition"]
+  Run --> MCP["Build MCP client and model"]
+  MCP --> Prompt["Compose layered system prompt"]
+  Prompt --> Resolve["get_graph(investigation)"]
 
-    ToolCalls -- no --> Assess
-    Assess --> Pivot["pivot\n(investigation only)"]
-    Pivot --> Budget{"budget exhausted?"}
-    Budget -- no --> Claim
-    Budget -- yes --> Finish
+  Resolve --> Seed["seed"]
+  Seed --> Claim["claim"]
+  Claim --> HasTask{"claimed task?"}
+  HasTask -- no --> Finish["finish"]
+  HasTask -- yes --> Think["think"]
 
-    Finish --> VerdictContract["verdict_contract"]
-    VerdictContract --> Reassess["reassess_verdict\n(investigation only)"]
-    Reassess --> Publish["publish_finish"]
-    Publish --> End(["persist AgentRun result"])
+  Think --> Calls{"tool calls?"}
+  Calls -- yes --> Tools["use_tools"]
+  Tools --> Interpret["interpret"]
+  Interpret --> AssessGate{"ready_to_assess?"}
+  AssessGate -- no --> Think
+  AssessGate -- yes --> Assess["assess"]
+  Calls -- no --> Assess
+
+  Assess --> Pivot["pivot"]
+  Pivot --> Claim
+
+  Finish --> Contract["verdict_contract"]
+  Contract --> Reassess["reassess_verdict"]
+  Reassess --> Publish["publish_finish"]
+  Publish --> End(["persist AgentRun result"])
+```
+
+### Seeder Graph
+
+```mermaid
+flowchart TD
+  Start(["AgentRun created or resumed"]) --> Run["run_agent loads AgentDefinition"]
+  Run --> MCP["Build MCP client and model"]
+  MCP --> Prompt["Compose layered system prompt"]
+  Prompt --> Resolve["get_graph(seeder)"]
+
+  Resolve --> Seed["seed"]
+  Seed --> Claim["claim"]
+  Claim --> HasTask{"claimed task?"}
+  HasTask -- no --> Finish["finish"]
+  HasTask -- yes --> Think["think"]
+
+  Think --> Calls{"tool calls?"}
+  Calls -- yes --> Tools["use_tools"]
+  Tools --> Interpret["interpret"]
+  Interpret --> AssessGate{"ready_to_assess?"}
+  AssessGate -- no --> Think
+  AssessGate -- yes --> Assess["assess"]
+  Calls -- no --> Assess
+
+  Assess --> Pivot["pivot"]
+  Pivot --> Claim
+
+  Finish --> Contract["verdict_contract"]
+  Contract --> Reassess["reassess_verdict"]
+  Reassess --> Publish["publish_finish"]
+  Publish --> End(["persist AgentRun result"])
 ```
 
 ### Task Completion Contract
