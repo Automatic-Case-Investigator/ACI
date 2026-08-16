@@ -70,6 +70,55 @@ def _collect_escalation_facts(text: str) -> list[str]:
 _DECODED_COMMAND_MARKER_RE = re.compile(r"\[(?:hex-)?decoded\]", re.I)
 
 
+def _cited_board_entries(
+    entries: list[dict],
+    *,
+    kinds: tuple[str, ...],
+    keep=None,
+) -> list[str]:
+    """Board entries of `kinds` as cited `"<content> [<source>]"` strings.
+
+    Pure over a list of entries so every consumer can use it — the ones holding a
+    `state` (escalation, verdict, interpret) and the ones that already fetched the
+    board via `get_board` (report synthesis).
+
+    Drops empty, placeholder, and negated content, de-dupes on content, and **ranks
+    decoded commands ahead of everything else**. That ordering is load-bearing: every
+    consumer caps the list, and a decoded `mysql … wp_users` credential dump is
+    deterministic ground truth, whereas prose that merely *mentions* a reverse-shell
+    token (often while narrating its ABSENCE) is the agent's fragile narration. The
+    authoritative decoded artifacts must never be crowded out of the cap by prose.
+
+    `keep` is an optional predicate over the content string. When given, an entry
+    survives only if it is a decoded command **or** `keep(content)` is truthy —
+    decoded commands are never gated, for the reason in `_board_compromise_facts`.
+    """
+    decoded: list[str] = []
+    rest: list[str] = []
+    seen: set[str] = set()
+    for entry in entries:
+        if entry.get("kind") not in kinds:
+            continue
+        content = (entry.get("content") or "").strip()
+        if (
+            not content
+            or _is_none_bullet(content)
+            or _NEGATED_EVIDENCE_RE.search(content)
+        ):
+            continue
+        is_decoded_command = bool(_DECODED_COMMAND_MARKER_RE.search(content))
+        if keep is not None and not is_decoded_command and not keep(content):
+            continue
+        key = content.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        src = (entry.get("source") or "").strip()
+        item = f"{content} [{src}]" if src else content
+        (decoded if is_decoded_command else rest).append(item)
+    return decoded + rest
+
+
 def _board_compromise_facts(state: AgentState) -> list[str]:
     """Compromise-relevant evidence sitting on the Findings Board — independent of whether
     the agent narrated it in its ## Findings.
@@ -93,39 +142,14 @@ def _board_compromise_facts(state: AgentState) -> list[str]:
     Negated evidence ("no ... found", "not observed") is excluded in both cases.
 
     Returns each item as `"<content> [<source event id>]"` so escalation/verdict keep the
-    raw-evidence citation.
+    raw-evidence citation. Ordering (decoded first) and filtering live in
+    `_cited_board_entries`; this adds only the compromise gate.
     """
-    # Rank decoded commands ahead of narrative matches. A downstream consumer (the interpret
-    # compromise block) caps the list at 6, and a decoded `mysql ... wp_users` credential dump
-    # is deterministic ground truth, whereas a narrative fact bullet that merely *mentions* a
-    # reverse-shell token (often while narrating its ABSENCE) is the agent's fragile prose. So
-    # the authoritative decoded artifacts must never be crowded out of the cap by prose noise.
-    decoded: list[str] = []
-    narrative: list[str] = []
-    seen: set[str] = set()
-    for entry in _board_entries_for_validation(state):
-        if entry.get("kind") not in ("artifact", "fact"):
-            continue
-        content = (entry.get("content") or "").strip()
-        if (
-            not content
-            or _is_none_bullet(content)
-            or _NEGATED_EVIDENCE_RE.search(content)
-        ):
-            continue
-        is_decoded_command = bool(_DECODED_COMMAND_MARKER_RE.search(content))
-        if not is_decoded_command and not _ACTIVE_COMPROMISE_INDICATORS_RE.search(
-            content
-        ):
-            continue
-        key = content.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        src = (entry.get("source") or "").strip()
-        item = f"{content} [{src}]" if src else content
-        (decoded if is_decoded_command else narrative).append(item)
-    return decoded + narrative
+    return _cited_board_entries(
+        _board_entries_for_validation(state),
+        kinds=("artifact", "fact"),
+        keep=_ACTIVE_COMPROMISE_INDICATORS_RE.search,
+    )
 
 
 def _unpivoted_network_iocs(report: str) -> list[str]:

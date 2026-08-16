@@ -28,8 +28,19 @@ from .toolio import (
     _call,
     _is_error_tool_result,
 )
-from .validation import _derive_report_guardrails
+from .validation import _cited_board_entries, _derive_report_guardrails
 from ..analysis.kill_chain import KILL_CHAIN_ORDER, _CORE_PHASES
+
+# Caps on the board-evidence block handed to the narrative model, matching the
+# `facts[:60]` / `hypotheses[:30]` convention below. Sized so a whole realistic board
+# fits rather than to shave the prompt: artifacts are one-liners, and a full 53-entry
+# board measured 2.3KB of artifacts + 3.2KB of correlations against a ~75KB prompt.
+# A tighter cap is a false economy that silently drops evidence — at 24, case
+# ~368586920 lost `user: phopkins` (index 38) and `file: /etc/shadow` (index 47)
+# behind 29 bare `ip:` artifacts. `_cited_board_entries` ranks decoded commands first,
+# so the cap never drops those.
+_MAX_SYNTHESIS_ARTIFACTS = 60
+_MAX_SYNTHESIS_CORRELATIONS = 12
 
 
 def _execution_record(messages: list) -> str:
@@ -101,6 +112,7 @@ async def _build_investigation_summary(
 
     # --- board ---
     get_board_fn = tmap.get("get_board")
+    entries: list[dict] = []
     artifacts: list[dict] = []
     facts: list[dict] = []
     hypotheses: list[dict] = []
@@ -271,6 +283,17 @@ async def _build_investigation_summary(
     kill_chain_content = (
         kill_chain_entries[-1].get("content") if kill_chain_entries else ""
     )
+    # Artifacts and correlations are EVIDENCE, not decoration. They used to reach the
+    # narrative only as generic severity advice via `_derive_report_guardrails`, so a
+    # decoded reverse-shell command, a `command: /bin/cat /etc/shadow`, and a
+    # `data.srcuser=<user> → sudo → root` correlation could all sit on the board while
+    # the report wrote the phase off as "not evidenced" (case ~368586920). Code selects
+    # and ranks; judging which phase they prove is the model's job below.
+    board_evidence = _cited_board_entries(entries, kinds=("artifact",))[
+        :_MAX_SYNTHESIS_ARTIFACTS
+    ] + _cited_board_entries(entries, kinds=("correlation",))[
+        :_MAX_SYNTHESIS_CORRELATIONS
+    ]
     narrative = await _synthesize_analyst_report(
         model,
         state,
@@ -280,6 +303,7 @@ async def _build_investigation_summary(
         completed,
         report_guardrails,
         phase_scaffold=_phase_scaffold(kill_chain_content),
+        board_evidence=board_evidence,
     )
     if narrative:
         return f"{narrative}\n\n---\n\n# Appendix — Structured Findings\n\n{structured}"
@@ -327,21 +351,54 @@ def _task_summary_for_synthesis(summary: str) -> str:
     )
 
 
+# One `<Tactic>[<technique labels>]` group of the kill-chain board line built by
+# `analysis/kill_chain.py::summarize_kill_chain`. Groups are joined with "; " and the
+# labels inside the brackets are joined with ", ", so "; " is the only safe separator.
+_KILL_CHAIN_PHASE_RE = re.compile(r"^\s*(?P<tactic>[^\[\];]+?)\s*\[(?P<labels>.+)\]\s*$")
+
+
+def _phases_with_evidence(kill_chain_content: str) -> dict[str, str]:
+    """Map each ATT&CK tactic the kill-chain tagged to its technique labels.
+
+    Parses the STRUCTURE of the board line rather than substring-matching it. A plain
+    `phase in content` test also matched the phase names listed in the trailing
+    `|| GAPS (...)` clause, which marked every gap phase as EVIDENCE PRESENT — the
+    scaffold then said "EVIDENCE PRESENT" for all 12 phases and carried no signal at
+    all. The line is truncated to 1400 chars upstream, so a trailing group may be cut
+    mid-way; those simply do not match and are treated as untagged.
+    """
+    content = (kill_chain_content or "").strip()
+    body = content.split(" || GAPS", 1)[0]
+    _, _, after_colon = body.partition(": ")
+    out: dict[str, str] = {}
+    for part in (after_colon or "").split("; "):
+        m = _KILL_CHAIN_PHASE_RE.match(part)
+        if m:
+            out[m.group("tactic")] = m.group("labels").strip()
+    return out
+
+
 def _phase_scaffold(kill_chain_content: str) -> str:
     """A kill-chain-ordered phase skeleton for the Phase-by-Phase section, derived
     deterministically from the kill-chain board line. Each ATT&CK phase the correlation
-    tagged is marked EVIDENCE PRESENT; each core phase it did not is marked a gap. The
-    model writes the prose under each and may confirm a phase from the facts even when
-    MITRE tagging missed it (e.g. a `su` privilege escalation with no technique tag)."""
+    tagged is marked EVIDENCE PRESENT **and carries the techniques and representative
+    event ids that tagged it**; each core phase it did not is marked a gap. The model
+    writes the prose under each and may confirm a phase from the facts even when MITRE
+    tagging missed it (e.g. a `su` privilege escalation with no technique tag).
+
+    Carrying the labels through matters: a bare "EVIDENCE PRESENT" gave the model a
+    claim with nothing behind it, so when the facts were all negatives it wrote the
+    phase off — reporting "no sudo/PAM/audit evidence" for a Privilege Escalation the
+    kill-chain had tagged `T1548.003 Sudo and Sudo Caching ×3` (case ~368586920).
+    """
     content = (kill_chain_content or "").strip()
     if not content:
         return "(kill-chain not computed — derive the phase coverage from the confirmed facts below)"
+    tagged = _phases_with_evidence(content)
     lines: list[str] = []
     for phase in KILL_CHAIN_ORDER:
-        if phase in content:
-            lines.append(
-                f"- {phase}: EVIDENCE PRESENT (kill-chain correlation tagged this tactic)"
-            )
+        if phase in tagged:
+            lines.append(f"- {phase}: EVIDENCE PRESENT — {tagged[phase]}")
         elif phase in _CORE_PHASES:
             lines.append(
                 f"- {phase}: no MITRE-tagged evidence (core phase — confirm from the facts or mark a gap)"
@@ -358,6 +415,7 @@ async def _synthesize_analyst_report(
     completed: list[dict],
     report_guardrails: str = "",
     phase_scaffold: str = "",
+    board_evidence: list[str] | None = None,
 ) -> str:
     """One grounded model call → an analyst-grade narrative. '' on any failure."""
     if model is None:
@@ -365,6 +423,7 @@ async def _synthesize_analyst_report(
     # Cap lists so the synthesis prompt stays within small-model context limits.
     facts_txt = "\n".join(_entry_line(f) for f in facts[:60]) or "- (none)"
     hyps_txt = "\n".join(_entry_line(h) for h in hypotheses[:30]) or "- (none)"
+    evidence_txt = "\n".join(f"- {e}" for e in (board_evidence or [])) or "- (none)"
     tasks_txt = (
         "\n\n".join(
             f"### {t.get('title', '(untitled)')}\n{_task_summary_for_synthesis(t.get('summary') or '')}"
@@ -386,6 +445,12 @@ async def _synthesize_analyst_report(
         f"## Deterministic analysis guardrails\n{guardrails_txt}\n\n"
         f"## Kill-chain phase coverage (scaffold for Phase-by-Phase Findings)\n{scaffold_txt}\n\n"
         f"## Confirmed facts (raw-evidence backed)\n{facts_txt}\n\n"
+        f"## Artifacts and correlations extracted from retrieved events\n"
+        f"Each line was pulled from a raw event by the extraction/correlation layer and "
+        f"carries its source event id. These are observations, not conclusions: decide "
+        f"which kill-chain phase each one evidences and say so in Phase-by-Phase. A "
+        f"`[decoded]` command was recovered from an encoded field — an attacker hid it "
+        f"there, so account for it explicitly.\n{evidence_txt}\n\n"
         f"## Hypotheses (with status)\n{hyps_txt}\n\n"
         f"## Completed investigation tasks\n{tasks_txt}\n\n"
         "Write the final report in markdown. Follow these authoring rules — they matter "
@@ -398,7 +463,11 @@ async def _synthesize_analyst_report(
         "3. ONE REPRESENTATIVE EVENT ID PER CLAIM — not a dump of every ID; the appendix and "
         "evidence files hold the rest.\n"
         "4. STATE EACH FACT ONCE, at its home altitude; higher sections reference it, they do "
-        "not restate it.\n\n"
+        "not restate it.\n"
+        "5. ACCOUNT FOR EVERY PIECE OF EVIDENCE YOU WERE GIVEN. Evidence you do not use is a "
+        "claim you have not tested. You may judge a piece of evidence insufficient — but say "
+        "so and cite it; never omit it silently, and never describe as 'not evidenced' "
+        "something the material below supplies evidence for.\n\n"
         "Use EXACTLY these section headers, verbatim, with nothing appended to the header line:\n"
         "## Verdict\n"
         "## Executive Summary\n"
@@ -422,7 +491,11 @@ async def _synthesize_analyst_report(
         "Use each phase as a '### <Phase>' sub-header and, for the phases that have evidence or "
         "are otherwise in scope, write: what the evidence shows, the evidence→conclusion link, and "
         "a confidence. A phase may be confirmed from the facts even if the scaffold shows no MITRE "
-        "tag. This section is where interpretation and scope live — including Initial Access: state "
+        "tag, and the converse also binds: a phase the scaffold marks EVIDENCE PRESENT must be "
+        "dispositioned against the techniques and event IDs listed beside it — confirm it, or "
+        "explain why that specific evidence is insufficient, citing it. Reporting such a phase as "
+        "'not evidenced' without addressing what the scaffold names is a contradiction, not a "
+        "finding. This section is where interpretation and scope live — including Initial Access: state "
         "the confirmed source IP of the first suspicious login/session, whether it matches a later "
         "C2/callback address, and whether attribution holds; if the source IP was NOT retrieved, "
         "write '⚠ Initial access vector not established — source IP missing from telemetry.' and "
